@@ -156,6 +156,17 @@ public sealed class App : IDisposable
                     _inputTest = true;
                     _windowed = true;
                     break;
+                case "--menutest" when i + 2 < args.Length:
+                    // Drives the real system cursor to a screen position so menu hover and
+                    // hit-testing can be verified from an automated run.
+                    _menuTestPoint = new Vector2D<int>(
+                        int.TryParse(args[i + 1], out int mx) ? mx : 0,
+                        int.TryParse(args[i + 2], out int my) ? my : 0);
+                    i += 2;
+                    break;
+                case "--menuclick":
+                    _menuTestClick = true;
+                    break;
                 case "--menuscreen" when i + 1 < args.Length:
                     // Debug aid: open straight onto a given front-end page.
                     if (Enum.TryParse(args[i + 1], true, out MenuScreen ms)) _bootMenuScreen = ms;
@@ -611,6 +622,7 @@ public sealed class App : IDisposable
         }
 
         if (_inputTest) UpdateInputSelfTest();
+        if (_menuTestPoint.HasValue) UpdateMenuPointerTest();
         HandleAutoScreenshot();
         _input.EndFrame(dt);
     }
@@ -751,12 +763,28 @@ public sealed class App : IDisposable
         }
 
         _menu.HandleInput(up, down, left, right, accept, back, dt);
+        if (_state != AppState.Menu) return;   // a menu action may have started a match
+        FeedMenuMouse();
+        if (_state != AppState.Menu) return;
 
         RenderMenuBackdrop(dt);
         _ui.Begin(Width, Height);
         _menu.Draw(_ui, Width, Height);
         DrawStatusLine();
         _ui.End();
+    }
+
+    /// <summary>Feeds pointer state to the front-end. Shared by every menu state.</summary>
+    private void FeedMenuMouse()
+    {
+        Vector2 position = _input.MousePosition;
+        position.X = MathX.Clamp(position.X, 0f, Width);
+        position.Y = MathX.Clamp(position.Y, 0f, Height);
+        bool moved = _input.MouseDelta.LengthSquared() > 0.01f;
+        _menu.HandleMouse(position, moved,
+            _input.MouseButtonPressed(MouseButton.Left),
+            _input.MouseButtonPressed(MouseButton.Right),
+            _input.ScrollDelta);
     }
 
     private bool AnyPadPressed(ButtonName name)
@@ -944,6 +972,8 @@ public sealed class App : IDisposable
 
         _menu.HandleInput(up, down, left, right, accept, back, dt);
         if (_state != AppState.Paused) return;   // a menu action may have changed state
+        FeedMenuMouse();
+        if (_state != AppState.Paused) return;
 
         RenderFrame(0f);
         _ui.Begin(Width, Height);
@@ -960,6 +990,8 @@ public sealed class App : IDisposable
         bool back = _input.KeyPressed(Key.Escape) || AnyPadPressed(ButtonName.B);
         // The results screen lays its actions out horizontally.
         _menu.HandleInput(left, right, false, false, accept, back, dt);
+        if (_state != AppState.Results) return;
+        FeedMenuMouse();
         if (_state != AppState.Results) return;
 
         RenderMenuBackdrop(dt);
@@ -1267,6 +1299,32 @@ public sealed class App : IDisposable
         }
         Console.WriteLine("──────────────────────");
         _window.Close();
+    }
+
+    // ---------------------------------------------------------------- menu pointer test
+
+    private Vector2D<int>? _menuTestPoint;
+    private int _menuTestFrame;
+    private bool _menuTestClick;
+
+    /// <summary>
+    /// Drives <c>--menutest X Y</c>: parks the real system cursor over a menu row so an
+    /// automated screenshot shows whether hover highlighting and the drawn pointer line up.
+    /// </summary>
+    private void UpdateMenuPointerTest()
+    {
+        _menuTestFrame++;
+        if (_menuTestFrame < 30) return;
+        // Nudge every frame; a single move can land before the menu has laid itself out.
+        var target = _menuTestPoint.Value;
+        InputDiagnostics.MoveCursorTo(target.X, target.Y, Width, Height);
+        if (_menuTestFrame == 40)
+            Console.WriteLine($"游標測試: 移動至 ({target.X}, {target.Y})，視窗 {Width}x{Height}");
+        if (_menuTestClick && _menuTestFrame == 80)
+        {
+            InputDiagnostics.InjectMouseClick();
+            Console.WriteLine("游標測試: 已注入點擊");
+        }
     }
 
     // ---------------------------------------------------------------- screenshots

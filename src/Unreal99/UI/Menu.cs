@@ -39,6 +39,23 @@ public sealed class Menu
     private float _navCooldown;
     private float _selectPulse;
 
+    // ---------------------------------------------------------------- mouse navigation
+    // Rows record their on-screen rectangle while drawing; the next frame's input pass hit-tests
+    // against them. One frame of lag is imperceptible and keeps layout and hit-testing in sync.
+
+    private readonly List<ItemRect> _itemRects = new();
+    private float _scroll;
+    private float _maxScroll;
+    private bool _pointerActive;
+    private Vector2 _pointer;
+
+    private readonly record struct ItemRect(int Index, float X, float Y, float Width, float Height,
+        float LeftArrowX, float RightArrowX, float ArrowWidth);
+
+    /// <summary>True once the mouse has moved, so the pointer only appears when actually used.</summary>
+    public bool PointerVisible => _pointerActive;
+    public Vector2 PointerPosition => _pointer;
+
     // ---------------------------------------------------------------- settings model
 
     public GameModeKind ModeKind = GameModeKind.Deathmatch;
@@ -136,6 +153,88 @@ public sealed class Menu
         if (back) Back();
     }
 
+    /// <summary>
+    /// Mouse input for the front-end. Hovering moves the selection, left-click activates an
+    /// action or steps a choice forward, right-click steps it back, and clicking directly on a
+    /// choice's arrows adjusts in that direction. The wheel scrolls long lists.
+    /// </summary>
+    public void HandleMouse(Vector2 position, bool moved, bool leftClick, bool rightClick, float wheel)
+    {
+        if (moved)
+        {
+            _pointerActive = true;
+            _pointer = position;
+        }
+        else if (_pointerActive)
+        {
+            _pointer = position;
+        }
+
+        if (MathF.Abs(wheel) > 0.01f && _maxScroll > 0f)
+        {
+            _scroll = MathX.Clamp(_scroll - wheel * 48f, 0f, _maxScroll);
+            _pointerActive = true;
+        }
+
+        if (!_pointerActive) return;
+
+        int hovered = HitTest(position, out ItemRect rect);
+        // Only steal the selection when the mouse actually moves, so hovering over one row does
+        // not fight the keyboard when the player is navigating with the arrows.
+        if (moved && hovered >= 0 && hovered != SelectedIndex)
+        {
+            SelectedIndex = hovered;
+            PlaySound?.Invoke(SoundId.MenuMove);
+        }
+
+        if (hovered < 0) return;
+        var item = _items[hovered];
+
+        if (leftClick)
+        {
+            // Clicking an arrow adjusts in that direction; clicking anywhere else on a choice
+            // row steps forward, which matches how most console menus behave.
+            if (item.Kind == MenuItemKind.Choice && rect.ArrowWidth > 0f
+                && position.X >= rect.LeftArrowX && position.X <= rect.LeftArrowX + rect.ArrowWidth)
+            {
+                item.OnAdjust?.Invoke(-1);
+                PlaySound?.Invoke(SoundId.MenuMove);
+            }
+            else if (item.Kind == MenuItemKind.Choice)
+            {
+                item.OnAdjust?.Invoke(1);
+                PlaySound?.Invoke(SoundId.MenuMove);
+            }
+            else if (item.Kind == MenuItemKind.Action && item.Enabled())
+            {
+                _selectPulse = 1f;
+                PlaySound?.Invoke(SoundId.MenuSelect);
+                item.OnActivate?.Invoke();
+            }
+        }
+        else if (rightClick && item.Kind == MenuItemKind.Choice)
+        {
+            item.OnAdjust?.Invoke(-1);
+            PlaySound?.Invoke(SoundId.MenuMove);
+        }
+    }
+
+    private int HitTest(Vector2 position, out ItemRect rect)
+    {
+        rect = default;
+        for (int i = 0; i < _itemRects.Count; i++)
+        {
+            ItemRect r = _itemRects[i];
+            if (position.X < r.X || position.X > r.X + r.Width) continue;
+            if (position.Y < r.Y || position.Y > r.Y + r.Height) continue;
+            if (r.Index < 0 || r.Index >= _items.Count) continue;
+            if (!_items[r.Index].Selectable || !_items[r.Index].Enabled()) continue;
+            rect = r;
+            return r.Index;
+        }
+        return -1;
+    }
+
     public void Back()
     {
         PlaySound?.Invoke(SoundId.MenuBack);
@@ -170,12 +269,16 @@ public sealed class Menu
 
     private void MoveToSelectable(int direction)
     {
+        _followSelection = true;
         for (int i = 0; i < _items.Count; i++)
         {
             SelectedIndex = ((SelectedIndex + direction) % _items.Count + _items.Count) % _items.Count;
             if (_items[SelectedIndex].Selectable && _items[SelectedIndex].Enabled()) return;
         }
     }
+
+    /// <summary>Set by keyboard navigation so the list scrolls to reveal the cursor.</summary>
+    private bool _followSelection;
 
     private void Adjust(int direction)
     {
@@ -463,6 +566,8 @@ public sealed class Menu
 
         if (Screen == MenuScreen.Results && ResultsWorld != null) DrawResults(ui, width, height, s);
         else DrawStandard(ui, width, height, s);
+
+        DrawPointer(ui, width, height);
     }
 
     private void DrawStandard(UiRenderer ui, int width, int height, float s)
@@ -508,18 +613,22 @@ public sealed class Menu
         float listTop = Screen == MenuScreen.Main ? height * 0.40f : titleY + 100f * s;
         float listBottom = height - 104f * s;
 
-        // Long lists (the binding editor has one row per action) scroll to keep the cursor visible.
+        // Long lists (the binding editor has one row per action) scroll. Keyboard navigation
+        // pulls the view to the cursor; the wheel drives it directly.
         float visible = MathF.Max(rowH * 3f, listBottom - listTop);
         float total = _items.Count * rowH;
-        float scroll = 0f;
-        if (total > visible)
+        _maxScroll = MathF.Max(0f, total - visible);
+        if (_followSelection)
         {
             float selectedTop = SelectedIndex * rowH;
-            float target = selectedTop - visible * 0.5f + rowH * 0.5f;
-            scroll = MathX.Clamp(target, 0f, total - visible);
+            if (selectedTop < _scroll) _scroll = selectedTop;
+            else if (selectedTop + rowH > _scroll + visible) _scroll = selectedTop + rowH - visible;
+            _followSelection = false;
         }
-        float y = listTop - scroll;
+        _scroll = MathX.Clamp(_scroll, 0f, _maxScroll);
+        float y = listTop - _scroll;
 
+        _itemRects.Clear();
         for (int i = 0; i < _items.Count; i++)
         {
             var item = _items[i];
@@ -527,6 +636,17 @@ public sealed class Menu
             {
                 y += rowH;
                 continue;
+            }
+            if (item.Selectable)
+            {
+                float arrowW = dense ? 26f * s : 30f * s;
+                float leftArrowX = x + panelW - 48f * s
+                    - ui.MeasureText(FaceBold, dense ? 19f * s : 23f * s,
+                        item.Kind == MenuItemKind.Choice && item.Value != null ? item.Value() : "")
+                    - 16f * s - arrowW;
+                _itemRects.Add(new ItemRect(i, x, y - 5f * s, panelW, rowH - 2f * s,
+                    leftArrowX, x + panelW - 48f * s + 8f * s,
+                    item.Kind == MenuItemKind.Choice ? arrowW : 0f));
             }
             bool selected = i == SelectedIndex && item.Selectable;
             bool enabled = item.Enabled();
@@ -584,13 +704,13 @@ public sealed class Menu
         }
 
         // A scrollbar so long binding lists show their extent.
-        if (total > visible)
+        if (_maxScroll > 0f)
         {
             float trackX = x + panelW + 10f * s;
             float trackH = listBottom - listTop;
             ui.Rect(trackX, listTop, 3f * s, trackH, UiRenderer.Rgba(1f, 1f, 1f, 0.10f));
             float thumbH = MathF.Max(20f * s, trackH * visible / total);
-            float thumbY = listTop + (trackH - thumbH) * (scroll / MathF.Max(total - visible, 1f));
+            float thumbY = listTop + (trackH - thumbH) * (_scroll / _maxScroll);
             ui.Rect(trackX, thumbY, 3f * s, thumbH, UiRenderer.Rgba(1f, 0.7f, 0.25f, 0.65f));
         }
 
@@ -699,12 +819,16 @@ public sealed class Menu
 
         // Action row.
         y += 26f * s;
+        _itemRects.Clear();
+        _maxScroll = 0f;
         for (int i = 0; i < _items.Count; i++)
         {
             var item = _items[i];
             bool selected = i == SelectedIndex;
             float itemW = w / _items.Count;
             float ix = x + i * itemW;
+            if (item.Selectable)
+                _itemRects.Add(new ItemRect(i, ix + 8f * s, y - 6f * s, itemW - 16f * s, 40f * s, 0f, 0f, 0f));
             if (selected)
             {
                 float glow = 0.6f + 0.25f * MathF.Sin(_time * 5.5f);
@@ -716,6 +840,38 @@ public sealed class Menu
                 selected ? UiRenderer.Rgba(1f, 0.95f, 0.8f) : UiRenderer.Rgba(0.75f, 0.8f, 0.9f, 0.9f),
                 TextAlign.Center, 2f * s);
         }
+
+        DrawCaptureOverlay(ui, width, height, s);
+    }
+
+    /// <summary>
+    /// Draws the menu pointer. The OS cursor is hidden in-game, and in fullscreen it cannot be
+    /// relied on at all, so the front-end draws its own.
+    /// </summary>
+    public void DrawPointer(UiRenderer ui, int width, int height)
+    {
+        if (!_pointerActive) return;
+        float s = MathF.Max(height / 900f, 0.5f);
+        float k = 15f * s;
+        Vector2 p = _pointer;
+
+        // Arrow silhouette, drawn as a dark outline first so it reads on any background.
+        Vector2 tip = p;
+        Vector2 tail = p + new Vector2(0f, k);
+        Vector2 wing = p + new Vector2(k * 0.72f, k * 0.72f);
+        Vector2 notch = p + new Vector2(k * 0.30f, k * 0.78f);
+
+        uint outline = UiRenderer.Rgba(0f, 0f, 0f, 0.85f);
+        Vector2 o = new(1.6f * s, 1.6f * s);
+        ui.Triangle(tip + o, wing + o, tail + o, outline);
+        ui.Triangle(tip + o, notch + o, tail + o, outline);
+
+        uint fill = UiRenderer.Rgba(1f, 0.86f, 0.45f, 0.98f);
+        ui.Triangle(tip, wing, tail, fill);
+        ui.Triangle(tip, notch, tail, fill);
+        ui.Line(tip, wing, 1.4f * s, UiRenderer.Rgba(1f, 1f, 1f, 0.85f));
+
+        _ = width;
     }
 
     /// <summary>Loading screen shown while the arena is generated.</summary>

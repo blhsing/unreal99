@@ -307,22 +307,40 @@ public sealed class InputSystem : IDisposable
     public Vector2 MousePosition => _mousePosition;
     public float ScrollDelta => _scroll;
 
-    public void SetMouseCapture(bool capture)
+    /// <summary>
+    /// Captured locks and hides the cursor for gameplay look. Hidden leaves normal pointer
+    /// motion but draws nothing, which is what the front-end wants so it can render its own
+    /// cursor — the OS one is unreliable in fullscreen.
+    /// </summary>
+    public enum PointerMode { Normal, Hidden, Captured }
+
+    private PointerMode _pointerMode = PointerMode.Normal;
+
+    public void SetPointerMode(PointerMode mode)
     {
-        if (_mouse == null || capture == MouseCaptured) return;
-        MouseCaptured = capture;
+        if (_mouse == null || mode == _pointerMode) return;
+        _pointerMode = mode;
+        MouseCaptured = mode == PointerMode.Captured;
         try
         {
-            _mouse.Cursor.CursorMode = capture ? CursorMode.Raw : CursorMode.Normal;
+            _mouse.Cursor.CursorMode = mode switch
+            {
+                PointerMode.Captured => CursorMode.Raw,
+                PointerMode.Hidden => CursorMode.Hidden,
+                _ => CursorMode.Normal,
+            };
         }
         catch (Exception)
         {
             // Raw mode is unavailable on some drivers; hidden still works for look control.
-            _mouse.Cursor.CursorMode = capture ? CursorMode.Hidden : CursorMode.Normal;
+            _mouse.Cursor.CursorMode = mode == PointerMode.Normal ? CursorMode.Normal : CursorMode.Hidden;
         }
         _firstMouseSample = true;
         _mouseDelta = Vector2.Zero;
     }
+
+    public void SetMouseCapture(bool capture)
+        => SetPointerMode(capture ? PointerMode.Captured : PointerMode.Hidden);
 
     // ---------------------------------------------------------------- gamepad
 

@@ -16,6 +16,7 @@ public static class InputDiagnostics
     private const uint MouseEventFMove = 0x0001;
     private const uint MouseEventFLeftDown = 0x0002;
     private const uint MouseEventFLeftUp = 0x0004;
+    private const uint MouseEventFAbsolute = 0x8000;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct MouseInput
@@ -51,6 +52,24 @@ public static class InputDiagnostics
         var inputs = new InputUnion[1];
         inputs[0].Type = InputMouse;
         inputs[0].Mouse = new MouseInput { Dx = dx, Dy = dy, Flags = MouseEventFMove };
+        InjectedEvents += SendInput(1, inputs, Marshal.SizeOf<InputUnion>());
+    }
+
+    /// <summary>
+    /// Moves the system cursor to an absolute screen position. Absolute mouse input is expressed
+    /// in a normalised 0..65535 space across the virtual desktop.
+    /// </summary>
+    public static void MoveCursorTo(int x, int y, int screenWidth, int screenHeight)
+    {
+        if (screenWidth <= 0 || screenHeight <= 0) return;
+        var inputs = new InputUnion[1];
+        inputs[0].Type = InputMouse;
+        inputs[0].Mouse = new MouseInput
+        {
+            Dx = (int)(x * 65535.0 / screenWidth),
+            Dy = (int)(y * 65535.0 / screenHeight),
+            Flags = MouseEventFMove | MouseEventFAbsolute,
+        };
         InjectedEvents += SendInput(1, inputs, Marshal.SizeOf<InputUnion>());
     }
 
