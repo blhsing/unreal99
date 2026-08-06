@@ -1,0 +1,1726 @@
+using System.Numerics;
+using Unreal99.Core;
+using Unreal99.Rendering;
+using Unreal99.UI;
+using Unreal99.World;
+
+namespace Unreal99.Game;
+
+/// <summary>Produces one frame of input for a pawn. Implemented by the player and bot controllers.</summary>
+public abstract class Controller
+{
+    public Pawn Pawn;
+    public abstract PawnInput Update(GameWorld world, float dt);
+    public virtual void OnSpawned(GameWorld world) { }
+    public virtual void OnDamaged(GameWorld world, Pawn attacker, float amount, Vector3 direction) { }
+    public virtual void OnKilled(GameWorld world, Pawn killer) { }
+}
+
+/// <summary>Transient on-screen feedback owned by one pawn (only rendered for local players).</summary>
+public sealed class Feedback
+{
+    public string BigText = "";
+    public float BigTextTimer;
+    public Vector3 BigTextColor = Vector3.One;
+    public string SubText = "";
+    public float SubTextTimer;
+    public string PickupText = "";
+    public float PickupTimer;
+    public float HitMarkerTimer;
+    public bool HitMarkerLethal;
+    public float DamageDirection;    // yaw-relative angle of the last hit, radians
+    public float DamageDirectionTimer;
+
+    public void Big(string text, Vector3 color, float duration = 2.2f)
+    {
+        BigText = text; BigTextColor = color; BigTextTimer = duration;
+    }
+
+    public void Sub(string text, float duration = 2.4f)
+    {
+        SubText = text; SubTextTimer = duration;
+    }
+
+    public void Pickup(string text, float duration = 1.8f)
+    {
+        PickupText = text; PickupTimer = duration;
+    }
+
+    public void Update(float dt)
+    {
+        BigTextTimer = MathF.Max(0f, BigTextTimer - dt);
+        SubTextTimer = MathF.Max(0f, SubTextTimer - dt);
+        PickupTimer = MathF.Max(0f, PickupTimer - dt);
+        HitMarkerTimer = MathF.Max(0f, HitMarkerTimer - dt);
+        DamageDirectionTimer = MathF.Max(0f, DamageDirectionTimer - dt);
+    }
+}
+
+public struct KillFeedEntry
+{
+    public string Text;
+    public float Timer;
+    public Vector3 Color;
+}
+
+/// <summary>
+/// The simulation. Owns every pawn, projectile and pickup, resolves all damage, and builds
+/// the per-frame render list. Split-screen views all read from this single world.
+/// </summary>
+public sealed class GameWorld
+{
+    public const int MaxProjectiles = 512;
+
+    public Level Level;
+    public GameMode Mode;
+    public readonly List<Pawn> Pawns = new(16);
+    public readonly List<Controller> Controllers = new(16);
+    public readonly List<PickupEntity> Pickups = new(96);
+    public readonly Projectile[] Projectiles = new Projectile[MaxProjectiles];
+    public readonly List<KillFeedEntry> KillFeed = new(8);
+    public readonly Dictionary<int, Feedback> Feedbacks = new();
+
+    public readonly Rng Rng = new(0xC0FFEE);
+    public float Time;
+    public int NextPawnId = 1;
+
+    private readonly Renderer _renderer;
+    private readonly CharacterModel _character;
+    private readonly WeaponModels _weaponModels;
+    private readonly ProjectileModels _projectileModels;
+    private readonly PickupModels _pickupModels;
+
+    private readonly Dictionary<int, Matrix4x4[]> _boneWorld = new();
+    private readonly Dictionary<int, Matrix4x4[]> _boneSkin = new();
+    private readonly List<Vector3> _spawnAvoid = new(16);
+
+    // CTF state
+    public readonly Dictionary<Team, Vector3> FlagHome = new();
+    public readonly Dictionary<Team, Vector3> FlagPosition = new();
+    public readonly Dictionary<Team, int> FlagCarrier = new();
+    public readonly Dictionary<Team, float> FlagDroppedTimer = new();
+
+    public ParticleSystem Particles => _renderer.Particles;
+    public EffectRenderer Effects => _renderer.Effects;
+    public MaterialLibrary Materials => _renderer.Materials;
+    public CharacterModel Character => _character;
+    public WeaponModels WeaponMeshes => _weaponModels;
+
+    /// <summary>Raised whenever something should make a noise; the audio layer subscribes.</summary>
+    public Action<SoundId, Vector3, float> OnSound;
+
+    public GameWorld(Renderer renderer, CharacterModel character, WeaponModels weaponModels,
+        ProjectileModels projectileModels, PickupModels pickupModels)
+    {
+        _renderer = renderer;
+        _character = character;
+        _weaponModels = weaponModels;
+        _projectileModels = projectileModels;
+        _pickupModels = pickupModels;
+    }
+
+    // ---------------------------------------------------------------- setup
+
+    public void LoadLevel(Level level, GameMode mode)
+    {
+        Level = level;
+        Mode = mode;
+        Pawns.Clear();
+        Controllers.Clear();
+        Pickups.Clear();
+        KillFeed.Clear();
+        Feedbacks.Clear();
+        Array.Clear(Projectiles);
+        Particles.Clear();
+        Effects.Clear();
+        Time = 0f;
+        NextPawnId = 1;
+
+        foreach (var p in level.Pickups)
+        {
+            Pickups.Add(new PickupEntity
+            {
+                Kind = p.Kind,
+                Weapon = p.Weapon,
+                Ammo = p.Ammo,
+                Position = p.Position,
+                RespawnTime = p.RespawnTime,
+                Active = true,
+                Phase = Rng.Range(0f, MathX.TwoPi),
+            });
+        }
+
+        FlagHome.Clear(); FlagPosition.Clear(); FlagCarrier.Clear(); FlagDroppedTimer.Clear();
+        foreach (var fb in level.FlagBases)
+        {
+            FlagHome[fb.Team] = fb.Position;
+            FlagPosition[fb.Team] = fb.Position;
+            FlagCarrier[fb.Team] = -1;
+            FlagDroppedTimer[fb.Team] = 0f;
+        }
+
+        Particles.RaycastFunc = (from, to) =>
+        {
+            var hit = Level.Collision.Raycast(from, to);
+            return (hit.Hit, hit.Point, hit.Normal);
+        };
+    }
+
+    public Pawn AddPawn(Controller controller, string name, Team team, bool isBot, int playerIndex,
+        Vector3 accentColor)
+    {
+        var pawn = new Pawn
+        {
+            Id = NextPawnId++,
+            Name = name,
+            Team = team,
+            IsBot = isBot,
+            PlayerIndex = playerIndex,
+            AccentColor = accentColor,
+        };
+        controller.Pawn = pawn;
+        Pawns.Add(pawn);
+        Controllers.Add(controller);
+        Feedbacks[pawn.Id] = new Feedback();
+        _boneWorld[pawn.Id] = new Matrix4x4[(int)Bone.Count];
+        _boneSkin[pawn.Id] = new Matrix4x4[(int)Bone.Count];
+        RespawnPawn(pawn);
+        return pawn;
+    }
+
+    public Feedback FeedbackFor(Pawn p) => Feedbacks.TryGetValue(p.Id, out var f) ? f : new Feedback();
+
+    public Pawn FindPawn(int id)
+    {
+        foreach (var p in Pawns) if (p.Id == id) return p;
+        return null;
+    }
+
+    public Controller ControllerFor(Pawn p)
+    {
+        for (int i = 0; i < Pawns.Count; i++) if (Pawns[i] == p) return Controllers[i];
+        return null;
+    }
+
+    public void RespawnPawn(Pawn pawn)
+    {
+        _spawnAvoid.Clear();
+        foreach (var other in Pawns)
+            if (other != pawn && other.Alive) _spawnAvoid.Add(other.Position);
+
+        var spawn = Level.PickSpawn(Rng, Mode.TeamBased ? pawn.Team : Team.None, _spawnAvoid);
+        Vector3 pos = spawn.Position + new Vector3(0, 0.06f, 0);
+
+        // Safety net: if the authored yaw points into a nearby wall, look at the arena instead.
+        Vector3 eye = pos + new Vector3(0, Physics.PawnHeight * Physics.EyeHeightFraction, 0);
+        Vector3 facing = MathX.DirFromYawPitch(spawn.Yaw, 0f);
+        if (Level.Collision.Raycast(eye, eye + facing * 5.0f).Hit)
+        {
+            Vector3 toCenter = (Level.Center - pos).FlatXZ();
+            if (toCenter.LengthSquared() > 0.01f)
+                MathX.YawPitchFromDir(Vector3.Normalize(toCenter), out spawn.Yaw, out _);
+        }
+
+        // Telefrag anything already standing on the spawn point.
+        foreach (var other in Pawns)
+        {
+            if (other == pawn || !other.Alive) continue;
+            if (Vector3.Distance(other.Position, pos) < 1.1f)
+                Kill(other, pawn, DamageType.Telefrag);
+        }
+
+        pawn.ResetForSpawn(pos, spawn.Yaw, Weapons.StartingWeapons, Mode.Kind == GameModeKind.Instagib);
+        pawn.RespawnTimer = 0f;
+        Particles.EnergyBurst(pos + new Vector3(0, 1f, 0), pawn.AccentColor, 1.1f);
+        OnSound?.Invoke(SoundId.Respawn, pos, 1f);
+        ControllerFor(pawn)?.OnSpawned(this);
+    }
+
+    // ---------------------------------------------------------------- main update
+
+    public void Update(float dt)
+    {
+        Time += dt;
+        Level.Update(dt, Time);
+        Mode.Update(this, dt);
+
+        for (int i = 0; i < Pawns.Count; i++)
+        {
+            var pawn = Pawns[i];
+            var feedback = Feedbacks[pawn.Id];
+            feedback.Update(dt);
+
+            if (!pawn.Alive)
+            {
+                pawn.DeathTime += dt;
+                pawn.RespawnTimer -= dt;
+                pawn.TickPresentation(dt);
+                if (pawn.RespawnTimer <= 0f && Mode.AllowsRespawn(this, pawn)) RespawnPawn(pawn);
+                continue;
+            }
+
+            PawnInput input = Controllers[i].Update(this, dt);
+            var events = pawn.Move(Level, input, dt);
+            HandleMoveEvents(pawn, events, dt);
+            if (!pawn.Alive) continue;
+
+            HandleWeapons(pawn, input, dt);
+            HandlePickups(pawn);
+            Mode.OnPawnUpdate(this, pawn, dt);
+            UpdateCarriedFlag(pawn);
+        }
+
+        UpdateProjectiles(dt);
+        UpdatePickups(dt);
+        UpdateFlags(dt);
+
+        for (int i = KillFeed.Count - 1; i >= 0; i--)
+        {
+            var e = KillFeed[i];
+            e.Timer -= dt;
+            if (e.Timer <= 0f) KillFeed.RemoveAt(i);
+            else KillFeed[i] = e;
+        }
+
+        Particles.Update(dt);
+        Effects.Update(dt);
+    }
+
+    private void HandleMoveEvents(Pawn pawn, in MoveEvents e, float dt)
+    {
+        if (e.Jumped) OnSound?.Invoke(e.UsedJumpBoots ? SoundId.JumpBoots : SoundId.Jump, pawn.Position, 0.6f);
+        if (e.Dodged)
+        {
+            OnSound?.Invoke(SoundId.Dodge, pawn.Position, 0.7f);
+            Particles.Dust(pawn.Position, 0.55f, 6);
+        }
+        if (e.Footstep)
+        {
+            OnSound?.Invoke(SoundId.Footstep, pawn.Position, 0.32f);
+        }
+        if (e.Landed)
+        {
+            OnSound?.Invoke(SoundId.Land, pawn.Position, MathX.Saturate(e.LandingSpeed / 14f) * 0.8f);
+            if (e.LandingSpeed > 8f) Particles.Dust(pawn.Position, 0.7f, 8);
+        }
+        if (e.FallDamage > 0f)
+        {
+            Damage(pawn, null, e.FallDamage, DamageType.Fall, MathX.Down);
+            if (!pawn.Alive) return;
+        }
+        if (e.JumpPad)
+        {
+            OnSound?.Invoke(SoundId.JumpPad, pawn.Position, 0.9f);
+            Particles.EnergyBurst(pawn.Position, e.JumpPadColor, 0.9f);
+        }
+        if (e.Teleported)
+        {
+            OnSound?.Invoke(SoundId.Teleport, e.TeleportFrom, 0.9f);
+            Particles.EnergyBurst(e.TeleportFrom + new Vector3(0, 1f, 0), new Vector3(0.6f, 0.3f, 1f), 1.2f);
+            Particles.EnergyBurst(pawn.Position + new Vector3(0, 1f, 0), new Vector3(0.6f, 0.3f, 1f), 1.2f);
+        }
+        if (e.InLava)
+        {
+            Damage(pawn, null, Physics.LavaDamagePerSecond * dt, DamageType.Lava, MathX.Up);
+            if (Rng.Chance(dt * 12f))
+                Particles.Trail(pawn.Position + Rng.InsideUnitSphere() * 0.4f + MathX.Up * 0.3f,
+                    new Vector3(1f, 0.4f, 0.1f), 0.35f, 0.5f);
+        }
+        if (e.Drowning) Damage(pawn, null, Physics.DrownDamagePerSecond * dt, DamageType.Drowning, MathX.Up);
+        if (e.EnteredVoid) Kill(pawn, null, DamageType.Void);
+    }
+
+    // ---------------------------------------------------------------- weapons
+
+    private void HandleWeapons(Pawn pawn, in PawnInput input, float dt)
+    {
+        if (input.WeaponSelect >= 0 && input.WeaponSelect < (int)WeaponKind.Count)
+            pawn.RequestWeapon((WeaponKind)input.WeaponSelect);
+        else if (input.WeaponCycle != 0)
+            pawn.CycleWeapon(input.WeaponCycle);
+
+        if (pawn.UpdateWeaponTimers(dt)) OnSound?.Invoke(SoundId.WeaponSwitch, pawn.Position, 0.4f);
+
+        var def = pawn.WeaponDef;
+        bool zoomHeld = input.AltFire && def.Alt.ZoomFov > 0f;
+        pawn.ZoomFov = zoomHeld ? def.Alt.ZoomFov : 0f;
+
+        // --- minigun spin-up ---
+        if (def.SpinUp)
+        {
+            bool spinning = (input.Fire || input.AltFire) && !pawn.IsSwitching;
+            pawn.SpinUp = MathX.Clamp(pawn.SpinUp + (spinning ? dt * 2.6f : -dt * 2.2f), 0f, 1f);
+        }
+        else pawn.SpinUp = 0f;
+
+        // --- pulse gun beam ---
+        if (def.Alt.Mode == FireMode.Beam && input.AltFire && !pawn.IsSwitching && pawn.CanFire(pawn.Weapon, true))
+        {
+            pawn.FiringBeam = true;
+            FireBeam(pawn, def.Alt, dt);
+            return;
+        }
+        pawn.FiringBeam = false;
+
+        if (pawn.IsSwitching) return;
+
+        // --- charged fire (impact hammer primary, bio alt) ---
+        bool primaryChargeable = def.Primary.Chargeable;
+        bool altChargeable = def.Alt.Chargeable;
+        if (primaryChargeable && input.Fire)
+        {
+            pawn.ChargingPrimary = true;
+            pawn.ChargeTime = MathF.Min(def.Primary.MaxCharge, pawn.ChargeTime + dt);
+            return;
+        }
+        if (pawn.ChargingPrimary && !input.Fire)
+        {
+            pawn.ChargingPrimary = false;
+            float charge = pawn.ChargeTime / MathF.Max(def.Primary.MaxCharge, 0.01f);
+            pawn.ChargeTime = 0f;
+            if (pawn.FireCooldown <= 0f) Fire(pawn, false, 0.55f + charge * 0.85f);
+            return;
+        }
+        if (altChargeable && input.AltFire)
+        {
+            pawn.ChargeTime = MathF.Min(def.Alt.MaxCharge, pawn.ChargeTime + dt);
+            return;
+        }
+        if (altChargeable && !input.AltFire && pawn.ChargeTime > 0.05f)
+        {
+            float charge = pawn.ChargeTime / MathF.Max(def.Alt.MaxCharge, 0.01f);
+            pawn.ChargeTime = 0f;
+            if (pawn.FireCooldown <= 0f) Fire(pawn, true, 0.6f + charge * 1.4f);
+            return;
+        }
+
+        if (pawn.FireCooldown > 0f) return;
+
+        if (input.Fire && pawn.CanFire(pawn.Weapon, false))
+        {
+            if (!def.SpinUp || pawn.SpinUp > 0.55f) Fire(pawn, false, 1f);
+        }
+        else if (input.AltFire && def.Alt.ZoomFov <= 0f && pawn.CanFire(pawn.Weapon, true))
+        {
+            if (!def.SpinUp || pawn.SpinUp > 0.55f) Fire(pawn, true, 1f);
+        }
+        else if ((input.Fire || input.AltFire) && !pawn.CanFire(pawn.Weapon, input.AltFire))
+        {
+            OnSound?.Invoke(SoundId.DryFire, pawn.Position, 0.4f);
+            pawn.FireCooldown = 0.35f;
+            pawn.SwitchToBestAvailable();
+            if (pawn.PlayerIndex >= 0) FeedbackFor(pawn).Pickup(Loc.HudNoAmmo, 1.2f);
+        }
+    }
+
+    private void Fire(Pawn pawn, bool alt, float chargeScale)
+    {
+        var def = pawn.WeaponDef;
+        FireDef fire = alt ? def.Alt : def.Primary;
+        if (fire.Mode == FireMode.Beam) return;
+
+        pawn.ConsumeAmmo(alt);
+        pawn.FireCooldown = fire.Interval;
+        pawn.FireBlend = 1f;
+        pawn.CameraShake = MathF.Min(1.5f, pawn.CameraShake + fire.ShakeAmount);
+        pawn.Pitch = MathX.Clamp(pawn.Pitch + fire.Recoil, -1.5f, 1.5f);
+        pawn.ShotsFired++;
+
+        Vector3 origin = pawn.MuzzleWorld();
+        Vector3 aim = pawn.ViewDirection;
+        float damageScale = chargeScale * (pawn.HasDamageAmp ? 2f : 1f);
+        if (Mode.Kind == GameModeKind.Instagib) damageScale *= 40f;
+
+        Particles.MuzzleFlash(origin, aim, alt ? 1.2f : 1f, def.Tint);
+        OnSound?.Invoke(WeaponSound(def.Kind, alt), pawn.Position, 1f);
+
+        switch (fire.Mode)
+        {
+            case FireMode.Hitscan:
+                for (int i = 0; i < Math.Max(1, fire.Shots); i++)
+                {
+                    float spread = fire.Spread;
+                    // Minigun and enforcer bloom with sustained fire; sniper never spreads.
+                    if (def.SpinUp) spread *= 0.6f + pawn.SpinUp * 0.8f;
+                    Vector3 dir = spread > 0f ? Rng.ConeDirection(aim, spread) : aim;
+                    HitscanShot(pawn, origin, dir, fire, damageScale, def.Tint);
+                }
+                break;
+
+            case FireMode.Projectile:
+                for (int i = 0; i < Math.Max(1, fire.Shots); i++)
+                {
+                    Vector3 dir = fire.Spread > 0f ? Rng.ConeDirection(aim, fire.Spread) : aim;
+                    SpawnProjectile(fire.Projectile, fire, origin, dir, pawn, damageScale, def.Tint);
+                }
+                if (fire.SelfKnockback > 0f && !pawn.OnGround)
+                    pawn.Velocity -= aim * fire.SelfKnockback * 0.25f;
+                break;
+
+            case FireMode.Melee:
+                MeleeSwing(pawn, origin, aim, fire, damageScale);
+                break;
+        }
+
+        if (!pawn.CanFire(pawn.Weapon, alt) && pawn.AmmoFor(pawn.Weapon) <= 0)
+            pawn.SwitchToBestAvailable();
+
+        // Muzzle light: brief, bright, and priority-boosted so it survives the light cull.
+        _renderer.Particles.Spawn(BlendMode.Additive, origin, Vector3.Zero,
+            new Vector4(def.Tint * 3f, 0.9f), new Vector4(def.Tint, 0f), 0.3f, 0.05f, 0.05f, Spr.Flare);
+    }
+
+    private void HitscanShot(Pawn shooter, Vector3 origin, Vector3 dir, in FireDef fire, float damageScale,
+        Vector3 tint)
+    {
+        Vector3 end = origin + dir * fire.Range;
+
+        // Shock combo: a shock beam that clips a shock ball detonates it.
+        int comboIndex = FindProjectileAlongRay(origin, end, shooter.Id, out float comboDist);
+        var worldHit = Level.Collision.Raycast(origin, end);
+        float worldDist = worldHit.Hit ? worldHit.Distance : fire.Range;
+
+        Pawn hitPawn = TracePawns(origin, dir, MathF.Min(worldDist, fire.Range), shooter, out float pawnDist,
+            out Vector3 pawnPoint, out bool headshot);
+
+        if (comboIndex >= 0 && comboDist < MathF.Min(pawnDist, worldDist))
+        {
+            ShockCombo(comboIndex, shooter);
+            Effects.AddTracer(origin, Projectiles[comboIndex].Position, tint, 0.05f, 0.10f);
+            return;
+        }
+
+        if (hitPawn != null && pawnDist <= worldDist)
+        {
+            float dmg = fire.Damage * damageScale;
+            if (headshot && fire.HeadshotMultiplier > 1f) dmg *= fire.HeadshotMultiplier;
+            shooter.ShotsHit++;
+            Damage(hitPawn, shooter, dmg, DamageType.Hitscan, dir, headshot);
+            if (fire.Knockback > 0f) hitPawn.Velocity += dir * fire.Knockback * 0.25f;
+            Particles.BloodSpray(pawnPoint, -dir, 0.8f);
+            Effects.AddTracer(origin, pawnPoint, tint, 0.04f, 0.08f);
+            OnSound?.Invoke(SoundId.HitFlesh, pawnPoint, 0.6f);
+            return;
+        }
+
+        if (worldHit.Hit)
+        {
+            Effects.AddTracer(origin, worldHit.Point, tint, 0.04f, 0.08f);
+            Particles.ImpactSparks(worldHit.Point, worldHit.Normal, 0.9f, tint);
+            Effects.AddBulletHole(worldHit.Point, worldHit.Normal, 0.14f);
+            OnSound?.Invoke(SoundId.HitWall, worldHit.Point, 0.5f);
+        }
+        else
+        {
+            Effects.AddTracer(origin, end, tint, 0.03f, 0.07f);
+        }
+    }
+
+    private void FireBeam(Pawn pawn, in FireDef fire, float dt)
+    {
+        pawn.BeamDamageAccumulator += dt;
+        Vector3 origin = pawn.MuzzleWorld();
+        Vector3 dir = pawn.ViewDirection;
+        Vector3 end = origin + dir * fire.Range;
+
+        var worldHit = Level.Collision.Raycast(origin, end);
+        float maxDist = worldHit.Hit ? worldHit.Distance : fire.Range;
+        Pawn target = TracePawns(origin, dir, maxDist, pawn, out float pawnDist, out Vector3 point, out _);
+
+        Vector3 tip = target != null ? point : (worldHit.Hit ? worldHit.Point : end);
+        Effects.AddLightning(origin, tip, pawn.WeaponDef.Tint, 0.14f, 0.06f);
+
+        // Damage ticks on a fixed cadence so frame rate never changes DPS.
+        if (pawn.BeamDamageAccumulator >= 0.1f)
+        {
+            pawn.BeamDamageAccumulator -= 0.1f;
+            pawn.ConsumeAmmo(true);
+            pawn.ShotsFired++;
+            OnSound?.Invoke(SoundId.PulseBeam, pawn.Position, 0.5f);
+            if (target != null)
+            {
+                pawn.ShotsHit++;
+                float amp = pawn.HasDamageAmp ? 2f : 1f;
+                Damage(target, pawn, fire.Damage * 0.1f * amp, DamageType.Energy, dir);
+                Particles.BloodSpray(point, -dir, 0.3f);
+            }
+            else if (worldHit.Hit)
+            {
+                Particles.ImpactSparks(worldHit.Point, worldHit.Normal, 0.4f, pawn.WeaponDef.Tint);
+            }
+        }
+        _ = pawnDist;
+    }
+
+    private void MeleeSwing(Pawn pawn, Vector3 origin, Vector3 dir, in FireDef fire, float damageScale)
+    {
+        Vector3 end = origin + dir * fire.Range;
+        var worldHit = Level.Collision.Raycast(origin, end);
+        float maxDist = worldHit.Hit ? worldHit.Distance : fire.Range;
+        Pawn target = TracePawns(origin, dir, maxDist, pawn, out _, out Vector3 point, out bool head);
+
+        if (target != null)
+        {
+            pawn.ShotsFired++;
+            pawn.ShotsHit++;
+            Damage(target, pawn, fire.Damage * damageScale, DamageType.Melee, dir, head);
+            target.Velocity += dir * fire.Knockback + MathX.Up * fire.Knockback * 0.3f;
+            Particles.BloodSpray(point, -dir, 1.4f);
+            Particles.EnergyBurst(point, new Vector3(0.6f, 0.85f, 1f), 0.7f);
+            OnSound?.Invoke(SoundId.HammerHit, point, 1f);
+        }
+        else if (worldHit.Hit)
+        {
+            Particles.ImpactSparks(worldHit.Point, worldHit.Normal, 1.6f, new Vector3(0.7f, 0.85f, 1f));
+            Effects.AddScorch(worldHit.Point, worldHit.Normal, 0.7f);
+            OnSound?.Invoke(SoundId.HammerHit, worldHit.Point, 0.8f);
+            // Hammer jump: firing at the floor launches the user.
+            if (fire.SelfKnockback > 0f || Vector3.Dot(worldHit.Normal, MathX.Up) > 0.6f)
+                pawn.Velocity += worldHit.Normal * MathF.Max(fire.SelfKnockback, 10.5f);
+        }
+        pawn.ShotsFired++;
+    }
+
+    // ---------------------------------------------------------------- projectiles
+
+    private void SpawnProjectile(ProjectileKind kind, in FireDef fire, Vector3 origin, Vector3 dir,
+        Pawn owner, float damageScale, Vector3 tint)
+    {
+        for (int i = 0; i < Projectiles.Length; i++)
+        {
+            if (Projectiles[i].Active) continue;
+            Projectiles[i] = ProjectileFactory.Create(kind, fire, origin, dir, owner.Id, owner.Team,
+                tint, damageScale, Rng);
+            return;
+        }
+    }
+
+    private void UpdateProjectiles(float dt)
+    {
+        for (int i = 0; i < Projectiles.Length; i++)
+        {
+            ref Projectile p = ref Projectiles[i];
+            if (!p.Active) continue;
+
+            p.Life -= dt;
+            p.ArmDelay -= dt;
+            if (p.Life <= 0f)
+            {
+                if (p.ExplodeOnTimeout) ExplodeProjectile(ref p);
+                else FizzleProjectile(ref p);
+                continue;
+            }
+
+            if (p.Stuck)
+            {
+                EmitProjectileTrail(ref p, dt);
+                continue;
+            }
+
+            if (p.AffectedByGravity) p.Velocity.Y -= Physics.Gravity * dt;
+
+            Vector3 next = p.Position + p.Velocity * dt;
+
+            // --- pawn hits ---
+            Pawn hit = TracePawnsSphere(p.Position, next, p.Radius, p.OwnerId, out Vector3 hitPoint,
+                out bool headshot);
+            if (hit != null && p.ArmDelay <= 0f)
+            {
+                var owner = FindPawn(p.OwnerId);
+                float dmg = p.Damage * p.DamageScale;
+                if (headshot && p.HeadshotMultiplier > 1f) dmg *= p.HeadshotMultiplier;
+                if (owner != null) owner.ShotsHit++;
+                Damage(hit, owner, dmg, DamageType.Generic, MathX.SafeNormalize(p.Velocity, MathX.Forward),
+                    headshot);
+                hit.Velocity += MathX.SafeNormalize(p.Velocity, Vector3.Zero) * p.Knockback * 0.22f;
+                Particles.BloodSpray(hitPoint, -MathX.SafeNormalize(p.Velocity, MathX.Up), 1.1f);
+                p.Position = hitPoint;
+                if (p.SplashRadius > 0f) ExplodeProjectile(ref p);
+                else { FizzleProjectile(ref p); OnSound?.Invoke(SoundId.HitFlesh, hitPoint, 0.7f); }
+                continue;
+            }
+
+            // --- world hits ---
+            var worldHit = Level.Collision.Raycast(p.Position, next);
+            if (worldHit.Hit)
+            {
+                if (p.StickOnImpact)
+                {
+                    p.Position = worldHit.Point + worldHit.Normal * 0.06f;
+                    p.Velocity = Vector3.Zero;
+                    p.Stuck = true;
+                    p.Life = MathF.Min(p.Life, 3.2f);
+                    OnSound?.Invoke(SoundId.BioSplat, p.Position, 0.6f);
+                    continue;
+                }
+                if (p.BouncesLeft > 0)
+                {
+                    p.BouncesLeft--;
+                    p.Position = worldHit.Point + worldHit.Normal * 0.04f;
+                    Vector3 v = p.Velocity;
+                    v -= worldHit.Normal * (2f * Vector3.Dot(v, worldHit.Normal));
+                    float restitution = p.Kind switch
+                    {
+                        ProjectileKind.RipperBlade => 0.98f,
+                        ProjectileKind.FlakShard => 0.55f,
+                        ProjectileKind.Grenade => 0.52f,
+                        _ => 0.45f,
+                    };
+                    p.Velocity = v * restitution;
+                    Particles.ImpactSparks(worldHit.Point, worldHit.Normal, 0.5f, p.Color);
+                    OnSound?.Invoke(p.Kind == ProjectileKind.RipperBlade ? SoundId.BladeBounce : SoundId.Bounce,
+                        worldHit.Point, 0.45f);
+                    if (p.Velocity.LengthSquared() < 1.2f && p.ExplodeOnTimeout) p.Life = MathF.Min(p.Life, 0.8f);
+                    continue;
+                }
+                p.Position = worldHit.Point;
+                if (p.SplashRadius > 0f) ExplodeProjectile(ref p);
+                else
+                {
+                    Particles.ImpactSparks(worldHit.Point, worldHit.Normal, 1.0f, p.Color);
+                    Effects.AddBulletHole(worldHit.Point, worldHit.Normal, 0.18f);
+                    FizzleProjectile(ref p);
+                    OnSound?.Invoke(SoundId.HitWall, worldHit.Point, 0.5f);
+                }
+                continue;
+            }
+
+            p.Position = next;
+            EmitProjectileTrail(ref p, dt);
+        }
+    }
+
+    private void EmitProjectileTrail(ref Projectile p, float dt)
+    {
+        p.TrailTimer -= dt;
+        if (p.TrailTimer > 0f) return;
+
+        switch (p.Kind)
+        {
+            case ProjectileKind.Rocket:
+                p.TrailTimer = 0.014f;
+                Particles.Trail(p.Position, new Vector3(1f, 0.55f, 0.15f), 0.42f, 0.28f, Spr.Puff);
+                Particles.Smoke(p.Position, -p.Velocity * 0.04f, 0.26f, 1.0f, 0.35f);
+                break;
+            case ProjectileKind.Warhead:
+                p.TrailTimer = 0.012f;
+                Particles.Trail(p.Position, new Vector3(1f, 0.7f, 0.2f), 0.85f, 0.4f, Spr.Puff);
+                Particles.Smoke(p.Position, -p.Velocity * 0.05f, 0.55f, 1.6f, 0.5f);
+                break;
+            case ProjectileKind.ShockBall:
+                p.TrailTimer = 0.02f;
+                Particles.Trail(p.Position, new Vector3(0.55f, 0.35f, 1f), 0.75f, 0.24f, Spr.Swirl);
+                break;
+            case ProjectileKind.PlasmaBolt:
+                p.TrailTimer = 0.022f;
+                Particles.Trail(p.Position, new Vector3(0.35f, 1f, 0.5f), 0.30f, 0.14f, Spr.Plasma);
+                break;
+            case ProjectileKind.BioGlob:
+                p.TrailTimer = 0.05f;
+                Particles.Trail(p.Position, new Vector3(0.4f, 1f, 0.2f), 0.26f, 0.22f, Spr.Plasma);
+                break;
+            case ProjectileKind.FlakShard:
+                p.TrailTimer = 0.03f;
+                Particles.Trail(p.Position, new Vector3(1f, 0.6f, 0.2f), 0.14f, 0.12f, Spr.Spark);
+                break;
+            case ProjectileKind.RipperBlade:
+                p.TrailTimer = 0.02f;
+                Particles.Trail(p.Position, new Vector3(0.7f, 0.9f, 1f), 0.18f, 0.12f, Spr.Spark);
+                break;
+            case ProjectileKind.Grenade:
+            case ProjectileKind.FlakShell:
+                p.TrailTimer = 0.05f;
+                Particles.Smoke(p.Position, Vector3.Zero, 0.14f, 0.5f, 0.24f);
+                break;
+        }
+    }
+
+    private void ExplodeProjectile(ref Projectile p)
+    {
+        Vector3 pos = p.Position;
+        float radius = p.SplashRadius;
+        float damage = p.SplashDamage * p.DamageScale;
+        var owner = FindPawn(p.OwnerId);
+        Vector3 tint = p.Kind switch
+        {
+            ProjectileKind.BioGlob => new Vector3(0.45f, 1f, 0.25f),
+            ProjectileKind.ShockBall => new Vector3(0.6f, 0.4f, 1f),
+            ProjectileKind.PlasmaBolt => new Vector3(0.4f, 1f, 0.55f),
+            _ => new Vector3(1f, 0.6f, 0.18f),
+        };
+
+        float scale = p.Kind == ProjectileKind.Warhead ? 4.5f : MathX.Clamp(radius / 5f, 0.45f, 2.2f);
+        Particles.Explosion(pos, scale, tint);
+        Effects.AddScorch(pos, MathX.Up, radius * 0.5f);
+        OnSound?.Invoke(p.Kind == ProjectileKind.Warhead ? SoundId.Nuke : SoundId.Explosion, pos,
+            p.Kind == ProjectileKind.Warhead ? 2f : 1f);
+
+        Explode(pos, radius, damage, p.Knockback, owner, p.Kind == ProjectileKind.Warhead
+            ? DamageType.Explosion : DamageType.Explosion);
+        p.Active = false;
+    }
+
+    private void FizzleProjectile(ref Projectile p)
+    {
+        Particles.EnergyBurst(p.Position, p.Color, 0.45f);
+        p.Active = false;
+    }
+
+    private void ShockCombo(int projectileIndex, Pawn shooter)
+    {
+        ref Projectile p = ref Projectiles[projectileIndex];
+        Vector3 pos = p.Position;
+        Particles.Explosion(pos, 2.4f, new Vector3(0.62f, 0.38f, 1f));
+        Particles.EnergyBurst(pos, new Vector3(0.7f, 0.45f, 1f), 3.2f);
+        Effects.AddScorch(pos, MathX.Up, 4.5f);
+        OnSound?.Invoke(SoundId.ShockCombo, pos, 1.6f);
+        Explode(pos, 7.2f, 145f * (shooter.HasDamageAmp ? 2f : 1f), 30f, shooter, DamageType.Energy);
+        p.Active = false;
+        if (shooter.PlayerIndex >= 0) FeedbackFor(shooter).Sub("震盪連鎖", 1.4f);
+    }
+
+    private int FindProjectileAlongRay(Vector3 from, Vector3 to, int shooterId, out float distance)
+    {
+        distance = float.MaxValue;
+        int best = -1;
+        Vector3 dir = to - from;
+        float len = dir.Length();
+        if (len < 1e-4f) return -1;
+        dir /= len;
+
+        for (int i = 0; i < Projectiles.Length; i++)
+        {
+            ref Projectile p = ref Projectiles[i];
+            if (!p.Active || !p.ComboTarget || p.OwnerId != shooterId) continue;
+            Vector3 toBall = p.Position - from;
+            float t = Vector3.Dot(toBall, dir);
+            if (t < 0f || t > len) continue;
+            float perp = (toBall - dir * t).Length();
+            if (perp > p.Radius + 0.35f) continue;
+            if (t < distance) { distance = t; best = i; }
+        }
+        return best;
+    }
+
+    // ---------------------------------------------------------------- damage
+
+    /// <summary>Radial damage with line-of-sight occlusion and distance falloff.</summary>
+    public void Explode(Vector3 center, float radius, float damage, float knockback, Pawn attacker,
+        DamageType type)
+    {
+        foreach (var target in Pawns)
+        {
+            if (!target.Alive) continue;
+            Vector3 targetCenter = target.Center;
+            float dist = Vector3.Distance(center, targetCenter);
+            if (dist > radius) continue;
+
+            // Occlusion: only ignore geometry when the blast originates inside the target.
+            if (dist > 0.6f)
+            {
+                var occl = Level.Collision.Raycast(center, targetCenter);
+                if (occl.Hit && occl.Distance < dist - 0.7f) continue;
+            }
+
+            float falloff = 1f - MathX.Saturate(dist / radius);
+            falloff = falloff * falloff * 0.55f + falloff * 0.45f;
+            float dmg = damage * falloff;
+            bool selfDamage = attacker == target;
+            if (selfDamage) dmg *= 0.42f;
+            if (Mode.TeamBased && attacker != null && !selfDamage && attacker.Team == target.Team)
+                dmg *= Mode.FriendlyFire;
+
+            Vector3 push = MathX.SafeNormalize(targetCenter - center, MathX.Up);
+            push.Y = MathF.Max(push.Y, 0.35f);
+            target.Velocity += push * knockback * falloff * (selfDamage ? 1.25f : 1f);
+
+            if (dmg > 0.5f) Damage(target, attacker, dmg, type, push);
+        }
+    }
+
+    public void Damage(Pawn target, Pawn attacker, float amount, DamageType type, Vector3 direction,
+        bool headshot = false)
+    {
+        if (!target.Alive || amount <= 0f) return;
+        if (Mode.TeamBased && attacker != null && attacker != target && attacker.Team == target.Team)
+        {
+            amount *= Mode.FriendlyFire;
+            if (amount <= 0.01f) return;
+        }
+
+        target.ApplyDamage(amount, type);
+        target.LastDamageTime = Time;
+        if (attacker != null && attacker != target) target.LastAttackerId = attacker.Id;
+
+        if (target.PlayerIndex >= 0)
+        {
+            var fb = Feedbacks[target.Id];
+            Vector3 fromDir = attacker != null
+                ? MathX.SafeNormalize((attacker.Position - target.Position).FlatXZ(), -direction.FlatXZ())
+                : -MathX.SafeNormalize(direction.FlatXZ(), target.ForwardFlat);
+            fb.DamageDirection = MathF.Atan2(
+                Vector3.Dot(fromDir, target.RightFlat), Vector3.Dot(fromDir, target.ForwardFlat));
+            fb.DamageDirectionTimer = 1.3f;
+        }
+
+        if (attacker != null && attacker != target && attacker.PlayerIndex >= 0)
+        {
+            var fb = Feedbacks[attacker.Id];
+            fb.HitMarkerTimer = 0.22f;
+            fb.HitMarkerLethal = target.Health <= 0f;
+            if (headshot) fb.Sub(Loc.AnnHeadshot, 1.1f);
+        }
+
+        ControllerFor(target)?.OnDamaged(this, attacker, amount, direction);
+
+        if (target.Health <= 0f) Kill(target, attacker, type, headshot);
+    }
+
+    public void Kill(Pawn victim, Pawn killer, DamageType type, bool headshot = false)
+    {
+        if (!victim.Alive) return;
+        victim.Alive = false;
+        victim.Health = 0f;
+        victim.DeathTime = 0.0001f;
+        victim.Deaths++;
+        victim.RespawnTimer = Mode.RespawnDelay;
+        victim.FiringBeam = false;
+
+        bool gib = type is DamageType.Explosion or DamageType.Telefrag
+                || (type == DamageType.Energy && victim.Health < -40f)
+                || Mode.Kind == GameModeKind.Instagib;
+        victim.Gibbed = gib;
+
+        if (gib)
+        {
+            Particles.Gibs(victim.Center, 1.3f);
+            OnSound?.Invoke(SoundId.Gib, victim.Position, 1f);
+        }
+        else
+        {
+            Particles.BloodSpray(victim.Center, MathX.Up, 2f);
+            OnSound?.Invoke(SoundId.Death, victim.Position, 1f);
+        }
+        Effects.AddBloodSplat(victim.Position + new Vector3(0, 0.05f, 0), MathX.Up, 0.62f);
+
+        DropFlag(victim);
+
+        // --- scoring and announcements ---
+        if (killer != null && killer != victim)
+        {
+            bool teamKill = Mode.TeamBased && killer.Team == victim.Team;
+            killer.Frags += teamKill ? -1 : 1;
+            if (!teamKill)
+            {
+                killer.Streak++;
+                killer.MultiKillCount++;
+                killer.MultiKillTimer = 3.2f;
+                Mode.OnFrag(this, killer, victim);
+                AnnounceKill(killer, victim, headshot);
+            }
+            else
+            {
+                AddKillFeed(Loc.KillFeed(killer.Name, victim.Name), new Vector3(1f, 0.8f, 0.2f));
+            }
+        }
+        else
+        {
+            victim.Frags--;
+            victim.Suicides++;
+            string text = type switch
+            {
+                DamageType.Lava => Loc.LavaDeathFeed(victim.Name),
+                DamageType.Void or DamageType.Fall => Loc.FallDeathFeed(victim.Name),
+                _ => Loc.SuicideFeed(victim.Name),
+            };
+            AddKillFeed(text, new Vector3(0.75f, 0.75f, 0.8f));
+        }
+
+        // Ending someone's spree is worth calling out.
+        if (victim.Streak >= 5 && killer != null && killer != victim)
+            AddKillFeed(Loc.SpreeEnded(victim.Name, killer.Name), new Vector3(1f, 0.6f, 0.2f));
+        victim.Streak = 0;
+        victim.MultiKillCount = 0;
+
+        ControllerFor(victim)?.OnKilled(this, killer);
+        Mode.OnDeath(this, victim, killer);
+    }
+
+    private void AnnounceKill(Pawn killer, Pawn victim, bool headshot)
+    {
+        AddKillFeed(Loc.KillFeed(killer.Name, victim.Name), GameTypes.TeamColor(killer.Team));
+
+        var fb = killer.PlayerIndex >= 0 ? Feedbacks[killer.Id] : null;
+
+        if (Mode.FirstBloodPending)
+        {
+            Mode.FirstBloodPending = false;
+            Broadcast(Loc.AnnFirstBlood, new Vector3(1f, 0.25f, 0.2f));
+            OnSound?.Invoke(SoundId.AnnounceMajor, killer.Position, 1f);
+        }
+
+        string multi = Loc.MultiKillAnnouncement(killer.MultiKillCount);
+        if (multi != null)
+        {
+            fb?.Big(multi, new Vector3(1f, 0.7f, 0.15f), 2.0f);
+            AddKillFeed($"{killer.Name} — {multi}", new Vector3(1f, 0.7f, 0.15f));
+            OnSound?.Invoke(SoundId.AnnounceMajor, killer.Position, 1f);
+        }
+
+        string spree = Loc.SpreeAnnouncement(killer.Streak);
+        if (spree != null)
+        {
+            fb?.Big(spree, new Vector3(1f, 0.35f, 0.15f), 2.4f);
+            AddKillFeed($"{killer.Name} — {spree}", new Vector3(1f, 0.35f, 0.15f));
+            OnSound?.Invoke(SoundId.AnnounceMajor, killer.Position, 1f);
+        }
+
+        if (headshot && multi == null && spree == null)
+            fb?.Sub(Loc.AnnHeadshot, 1.3f);
+    }
+
+    public void AddKillFeed(string text, Vector3 color)
+    {
+        KillFeed.Add(new KillFeedEntry { Text = text, Timer = 5.5f, Color = color });
+        if (KillFeed.Count > 6) KillFeed.RemoveAt(0);
+    }
+
+    public void Broadcast(string text, Vector3 color, float duration = 2.2f)
+    {
+        foreach (var p in Pawns)
+            if (p.PlayerIndex >= 0) Feedbacks[p.Id].Big(text, color, duration);
+    }
+
+    // ---------------------------------------------------------------- tracing
+
+    /// <summary>Nearest pawn intersected by a ray, treating pawns as capsules.</summary>
+    public Pawn TracePawns(Vector3 origin, Vector3 dir, float maxDist, Pawn ignore, out float distance,
+        out Vector3 point, out bool headshot)
+    {
+        distance = maxDist;
+        point = origin + dir * maxDist;
+        headshot = false;
+        Pawn best = null;
+
+        foreach (var target in Pawns)
+        {
+            if (target == ignore || !target.Alive) continue;
+            Vector3 feet = target.Position;
+            Vector3 head = target.Position + new Vector3(0, target.CurrentHeight, 0);
+            if (!RayCapsule(origin, dir, maxDist, feet, head, Physics.PawnRadius, out float t)) continue;
+            if (t >= distance) continue;
+            distance = t;
+            point = origin + dir * t;
+            best = target;
+            headshot = point.Y > target.Position.Y + target.CurrentHeight - 0.30f;
+        }
+        return best;
+    }
+
+    private Pawn TracePawnsSphere(Vector3 from, Vector3 to, float radius, int ignoreId, out Vector3 point,
+        out bool headshot)
+    {
+        point = to;
+        headshot = false;
+        Vector3 delta = to - from;
+        float len = delta.Length();
+        if (len < 1e-5f) return null;
+        Vector3 dir = delta / len;
+
+        Pawn best = null;
+        float bestT = len;
+        foreach (var target in Pawns)
+        {
+            if (target.Id == ignoreId || !target.Alive) continue;
+            Vector3 feet = target.Position;
+            Vector3 head = target.Position + new Vector3(0, target.CurrentHeight, 0);
+            if (!RayCapsule(from, dir, len, feet, head, Physics.PawnRadius + radius, out float t)) continue;
+            if (t >= bestT) continue;
+            bestT = t;
+            best = target;
+            point = from + dir * t;
+            headshot = point.Y > target.Position.Y + target.CurrentHeight - 0.30f;
+        }
+        return best;
+    }
+
+    /// <summary>Ray versus a vertical capsule. Good enough for hit registration at these speeds.</summary>
+    private static bool RayCapsule(Vector3 origin, Vector3 dir, float maxDist, Vector3 a, Vector3 b,
+        float radius, out float t)
+    {
+        t = 0f;
+        // Solve against the infinite cylinder in XZ, then clamp against the end caps.
+        Vector2 o = new(origin.X - a.X, origin.Z - a.Z);
+        Vector2 d = new(dir.X, dir.Z);
+        float dd = Vector2.Dot(d, d);
+
+        if (dd < 1e-8f)
+        {
+            // Vertical shot: hit if inside the radius horizontally and within the span.
+            if (o.LengthSquared() > radius * radius) return false;
+            float lo = (a.Y - origin.Y) / dir.Y;
+            float hi = (b.Y - origin.Y) / dir.Y;
+            if (lo > hi) (lo, hi) = (hi, lo);
+            if (hi < 0f || lo > maxDist) return false;
+            t = MathF.Max(lo, 0f);
+            return true;
+        }
+
+        float bq = 2f * Vector2.Dot(o, d);
+        float c = Vector2.Dot(o, o) - radius * radius;
+        float disc = bq * bq - 4f * dd * c;
+        if (disc < 0f) return false;
+        float sq = MathF.Sqrt(disc);
+        float t0 = (-bq - sq) / (2f * dd);
+        float t1 = (-bq + sq) / (2f * dd);
+        if (t1 < 0f) return false;
+        float enter = t0 > 0f ? t0 : 0f;
+        if (enter > maxDist) return false;
+
+        // Clamp to the vertical extent, extending slightly for the rounded caps.
+        float yAtEnter = origin.Y + dir.Y * enter;
+        if (yAtEnter >= a.Y - radius * 0.5f && yAtEnter <= b.Y + radius * 0.5f)
+        {
+            t = enter;
+            return true;
+        }
+
+        float targetY = yAtEnter < a.Y ? a.Y : b.Y;
+        if (MathF.Abs(dir.Y) < 1e-6f) return false;
+        float tPlane = (targetY - origin.Y) / dir.Y;
+        if (tPlane < 0f || tPlane > maxDist || tPlane < enter || tPlane > t1) return false;
+        Vector3 p = origin + dir * tPlane;
+        if (new Vector2(p.X - a.X, p.Z - a.Z).LengthSquared() > radius * radius) return false;
+        t = tPlane;
+        return true;
+    }
+
+    // ---------------------------------------------------------------- pickups
+
+    private void UpdatePickups(float dt)
+    {
+        foreach (var pu in Pickups)
+        {
+            pu.Phase += dt;
+            if (!pu.Active)
+            {
+                pu.Timer -= dt;
+                if (pu.Timer <= 0f)
+                {
+                    pu.Active = true;
+                    pu.SpawnBlend = 0f;
+                    Particles.EnergyBurst(pu.Position + new Vector3(0, 0.4f, 0), pu.GlowColor, 0.7f);
+                    OnSound?.Invoke(SoundId.ItemRespawn, pu.Position, 0.5f);
+                }
+            }
+            else pu.SpawnBlend = MathF.Min(1f, pu.SpawnBlend + dt * 3.5f);
+        }
+    }
+
+    private void HandlePickups(Pawn pawn)
+    {
+        foreach (var pu in Pickups)
+        {
+            if (!pu.Active) continue;
+            Vector3 delta = pu.Position - (pawn.Position + new Vector3(0, 0.6f, 0));
+            if (delta.LengthSquared() > pu.PickupRadius * pu.PickupRadius) continue;
+            if (!TryGivePickup(pawn, pu)) continue;
+
+            pu.Active = false;
+            pu.Timer = pu.RespawnTime;
+            Particles.EnergyBurst(pu.Position + new Vector3(0, 0.35f, 0), pu.GlowColor, 0.55f);
+            OnSound?.Invoke(PickupSound(pu.Kind), pu.Position, 0.75f);
+        }
+    }
+
+    private bool TryGivePickup(Pawn pawn, PickupEntity pu)
+    {
+        var fb = pawn.PlayerIndex >= 0 ? Feedbacks[pawn.Id] : null;
+        switch (pu.Kind)
+        {
+            case PickupKind.HealthVial:
+                if (pawn.Health >= 199f) return false;
+                pawn.GiveHealth(5f, 199f);
+                fb?.Pickup(Loc.PickedUp(Loc.PickupHealthVial));
+                return true;
+            case PickupKind.HealthPack:
+                if (pawn.Health >= 100f) return false;
+                pawn.GiveHealth(25f, 100f);
+                fb?.Pickup(Loc.PickedUp(Loc.PickupHealthPack));
+                return true;
+            case PickupKind.SuperHealth:
+                if (pawn.Health >= 199f) return false;
+                pawn.GiveHealth(100f, 199f);
+                fb?.Pickup(Loc.PickedUp(Loc.PickupSuperHealth));
+                return true;
+            case PickupKind.ThighPads:
+                if (pawn.Armor >= 150f) return false;
+                pawn.GiveArmor(30f, 150f);
+                fb?.Pickup(Loc.PickedUp(Loc.PickupThighPads));
+                return true;
+            case PickupKind.BodyArmor:
+                if (pawn.Armor >= 150f) return false;
+                pawn.GiveArmor(80f, 150f);
+                fb?.Pickup(Loc.PickedUp(Loc.PickupBodyArmor));
+                return true;
+            case PickupKind.ShieldBelt:
+                if (pawn.HasShieldBelt && pawn.Armor >= 150f) return false;
+                pawn.GiveArmor(150f, 150f, shieldBelt: true);
+                fb?.Pickup(Loc.PickedUp(Loc.PickupShieldBelt));
+                return true;
+            case PickupKind.DamageAmp:
+                pawn.DamageAmpTime = 30f;
+                fb?.Pickup(Loc.PickedUp(Loc.PickupDamageAmp));
+                return true;
+            case PickupKind.Invisibility:
+                pawn.InvisibilityTime = 28f;
+                fb?.Pickup(Loc.PickedUp(Loc.PickupInvisibility));
+                return true;
+            case PickupKind.JumpBoots:
+                pawn.JumpBootCharges = 3;
+                fb?.Pickup(Loc.PickedUp(Loc.PickupJumpBoots));
+                return true;
+            case PickupKind.WeaponPickup:
+                {
+                    if (Mode.Kind == GameModeKind.Instagib) return false;
+                    if (!pawn.GiveWeapon(pu.Weapon)) return false;
+                    fb?.Pickup(Loc.PickedUp(GameTypes.WeaponName(pu.Weapon)));
+                    return true;
+                }
+            case PickupKind.AmmoPickup:
+                {
+                    if (Mode.Kind == GameModeKind.Instagib) return false;
+                    int amount = AmmoPickupAmount(pu.Ammo);
+                    if (!pawn.GiveAmmo(pu.Ammo, amount)) return false;
+                    fb?.Pickup(Loc.PickedUp(Loc.PickupAmmo));
+                    return true;
+                }
+            default:
+                return false;
+        }
+    }
+
+    private static int AmmoPickupAmount(AmmoKind kind)
+    {
+        for (int i = 0; i < (int)WeaponKind.Count; i++)
+            if (Weapons.All[i].Ammo == kind) return Math.Max(5, Weapons.All[i].PickupAmmo);
+        return 10;
+    }
+
+    // ---------------------------------------------------------------- flags (CTF)
+
+    private void UpdateCarriedFlag(Pawn pawn)
+    {
+        if (Mode.Kind != GameModeKind.CaptureTheFlag) return;
+
+        foreach (var team in FlagHome.Keys)
+        {
+            if (FlagCarrier[team] == pawn.Id)
+            {
+                FlagPosition[team] = pawn.Position;
+                continue;
+            }
+            if (FlagCarrier[team] >= 0) continue;
+
+            float dist = Vector3.Distance(pawn.Position, FlagPosition[team]);
+            if (dist > 1.7f) continue;
+
+            bool atHome = Vector3.Distance(FlagPosition[team], FlagHome[team]) < 0.4f;
+            if (team == pawn.Team)
+            {
+                if (!atHome)
+                {
+                    FlagPosition[team] = FlagHome[team];
+                    FlagDroppedTimer[team] = 0f;
+                    Broadcast(team == Team.Red ? Loc.AnnRedFlagReturned : Loc.AnnBlueFlagReturned,
+                        GameTypes.TeamColor(team), 1.8f);
+                    OnSound?.Invoke(SoundId.FlagReturn, pawn.Position, 1f);
+                }
+                else if (pawn.HasFlag && pawn.CarriedFlag != pawn.Team)
+                {
+                    // Standing on your own flag while holding theirs scores a capture.
+                    Team enemy = pawn.CarriedFlag;
+                    FlagCarrier[enemy] = -1;
+                    FlagPosition[enemy] = FlagHome[enemy];
+                    pawn.HasFlag = false;
+                    pawn.CarriedFlag = Team.None;
+                    pawn.Captures++;
+                    Mode.OnCapture(this, pawn);
+                    Broadcast(pawn.Team == Team.Red ? Loc.AnnRedScores : Loc.AnnBlueScores,
+                        GameTypes.TeamColor(pawn.Team), 2.4f);
+                    AddKillFeed($"{pawn.Name} {Loc.HudFlagTaken}", GameTypes.TeamColor(pawn.Team));
+                    OnSound?.Invoke(SoundId.FlagCapture, pawn.Position, 1.4f);
+                }
+            }
+            else if (!pawn.HasFlag)
+            {
+                FlagCarrier[team] = pawn.Id;
+                pawn.HasFlag = true;
+                pawn.CarriedFlag = team;
+                Broadcast(team == Team.Red ? Loc.AnnFlagTakenRed : Loc.AnnFlagTakenBlue,
+                    GameTypes.TeamColor(team), 2.0f);
+                OnSound?.Invoke(SoundId.FlagTaken, pawn.Position, 1.2f);
+            }
+        }
+    }
+
+    private void UpdateFlags(float dt)
+    {
+        if (Mode.Kind != GameModeKind.CaptureTheFlag) return;
+        foreach (var team in FlagHome.Keys.ToArray())
+        {
+            if (FlagCarrier[team] >= 0) continue;
+            if (Vector3.Distance(FlagPosition[team], FlagHome[team]) < 0.4f) continue;
+            FlagDroppedTimer[team] += dt;
+            if (FlagDroppedTimer[team] > 25f)
+            {
+                FlagPosition[team] = FlagHome[team];
+                FlagDroppedTimer[team] = 0f;
+                Broadcast(team == Team.Red ? Loc.AnnRedFlagReturned : Loc.AnnBlueFlagReturned,
+                    GameTypes.TeamColor(team), 1.6f);
+            }
+        }
+    }
+
+    private void DropFlag(Pawn pawn)
+    {
+        if (!pawn.HasFlag) return;
+        Team team = pawn.CarriedFlag;
+        FlagCarrier[team] = -1;
+        float floor = Level.Collision.FloorHeight(pawn.Position + new Vector3(0, 1f, 0));
+        FlagPosition[team] = new Vector3(pawn.Position.X, float.IsNaN(floor) ? pawn.Position.Y : floor,
+            pawn.Position.Z);
+        FlagDroppedTimer[team] = 0f;
+        pawn.HasFlag = false;
+        pawn.CarriedFlag = Team.None;
+        Broadcast(Loc.HudFlagDropped, GameTypes.TeamColor(team), 1.4f);
+        OnSound?.Invoke(SoundId.FlagDrop, pawn.Position, 0.9f);
+    }
+
+    // ---------------------------------------------------------------- rendering
+
+    /// <summary>Fills the render scene with the level, every pawn, projectile, pickup and light.</summary>
+    public void Submit(RenderScene scene, int viewCount, IReadOnlyList<int> viewPawnIds)
+    {
+        scene.Time = Time;
+        Level.Environment.ApplyTo(scene);
+        Level.Submit(scene, Materials, Time);
+
+        SubmitPawns(scene, viewPawnIds);
+        SubmitProjectiles(scene);
+        SubmitPickups(scene);
+        SubmitFlags(scene);
+        _ = viewCount;
+    }
+
+    private void SubmitPawns(RenderScene scene, IReadOnlyList<int> viewPawnIds)
+    {
+        foreach (var pawn in Pawns)
+        {
+            if (!pawn.Alive && pawn.DeathTime > 6f) continue;
+
+            var world = _boneWorld[pawn.Id];
+            var skin = _boneSkin[pawn.Id];
+
+            Vector3 localMove = new(
+                Vector3.Dot(pawn.Velocity, pawn.RightFlat) / Physics.GroundSpeed, 0f,
+                Vector3.Dot(pawn.Velocity, pawn.ForwardFlat) / Physics.GroundSpeed);
+
+            var pose = new PoseInput
+            {
+                Time = pawn.ViewBobPhase,
+                Speed = pawn.Speed,
+                LocalMove = localMove,
+                InAir = !pawn.OnGround,
+                Crouching = pawn.Crouching,
+                AimPitch = pawn.Pitch,
+                FireBlend = pawn.FireBlend,
+                DodgeBlend = pawn.DodgeBlend,
+                DeathTime = pawn.Alive ? 0f : pawn.DeathTime,
+                LandBlend = pawn.LandBlend,
+                Health01 = MathX.Saturate(pawn.Health / 100f),
+            };
+
+            // Dead pawns topple at the root so the body actually ends up lying on the floor;
+            // the per-bone death pose only adds the limp detail.
+            Matrix4x4 root;
+            if (pawn.Alive)
+            {
+                root = Matrix4x4.CreateRotationY(pawn.Yaw) * Matrix4x4.CreateTranslation(pawn.Position);
+            }
+            else
+            {
+                float t = MathX.Saturate(pawn.DeathTime / 0.9f);
+                float fall = 1f - (1f - t) * (1f - t);
+                float lift = MathF.Sin(fall * MathX.Pi) * 0.12f + fall * 0.24f;
+                root = Matrix4x4.CreateRotationX(1.48f * fall)
+                     * Matrix4x4.CreateRotationY(pawn.Yaw)
+                     * Matrix4x4.CreateTranslation(pawn.Position + new Vector3(0, lift, 0));
+            }
+            _character.Animate(pose, root, world, skin);
+
+            bool isOwnView = viewPawnIds.Contains(pawn.Id);
+            if (isOwnView && pawn.Alive) continue;      // first-person: body is not drawn for its own view
+            if (pawn.Gibbed && !pawn.Alive) continue;
+
+            int boneBase = scene.AddBones(skin);
+            Vector3 tint = Mode.TeamBased ? GameTypes.TeamColor(pawn.Team) : pawn.AccentColor;
+            float alpha = pawn.IsInvisible ? 0.16f : 1f;
+            Vector3 emissive = pawn.HasDamageAmp
+                ? new Vector3(1.4f, 0.25f, 0.15f)
+                : (pawn.HasShieldBelt ? new Vector3(0.5f, 0.15f, 0.9f) : Vector3.Zero);
+
+            foreach (var section in _character.Sections)
+            {
+                Material mat = Materials.Get(section.Material);
+                bool bodyPlate = section.Material == (int)MatId.ArmorPlate;
+                var dc = new DrawCall
+                {
+                    Mesh = _character.Mesh,
+                    IndexOffset = section.IndexOffset,
+                    IndexCount = section.IndexCount,
+                    Material = mat,
+                    Transform = Matrix4x4.Identity,
+                    BoneBase = boneBase,
+                    BoneCount = (int)Bone.Count,
+                    Tint = bodyPlate ? new Vector4(tint * 1.15f, 1f) : mat.BaseColor,
+                    Emissive = section.Material == (int)MatId.EnergyPanel
+                        ? new Vector3(tint.X * 2.2f + 0.4f, tint.Y * 2.2f + 0.6f, tint.Z * 2.2f + 1.0f)
+                        : emissive,
+                    OverrideEmissive = true,
+                    Alpha = alpha,
+                    Center = pawn.Center,
+                    Radius = 1.4f,
+                    CastShadow = !pawn.IsInvisible,
+                    RimStrength = 0.55f,
+                    RimColor = tint * 0.9f,
+                    UvScale = mat.UvScale,
+                    OwnerView = -1,
+                };
+                if (alpha < 0.999f) scene.Transparent.Add(dc); else scene.Opaque.Add(dc);
+            }
+
+            // Third-person weapon in the right hand.
+            if (pawn.Alive)
+            {
+                // Anchor to the hand's position but orient by the aim, so the muzzle always
+                // points where shots actually go rather than wherever the arm animation lands.
+                Matrix4x4 hand = world[(int)Bone.HandR];
+                Vector3 handPos = new(hand.M41, hand.M42, hand.M43);
+                Matrix4x4 grip = Matrix4x4.CreateRotationX(pawn.Pitch)
+                               * Matrix4x4.CreateRotationY(pawn.Yaw)
+                               * Matrix4x4.CreateTranslation(handPos);
+                var wMesh = _weaponModels.MeshFor(pawn.Weapon);
+                foreach (var section in _weaponModels.SectionsFor(pawn.Weapon))
+                {
+                    Material mat = Materials.Get(section.Material);
+                    scene.Opaque.Add(new DrawCall
+                    {
+                        Mesh = wMesh,
+                        IndexOffset = section.IndexOffset,
+                        IndexCount = section.IndexCount,
+                        Material = mat,
+                        Transform = grip,
+                        BoneBase = -1,
+                        Tint = mat.BaseColor,
+                        Emissive = mat.Emissive,
+                        Alpha = alpha,
+                        Center = pawn.Center,
+                        Radius = 1.6f,
+                        CastShadow = false,
+                        UvScale = mat.UvScale,
+                        OwnerView = -1,
+                    });
+                }
+            }
+
+            // Power-up auras read at a glance in a firefight.
+            if (pawn.HasDamageAmp)
+                scene.AddLight(pawn.Center, 5.5f, new Vector3(1f, 0.25f, 0.15f), 2.6f, 1.6f);
+            if (pawn.HasShieldBelt)
+                scene.AddLight(pawn.Center, 4.5f, new Vector3(0.6f, 0.2f, 1f), 1.8f, 1.4f);
+            if (pawn.FiringBeam)
+                scene.AddLight(pawn.MuzzleWorld(), 8f, new Vector3(0.4f, 1f, 0.6f), 5f, 2.5f);
+        }
+    }
+
+    private void SubmitProjectiles(RenderScene scene)
+    {
+        for (int i = 0; i < Projectiles.Length; i++)
+        {
+            ref Projectile p = ref Projectiles[i];
+            if (!p.Active) continue;
+
+            float lightRadius = p.Kind switch
+            {
+                ProjectileKind.Warhead => 20f,
+                ProjectileKind.Rocket => 11f,
+                ProjectileKind.ShockBall => 10f,
+                ProjectileKind.FlakShell => 7f,
+                ProjectileKind.PlasmaBolt => 6f,
+                ProjectileKind.BioGlob => 6f,
+                _ => 4.5f,
+            };
+            float lightIntensity = p.Kind switch
+            {
+                ProjectileKind.Warhead => 10f,
+                ProjectileKind.Rocket => 6f,
+                ProjectileKind.ShockBall => 5.5f,
+                _ => 3f,
+            };
+            scene.AddLight(p.Position, lightRadius, p.Color, lightIntensity, 2.2f);
+
+            var mesh = _projectileModels.MeshFor(p.Kind);
+            if (mesh == null)
+            {
+                // Small energy projectiles are pure particles; a bright sprite is enough.
+                Particles.Spawn(BlendMode.Additive, p.Position, Vector3.Zero,
+                    new Vector4(p.Color * 4f, 1f), new Vector4(p.Color * 4f, 1f),
+                    p.Radius * 3.4f, p.Radius * 3.4f, 0.02f,
+                    p.Kind == ProjectileKind.ShockBall ? Spr.Swirl : Spr.Plasma);
+                continue;
+            }
+
+            Vector3 dir = MathX.SafeNormalize(p.Velocity, MathX.Up);
+            Matrix4x4 orient = p.Kind == ProjectileKind.RipperBlade
+                ? Matrix4x4.CreateRotationY(Time * p.Spin) * AlignYTo(dir)
+                : Matrix4x4.CreateRotationY(Time * p.Spin) * AlignYTo(dir);
+            Matrix4x4 xf = orient * Matrix4x4.CreateTranslation(p.Position);
+
+            foreach (var section in _projectileModels.SectionsFor(p.Kind))
+            {
+                Material mat = Materials.Get(section.Material);
+                scene.Opaque.Add(new DrawCall
+                {
+                    Mesh = mesh,
+                    IndexOffset = section.IndexOffset,
+                    IndexCount = section.IndexCount,
+                    Material = mat,
+                    Transform = xf,
+                    BoneBase = -1,
+                    Tint = mat.BaseColor,
+                    Emissive = mat.Emissive,
+                    Alpha = 1f,
+                    Center = p.Position,
+                    Radius = 0.8f,
+                    CastShadow = false,
+                    UvScale = mat.UvScale,
+                    OwnerView = -1,
+                });
+            }
+        }
+    }
+
+    /// <summary>Builds a rotation that maps local +Y onto <paramref name="dir"/>.</summary>
+    private static Matrix4x4 AlignYTo(Vector3 dir)
+    {
+        Vector3 up = MathX.SafeNormalize(dir, MathX.Up);
+        MathX.OrthoBasis(up, out Vector3 right, out Vector3 fwd);
+        Matrix4x4 m = Matrix4x4.Identity;
+        m.M11 = right.X; m.M12 = right.Y; m.M13 = right.Z;
+        m.M21 = up.X; m.M22 = up.Y; m.M23 = up.Z;
+        m.M31 = fwd.X; m.M32 = fwd.Y; m.M33 = fwd.Z;
+        return m;
+    }
+
+    private void SubmitPickups(RenderScene scene)
+    {
+        foreach (var pu in Pickups)
+        {
+            if (!pu.Active) continue;
+            float bob = MathF.Sin(pu.Phase * 1.9f) * 0.10f;
+            float spin = pu.Phase * 1.15f;
+            float scale = MathX.Lerp(0.2f, 1f, MathX.SmoothStep(0f, 1f, pu.SpawnBlend));
+
+            Matrix4x4 xf = Matrix4x4.CreateScale(scale)
+                         * Matrix4x4.CreateRotationY(spin)
+                         * Matrix4x4.CreateTranslation(pu.Position + new Vector3(0, bob + 0.15f, 0));
+
+            if (pu.Kind == PickupKind.WeaponPickup)
+            {
+                // Weapon pickups show the actual weapon, tilted and slowly rotating on a ring.
+                Matrix4x4 wxf = Matrix4x4.CreateScale(scale * 1.25f)
+                              * Matrix4x4.CreateRotationX(0.35f)
+                              * Matrix4x4.CreateRotationY(spin)
+                              * Matrix4x4.CreateTranslation(pu.Position + new Vector3(0, bob + 0.55f, 0));
+                var wm = _weaponModels.MeshFor(pu.Weapon);
+                foreach (var section in _weaponModels.SectionsFor(pu.Weapon))
+                {
+                    Material mat = Materials.Get(section.Material);
+                    scene.Opaque.Add(MakePickupDraw(wm, section, mat, wxf, pu.Position, 1.4f));
+                }
+            }
+            else if (pu.Kind == PickupKind.AmmoPickup)
+            {
+                foreach (var section in _pickupModels.SectionsFor(PickupKind.AmmoPickup))
+                {
+                    Material mat = Materials.Get(section.Material);
+                    scene.Opaque.Add(MakePickupDraw(_pickupModels.MeshFor(PickupKind.AmmoPickup), section,
+                        mat, xf, pu.Position, 0.9f));
+                }
+            }
+
+            var mesh = _pickupModels.MeshFor(pu.Kind);
+            if (mesh != null && pu.Kind != PickupKind.AmmoPickup)
+            {
+                foreach (var section in _pickupModels.SectionsFor(pu.Kind))
+                {
+                    Material mat = Materials.Get(section.Material);
+                    var dc = MakePickupDraw(mesh, section, mat, xf, pu.Position, 1.1f);
+                    if (mat.Transparent) scene.Transparent.Add(dc); else scene.Opaque.Add(dc);
+                }
+            }
+
+            scene.AddLight(pu.Position + new Vector3(0, 0.55f, 0), 5.5f, pu.GlowColor, 2.2f, 0.85f);
+        }
+    }
+
+    private static DrawCall MakePickupDraw(Mesh mesh, MeshSection section, Material mat, in Matrix4x4 xf,
+        Vector3 center, float radius) => new()
+        {
+            Mesh = mesh,
+            IndexOffset = section.IndexOffset,
+            IndexCount = section.IndexCount,
+            Material = mat,
+            Transform = xf,
+            BoneBase = -1,
+            Tint = mat.BaseColor,
+            Emissive = mat.Emissive,
+            Alpha = mat.Alpha,
+            Center = center,
+            Radius = radius,
+            CastShadow = false,
+            UvScale = mat.UvScale,
+            OwnerView = -1,
+        };
+
+    private void SubmitFlags(RenderScene scene)
+    {
+        if (Mode.Kind != GameModeKind.CaptureTheFlag) return;
+        foreach (var kv in FlagPosition)
+        {
+            Team team = kv.Key;
+            Vector3 pos = kv.Value;
+            int carrier = FlagCarrier[team];
+            float yaw = Time * 0.6f;
+            if (carrier >= 0)
+            {
+                var p = FindPawn(carrier);
+                if (p != null) { pos = p.Position + new Vector3(0, 0.2f, 0); yaw = p.Yaw + MathX.Pi; }
+            }
+
+            Matrix4x4 xf = Matrix4x4.CreateRotationY(yaw) * Matrix4x4.CreateTranslation(pos);
+            Vector3 col = GameTypes.TeamColor(team);
+            foreach (var section in _pickupModels.FlagSections)
+            {
+                Material mat = Materials.Get(section.Material);
+                bool cloth = section.Material == (int)MatId.EnergyPanel;
+                scene.Opaque.Add(new DrawCall
+                {
+                    Mesh = _pickupModels.Flag,
+                    IndexOffset = section.IndexOffset,
+                    IndexCount = section.IndexCount,
+                    Material = mat,
+                    Transform = xf,
+                    BoneBase = -1,
+                    Tint = cloth ? new Vector4(col, 1f) : mat.BaseColor,
+                    Emissive = cloth ? col * 2.4f : mat.Emissive,
+                    OverrideEmissive = true,
+                    Alpha = 1f,
+                    Center = pos + new Vector3(0, 1f, 0),
+                    Radius = 1.8f,
+                    CastShadow = true,
+                    UvScale = mat.UvScale,
+                    OwnerView = -1,
+                });
+            }
+            scene.AddLight(pos + new Vector3(0, 1.3f, 0), 9f, col, 4f, 1.5f);
+        }
+    }
+
+    /// <summary>Adds the first-person weapon for one view. Called once per local player.</summary>
+    public void SubmitViewModel(RenderScene scene, int viewIndex, Pawn pawn, in Camera camera)
+    {
+        if (!pawn.Alive) return;
+        var def = pawn.WeaponDef;
+        var mesh = _weaponModels.MeshFor(pawn.Weapon);
+        if (mesh == null) return;
+
+        // Weapon bob and sway, plus a switch dip and recoil kick.
+        float speed01 = MathX.Saturate(pawn.Speed / Physics.GroundSpeed);
+        float bobX = MathF.Sin(pawn.ViewBobPhase) * 0.016f * speed01;
+        float bobY = MathF.Abs(MathF.Cos(pawn.ViewBobPhase)) * 0.014f * speed01;
+        float switchDip = pawn.IsSwitching
+            ? MathF.Sin(MathX.Saturate(1f - pawn.SwitchTimer / MathF.Max(def.SwitchTime, 0.01f)) * MathX.Pi) * 0.22f
+            : 0f;
+        float recoilZ = pawn.FireBlend * 0.075f;
+        float spin = def.SpinUp ? pawn.SpinUp * Time * 26f : 0f;
+
+        Vector3 offset = def.FpOffset + new Vector3(bobX, bobY - switchDip, recoilZ);
+        if (pawn.ZoomFov > 0f) offset = new Vector3(0f, -0.06f, -0.30f);
+
+        Matrix4x4 local = Matrix4x4.CreateScale(def.FpScale)
+                        * Matrix4x4.CreateRotationZ(spin)
+                        * Matrix4x4.CreateRotationX(-pawn.FireBlend * 0.16f)
+                        * Matrix4x4.CreateTranslation(offset);
+
+        Matrix4x4 view = Matrix4x4.CreateWorld(camera.Position, camera.Forward, camera.Up);
+        Matrix4x4 xf = local * view;
+
+        foreach (var section in _weaponModels.SectionsFor(pawn.Weapon))
+        {
+            Material mat = Materials.Get(section.Material);
+            scene.Opaque.Add(new DrawCall
+            {
+                Mesh = mesh,
+                IndexOffset = section.IndexOffset,
+                IndexCount = section.IndexCount,
+                Material = mat,
+                Transform = xf,
+                BoneBase = -1,
+                Tint = mat.BaseColor,
+                Emissive = mat.Emissive,
+                Alpha = 1f,
+                Center = camera.Position,
+                Radius = 2f,
+                CastShadow = false,
+                RimStrength = 0.35f,
+                RimColor = def.Tint * 0.6f,
+                UvScale = mat.UvScale,
+                OwnerView = viewIndex,
+                FirstPerson = true,
+            });
+        }
+
+        if (pawn.FireBlend > 0.05f)
+            scene.AddLight(pawn.MuzzleWorld(), def.MuzzleLightRadius,
+                def.Tint, def.MuzzleLightIntensity * pawn.FireBlend, 4f);
+    }
+
+    // ---------------------------------------------------------------- sound mapping
+
+    private static SoundId WeaponSound(WeaponKind kind, bool alt) => kind switch
+    {
+        WeaponKind.ImpactHammer => SoundId.HammerSwing,
+        WeaponKind.Enforcer => SoundId.Enforcer,
+        WeaponKind.BioRifle => SoundId.BioFire,
+        WeaponKind.ShockRifle => alt ? SoundId.ShockAlt : SoundId.ShockPrimary,
+        WeaponKind.PulseGun => SoundId.PulseFire,
+        WeaponKind.Ripper => SoundId.RipperFire,
+        WeaponKind.Minigun => SoundId.MinigunFire,
+        WeaponKind.FlakCannon => alt ? SoundId.FlakAlt : SoundId.FlakPrimary,
+        WeaponKind.RocketLauncher => SoundId.RocketFire,
+        WeaponKind.SniperRifle => SoundId.SniperFire,
+        WeaponKind.Redeemer => SoundId.RedeemerFire,
+        _ => SoundId.Enforcer,
+    };
+
+    private static SoundId PickupSound(PickupKind kind) => kind switch
+    {
+        PickupKind.HealthVial or PickupKind.HealthPack or PickupKind.SuperHealth => SoundId.PickupHealth,
+        PickupKind.ThighPads or PickupKind.BodyArmor or PickupKind.ShieldBelt => SoundId.PickupArmor,
+        PickupKind.DamageAmp or PickupKind.Invisibility or PickupKind.JumpBoots => SoundId.PickupPower,
+        PickupKind.WeaponPickup => SoundId.PickupWeapon,
+        _ => SoundId.PickupAmmo,
+    };
+}
