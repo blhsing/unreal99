@@ -57,6 +57,40 @@ public static class Shortcut
         void GetCurFile([MarshalAs(UnmanagedType.LPWStr)] out string fileName);
     }
 
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern void SHChangeNotify(int eventId, uint flags, nint item1, nint item2);
+
+    private const int ShcneCreate = 0x00000002;      // a non-folder item was created
+    private const int ShcneUpdateDir = 0x00001000;   // a directory's contents changed
+    private const int ShcneAssocChanged = 0x08000000;
+    private const uint ShcnfPathW = 0x0005;
+    private const uint ShcnfFlush = 0x1000;
+
+    /// <summary>
+    /// Tells the shell a shortcut appeared. Without this the Start Menu keeps serving its cached
+    /// app list and the new entry stays invisible until Explorer happens to restart.
+    /// </summary>
+    private static void NotifyShell(string linkPath, string folder)
+    {
+        try
+        {
+            nint link = Marshal.StringToHGlobalUni(linkPath);
+            nint dir = Marshal.StringToHGlobalUni(folder);
+            try
+            {
+                SHChangeNotify(ShcneCreate, ShcnfPathW | ShcnfFlush, link, 0);
+                SHChangeNotify(ShcneUpdateDir, ShcnfPathW | ShcnfFlush, dir, 0);
+                SHChangeNotify(ShcneAssocChanged, ShcnfFlush, 0, 0);
+            }
+            finally
+            {
+                Marshal.FreeHGlobal(link);
+                Marshal.FreeHGlobal(dir);
+            }
+        }
+        catch (Exception) { /* purely a refresh hint */ }
+    }
+
     /// <summary>Per-user Start Menu programs folder. No administrator rights required.</summary>
     public static string StartMenuFolder => Environment.GetFolderPath(Environment.SpecialFolder.Programs);
 
@@ -97,6 +131,8 @@ public static class Shortcut
 
             if (!File.Exists(linkPath)) { LastError = "捷徑檔案未建立"; return null; }
             if (!Verify(linkPath, targetPath)) { LastError = "捷徑目標驗證失敗"; return null; }
+
+            NotifyShell(linkPath, StartMenuFolder);
             return linkPath;
         }
         catch (Exception ex)
