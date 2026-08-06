@@ -22,6 +22,14 @@ dotnet run --project src/Unreal99/Unreal99.csproj -c Release
 
 ### 安裝到開始選單
 
+在**一般的命令提示字元或 PowerShell 視窗**中執行專案根目錄的：
+
+```
+install.cmd
+```
+
+或手動執行：
+
 ```bash
 dotnet publish src/Unreal99/Unreal99.csproj -c Release -r win-x64 --self-contained false -o dist
 dist\Unreal99.exe --install-shortcut
@@ -29,6 +37,11 @@ dist\Unreal99.exe --install-shortcut
 
 這會以程序化方式產生多尺寸的 `.ico` 圖示，並在目前使用者的「開始選單」中建立捷徑
 （不需要系統管理員權限）。移除請使用 `--uninstall-shortcut`。
+
+> **注意**：請勿在 MSIX 封裝應用程式（例如從 Microsoft Store 安裝的終端機或編輯器）
+> 的內嵌終端機中執行安裝。封裝應用程式對使用者設定檔的寫入會被重新導向到
+> `%LOCALAPPDATA%\Packages\<套件名稱>\LocalCache\Roaming\...`，捷徑會被寫進該私有覆蓋層，
+> 因此不會出現在真正的開始選單裡。從一般的終端機視窗執行即可正常運作。
 
 ### 命令列參數
 
