@@ -24,6 +24,14 @@ public static partial class Maps
     /// Two identical towers at opposite ends of a narrow strip of rock adrift in orbit, joined
     /// by a split central bridge. Flags sit at each tower's base, snipers own the roofs, and the
     /// long open middle is the whole game.
+    ///
+    /// The towers are solid blocks with three openings punched in the face that looks down the
+    /// map — entrance, a Redeemer alcove partway up, and a pillared sniping gallery above it.
+    /// An earlier version climbed them with internal switchback ramps, which was wrong twice
+    /// over: the original moves you between floors by teleporter (it shipped with lifts and
+    /// swapped them because the bots could not use them), and the floors are separate chambers
+    /// rather than one shaft. The teleporters happen to be what this engine's nav graph needs
+    /// too, since ramps that steep carry no bot routes at all.
     /// </summary>
     private static Level BuildFacingWorlds(GL gl)
     {
@@ -65,7 +73,11 @@ public static partial class Maps
             MatId teamMat = team == Team.Red ? MatId.TeamRed : MatId.TeamBlue;
             float z = TowerZ * sign;
 
-            // --- tower shell: four walls, open toward the middle of the map ---
+            // --- tower shell ---
+            // The tower is a solid block, not a frame: the original's whole geometry budget went
+            // into these two shapes, and what it has are three openings punched in the face that
+            // looks down the map — the entrance at the bottom, a Redeemer alcove partway up, and
+            // a pillared sniping gallery above that. You cannot see through a tower.
             const float Wall = 1.6f;
             float innerFace = z - TowerHalf * sign;    // the face looking down the map
             float outerFace = z + TowerHalf * sign;
@@ -74,18 +86,52 @@ public static partial class Maps
                     new Vector3(-TowerHalf, TowerTop, MathF.Max(innerFace, outerFace)), teamMat, true, 0.55f);
             b.Solid(new Vector3(TowerHalf, DeckY, MathF.Min(innerFace, outerFace)),
                     new Vector3(TowerHalf + Wall, TowerTop, MathF.Max(innerFace, outerFace)), teamMat, true, 0.55f);
-            // Back wall.
             b.Solid(new Vector3(-TowerHalf - Wall, DeckY, MathF.Min(outerFace, outerFace + Wall * sign)),
                     new Vector3(TowerHalf + Wall, TowerTop, MathF.Max(outerFace, outerFace + Wall * sign)),
                     teamMat, true, 0.55f);
-            // Front wall with a wide arch onto the strip.
+
             float f0 = MathF.Min(innerFace, innerFace - Wall * sign);
             float f1 = MathF.Max(innerFace, innerFace - Wall * sign);
-            b.Solid(new Vector3(-TowerHalf - Wall, DeckY, f0), new Vector3(-5.5f, TowerTop, f1), teamMat, true, 0.55f);
-            b.Solid(new Vector3(5.5f, DeckY, f0), new Vector3(TowerHalf + Wall, TowerTop, f1), teamMat, true, 0.55f);
-            b.Solid(new Vector3(-5.5f, 7.5f, f0), new Vector3(5.5f, TowerTop, f1), teamMat, true, 0.55f);
 
-            // --- flag room floor and the dais the flag stands on ---
+            const float EntryTop = 7.5f;
+            const float MidFloor = 15f, MidTop = 21f;
+            const float GalleryFloor = 26f, GalleryTop = 33f;
+
+            // Front face, emitted as horizontal bands so the three openings are simply gaps.
+            void FrontBand(float y0, float y1, float holeHalf)
+            {
+                if (holeHalf <= 0f)
+                {
+                    b.Solid(new Vector3(-TowerHalf - Wall, y0, f0), new Vector3(TowerHalf + Wall, y1, f1),
+                        teamMat, true, 0.55f);
+                    return;
+                }
+                b.Solid(new Vector3(-TowerHalf - Wall, y0, f0), new Vector3(-holeHalf, y1, f1), teamMat, true, 0.55f);
+                b.Solid(new Vector3(holeHalf, y0, f0), new Vector3(TowerHalf + Wall, y1, f1), teamMat, true, 0.55f);
+            }
+            FrontBand(DeckY, EntryTop, 5.5f);
+            FrontBand(EntryTop, MidFloor + 1f, 0f);
+            FrontBand(MidFloor + 1f, MidTop, 6f);
+            FrontBand(MidTop, GalleryFloor + 1f, 0f);
+            FrontBand(GalleryFloor + 1f, GalleryTop, 8.5f);
+            FrontBand(GalleryTop, TowerTop, 0f);
+            // The two pillars that split the gallery into three firing slots.
+            foreach (float px in new[] { -3.0f, 3.0f })
+                b.Solid(new Vector3(px - 0.7f, GalleryFloor + 1f, f0), new Vector3(px + 0.7f, GalleryTop, f1),
+                    teamMat, true, 0.55f);
+
+            // --- interior floors and ceilings ---
+            void Slab(float y0, float y1, MatId mat) => b.Solid(
+                new Vector3(-TowerHalf, y0, MathF.Min(innerFace, outerFace)),
+                new Vector3(TowerHalf, y1, MathF.Max(innerFace, outerFace)), mat, true, 0.8f);
+            Slab(11f, 12f, MatId.TechPanelDark);              // flag room ceiling
+            Slab(MidFloor, MidFloor + 1f, MatId.MetalGrate);   // Redeemer alcove floor
+            Slab(24f, 25f, MatId.TechPanelDark);
+            Slab(GalleryFloor, GalleryFloor + 1f, MatId.MetalGrate);
+            Slab(38f, 39f, MatId.TechPanelDark);
+            Slab(TowerTop - 0.8f, TowerTop, MatId.TechPanelDark);   // roof deck
+
+            // --- flag room ---
             Vector3 flagPos = new(0f, 0.6f, z + 4.5f * sign);
             b.Solid(new Vector3(-6f, DeckY, flagPos.Z - 4.5f), new Vector3(6f, 0.6f, flagPos.Z + 4.5f),
                 MatId.TechPanelDark);
@@ -94,30 +140,33 @@ public static partial class Maps
                    sign > 0 ? 2 : 3, MatId.TechFloor);
             b.AddFlagBase(flagPos, team, sign > 0 ? 180f : 0f);
 
-            // --- ramps spiralling up the inside of the tower ---
-            float[] levels = [8f, 16f, 24f, 32f];
-            for (int i = 0; i < levels.Length; i++)
-            {
-                float y = levels[i];
-                float prev = i == 0 ? DeckY + 0.6f : levels[i - 1];
-                bool onLeft = i % 2 == 0;
-                float rx0 = onLeft ? -TowerHalf : TowerHalf - 7f;
-                float rx1 = onLeft ? -TowerHalf + 7f : TowerHalf;
-
-                // Landing hugging one wall, then a ramp climbing along the opposite wall.
-                b.Solid(new Vector3(rx0, y - 0.5f, z - 9f), new Vector3(rx1, y, z + 9f),
+            // Platform under the entrance ceiling holding the amplifier, as in the original.
+            b.Solid(new Vector3(-4f, 8.2f, MathF.Min(innerFace, innerFace + 5f * sign)),
+                    new Vector3(4f, 8.8f, MathF.Max(innerFace, innerFace + 5f * sign)),
                     MatId.MetalGrate, true, 0.9f);
-                float mx0 = onLeft ? -TowerHalf + 7f : TowerHalf - 14f;
-                float mx1 = onLeft ? -TowerHalf + 14f : TowerHalf - 7f;
-                b.Ramp(new Vector3(mx0, prev - 0.5f, z - 4.5f), new Vector3(mx1, y, z + 4.5f),
-                    onLeft ? 1 : 0, MatId.TechFloor);
+            b.AddJumpPad(new Vector3(0f, DeckY + 0.1f, z - 7.5f * sign),
+                         new Vector3(0f, 10.2f, z - 8f * sign + 5f * sign), new Vector3(0.4f, 0.85f, 1f));
 
-                b.AddLight(new Vector3(0f, y + 3.2f, z), teamColor * 0.55f + new Vector3(0.35f), 15f, 3.2f);
-            }
+            // --- three teleporters out of the flag room, exactly as the original does it ---
+            // Not ramps and not lifts. The original shipped with lifts and swapped them for
+            // teleporters because the bots could not cope; this engine agrees for its own reason,
+            // since only pads, lifts and teleporters create nav links at all.
+            Vector3 midChamber = new(0f, MidFloor + 1.2f, z + 3f * sign);
+            Vector3 gallery = new(0f, GalleryFloor + 1.2f, z + 3f * sign);
+            Vector3 roof = new(0f, TowerTop + 0.2f, z + 4f * sign);
+            float faceIn = sign > 0 ? 180f : 0f;
+
+            b.AddTeleporter(new Vector3(-6f, DeckY + 0.2f, z), midChamber, faceIn, teamColor * 0.6f + new Vector3(0.3f));
+            b.AddTeleporter(new Vector3(6f, DeckY + 0.2f, z), gallery, faceIn, teamColor * 0.6f + new Vector3(0.3f));
+            b.AddTeleporter(new Vector3(0f, DeckY + 0.2f, z + 1f * sign), roof, faceIn, new Vector3(1f, 0.75f, 0.35f));
+            // Return trips. Without a way down the nav graph strands anyone it sends up, and the
+            // drop from the roof to the rock is lethal.
+            Vector3 lobby = new(0f, DeckY + 0.2f, z - 4f * sign);
+            b.AddTeleporter(midChamber + new Vector3(-5f, 0f, 0f), lobby, faceIn, teamColor * 0.5f + new Vector3(0.25f));
+            b.AddTeleporter(gallery + new Vector3(-6.5f, 0f, 0f), lobby, faceIn, teamColor * 0.5f + new Vector3(0.25f));
+            b.AddTeleporter(roof + new Vector3(-7f, 0f, 0f), lobby, faceIn, teamColor * 0.5f + new Vector3(0.25f));
 
             // --- roof: the sniper perch, with battlements you can duck behind ---
-            b.Solid(new Vector3(-TowerHalf, TowerTop - 0.6f, z - TowerHalf),
-                    new Vector3(TowerHalf, TowerTop, z + TowerHalf), MatId.TechPanelDark);
             for (int i = -2; i <= 2; i++)
             {
                 float bx = i * 4.4f;
@@ -126,29 +175,41 @@ public static partial class Maps
                         MatId.Trim, true, 1.1f);
             }
             b.AddLight(new Vector3(0f, TowerTop + 4f, z), teamColor, 26f, 6f);
+            b.AddLight(new Vector3(0f, 6f, z), teamColor * 0.55f + new Vector3(0.35f), 20f, 4.2f);
+            b.AddLight(new Vector3(0f, MidFloor + 4f, z), teamColor * 0.5f + new Vector3(0.3f), 16f, 3.4f);
+            b.AddLight(new Vector3(0f, GalleryFloor + 4f, z), teamColor * 0.5f + new Vector3(0.3f), 16f, 3.4f);
 
-            // The lift is the fast way to the roof; the ramps are the safe way.
-            b.Lift(new Vector3(-2.6f, TowerTop - 8.4f, z + 6.5f * sign - 2.6f),
-                   new Vector3(2.6f, TowerTop - 8.0f, z + 6.5f * sign + 2.6f),
-                   new Vector3(0f, 8.0f, 0f), MatId.TechPanelDark, period: 7f, dwell: 0.25f);
-
-            // --- loadout ---
-            b.Weapon(new Vector3(0f, TowerTop + 0.9f, z + 3f * sign), WeaponKind.SniperRifle);
-            b.Ammo(new Vector3(3.5f, TowerTop + 0.7f, z + 3f * sign), AmmoKind.SniperRounds);
-            b.Ammo(new Vector3(-3.5f, TowerTop + 0.7f, z + 3f * sign), AmmoKind.SniperRounds);
-            b.Weapon(new Vector3(-7.5f, 8.9f, z), WeaponKind.RocketLauncher);
-            b.Weapon(new Vector3(7.5f, 16.9f, z), WeaponKind.FlakCannon);
-            b.Weapon(new Vector3(-7.5f, 24.9f, z), WeaponKind.Minigun);
+            // --- loadout, matching the original's per-base inventory ---
+            // Per base: Redeemer x1, Sniper Rifle x3, Ripper x1, Shock Rifle x1, Rocket Launcher
+            // x1, Health Pack x4, Body Armor x1, Damage Amplifier x1, plus shock cores, rocket
+            // packs and rifle rounds. Everything the map gives you is inside your own tower.
             b.Weapon(new Vector3(0f, 0.9f, z - 6f * sign), WeaponKind.ShockRifle);
-            b.Item(new Vector3(-4f, 1.4f, flagPos.Z), PickupKind.BodyArmor);
-            b.Item(new Vector3(4f, 1.4f, flagPos.Z), PickupKind.HealthPack);
-            b.Ammo(new Vector3(-7.5f, 8.7f, z - 3f), AmmoKind.Rockets);
-            b.Ammo(new Vector3(7.5f, 16.7f, z - 3f), AmmoKind.FlakShells);
+            b.Weapon(new Vector3(-4f, 1.4f, flagPos.Z), WeaponKind.RocketLauncher);
+            b.Weapon(new Vector3(4f, 1.4f, flagPos.Z), WeaponKind.Ripper);
+            foreach (float hx in new[] { -8f, -3f, 3f, 8f })
+                b.Item(new Vector3(hx, 0.7f, z - 8.5f * sign), PickupKind.HealthPack);
+            b.Ammo(new Vector3(-7f, 0.7f, z - 2f * sign), AmmoKind.Rockets);
+            b.Ammo(new Vector3(-9f, 0.7f, z - 2f * sign), AmmoKind.Rockets);
+            b.Ammo(new Vector3(7f, 0.7f, z - 2f * sign), AmmoKind.ShockCore);
+            b.Ammo(new Vector3(9f, 0.7f, z - 2f * sign), AmmoKind.ShockCore);
+            b.Ammo(new Vector3(-6f, 0.7f, z + 1f * sign), AmmoKind.SniperRounds);
+            b.Ammo(new Vector3(6f, 0.7f, z + 1f * sign), AmmoKind.SniperRounds);
+            b.Item(new Vector3(0f, 9.7f, z - 8.5f * sign), PickupKind.DamageAmp);
+            b.Ammo(new Vector3(2.5f, 9.5f, z - 8.5f * sign), AmmoKind.Rockets);
+            b.Ammo(new Vector3(-2.5f, 9.5f, z - 8.5f * sign), AmmoKind.Rockets);
+
+            b.Weapon(midChamber + new Vector3(3f, 0.7f, 0f), WeaponKind.Redeemer, respawn: 95f);
+            // Two of the gallery's three firing slots hold a rifle; the third is the free spot.
+            b.Weapon(gallery + new Vector3(-6f, 0.7f, 0f), WeaponKind.SniperRifle);
+            b.Weapon(gallery + new Vector3(6f, 0.7f, 0f), WeaponKind.SniperRifle);
+            b.Ammo(gallery + new Vector3(0f, 0.5f, 2.5f * sign), AmmoKind.SniperRounds);
+            b.Weapon(roof + new Vector3(0f, 0.7f, 0f), WeaponKind.SniperRifle);
+            b.Ammo(roof + new Vector3(3.5f, 0.5f, 0f), AmmoKind.SniperRounds);
+            b.Item(roof + new Vector3(-3.5f, 0.6f, 0f), PickupKind.BodyArmor);
 
             // Clear of the flag dais, which occupies the back of the tower floor.
             for (int i = 0; i < 5; i++)
-                b.Spawn(new Vector3(-8f + i * 4f, DeckY + 0.2f, z - 2f * sign), sign > 0 ? 180f : 0f, team);
-            b.Spawn(new Vector3(0f, TowerTop + 0.2f, z + 7f * sign), sign > 0 ? 180f : 0f, team);
+                b.Spawn(new Vector3(-8f + i * 4f, DeckY + 0.2f, z - 2f * sign), faceIn, team);
         }
 
         // --- the central bridge: two lanes with a gap down the middle ---
@@ -175,20 +236,12 @@ public static partial class Maps
             b.AddJumpPad(new Vector3(i * 16f, 0.1f, 0f), new Vector3(i * 7.5f, BridgeY + 1.6f, 0f),
                 new Vector3(0.35f, 0.8f, 1f));
         }
-        b.Weapon(new Vector3(0f, BridgeY + 0.9f, 0f), WeaponKind.Redeemer, 110f);
-        b.Item(new Vector3(-6.5f, BridgeY + 0.8f, 0f), PickupKind.ShieldBelt);
-        b.Item(new Vector3(6.5f, BridgeY + 0.8f, 0f), PickupKind.DamageAmp);
-        b.Item(new Vector3(0f, 0.7f, -30f), PickupKind.SuperHealth);
-        b.Item(new Vector3(0f, 0.7f, 30f), PickupKind.SuperHealth);
-        for (int i = 0; i < 6; i++)
-        {
-            float z = -50f + i * 20f;
-            b.Item(new Vector3(-13f, 0.6f, z), PickupKind.HealthVial);
-            b.Item(new Vector3(13f, 0.6f, z), PickupKind.HealthVial);
-        }
-        b.Weapon(new Vector3(-13f, 0.9f, 0f), WeaponKind.PulseGun);
-        b.Weapon(new Vector3(13f, 0.9f, 0f), WeaponKind.BioRifle);
-        b.Spawn(new Vector3(0f, BridgeY + 0.2f, 0f), 0f);
+        // The middle holds exactly one thing: the big keg at the centre of the asteroid. No
+        // weapons, no armour, no vials. Crossing it with nothing to pick up on the way, under
+        // fire from two towers, is the entire map — an earlier pass had a Redeemer, a shield
+        // belt and four guns strewn along the bridge, which quietly turned the crossing into
+        // the safest place to shop.
+        b.Item(new Vector3(0f, 0.7f, 0f), PickupKind.SuperHealth);
 
         return b.Build(gl);
     }

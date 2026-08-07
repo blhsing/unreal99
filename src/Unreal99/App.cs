@@ -217,36 +217,44 @@ public sealed class App : IDisposable
                     break;
                 case "--players" when i + 1 < args.Length:
                     _menu.LocalPlayers = MathX.Clamp(int.TryParse(args[i + 1], out int p) ? p : 1, 1, 4);
+                    _cliOverrides.Add("players");
                     i++;
                     break;
                 case "--bots" when i + 1 < args.Length:
                     _menu.BotCount = MathX.Clamp(int.TryParse(args[i + 1], out int b) ? b : 7, 0, 15);
+                    _cliOverrides.Add("bots");
                     i++;
                     break;
                 case "--map" when i + 1 < args.Length:
                     if (int.TryParse(args[i + 1], out int m)) _menu.Map = (MapId)MathX.Clamp(m, 0, (int)MapId.Count - 1);
+                    _cliOverrides.Add("map");
                     i++;
                     break;
                 case "--mode" when i + 1 < args.Length:
                     if (int.TryParse(args[i + 1], out int gm))
                         _menu.ModeKind = (GameModeKind)MathX.Clamp(gm, 0, 4);
+                    _cliOverrides.Add("mode");
                     i++;
                     break;
                 case "--frags" when i + 1 < args.Length:
                     if (int.TryParse(args[i + 1], out int fl)) _menu.FragLimit = MathX.Clamp(fl, 0, 100);
+                    _cliOverrides.Add("frags");
                     i++;
                     break;
                 case "--time" when i + 1 < args.Length:
                     if (int.TryParse(args[i + 1], out int tl)) _menu.TimeLimitMinutes = MathX.Clamp(tl, 0, 60);
+                    _cliOverrides.Add("time");
                     i++;
                     break;
                 case "--skill" when i + 1 < args.Length:
                     if (int.TryParse(args[i + 1], out int sk))
                         _menu.BotSkill = MathX.Clamp(sk, 0, Loc.SkillNames.Length - 1);
+                    _cliOverrides.Add("skill");
                     i++;
                     break;
                 case "--quality" when i + 1 < args.Length:
                     if (int.TryParse(args[i + 1], out int q)) _renderSettings.Apply((QualityLevel)MathX.Clamp(q, 0, 3));
+                    _cliOverrides.Add("quality");
                     i++;
                     break;
             }
@@ -363,6 +371,12 @@ public sealed class App : IDisposable
         TimeLimitMinutes = _menu.TimeLimitMinutes,
     };
 
+    /// <summary>
+    /// Options named on the command line. Saved settings are applied after argument parsing, so
+    /// without this the stored value would quietly win and every flag would be ignored.
+    /// </summary>
+    private readonly HashSet<string> _cliOverrides = new();
+
     private void LoadUserSettings()
     {
         var saved = SettingsStore.Load();
@@ -372,15 +386,16 @@ public sealed class App : IDisposable
         SettingsStore.Apply(saved, _renderSettings, _controls, _playerDevices, setup,
             out float volume, out bool vsync, out bool showFps);
 
-        _menu.Map = (MapId)MathX.Clamp(setup.Map, 0, (int)MapId.Count - 1);
-        _menu.ModeKind = (GameModeKind)setup.ModeKind;
-        _menu.LocalPlayers = setup.LocalPlayers;
-        _menu.BotCount = setup.BotCount;
-        _menu.BotSkill = setup.BotSkill;
-        _menu.FragLimit = setup.FragLimit;
-        _menu.CaptureLimit = setup.CaptureLimit;
-        _menu.TimeLimitMinutes = setup.TimeLimitMinutes;
-        _menu.DemoMode = saved.DemoMode;
+        if (!_cliOverrides.Contains("map")) _menu.Map = (MapId)MathX.Clamp(setup.Map, 0, (int)MapId.Count - 1);
+        if (!_cliOverrides.Contains("mode")) _menu.ModeKind = (GameModeKind)setup.ModeKind;
+        if (!_cliOverrides.Contains("players")) _menu.LocalPlayers = setup.LocalPlayers;
+        if (!_cliOverrides.Contains("bots")) _menu.BotCount = setup.BotCount;
+        if (!_cliOverrides.Contains("skill")) _menu.BotSkill = setup.BotSkill;
+        if (!_cliOverrides.Contains("frags")) _menu.FragLimit = setup.FragLimit;
+        if (!_cliOverrides.Contains("frags")) _menu.CaptureLimit = setup.CaptureLimit;
+        if (!_cliOverrides.Contains("time")) _menu.TimeLimitMinutes = setup.TimeLimitMinutes;
+        if (!_cliOverrides.Contains("quality")) _renderSettings.Apply((QualityLevel)MathX.Clamp(saved.Quality, 0, 3));
+        _menu.DemoMode = saved.DemoMode || _demoMode;
         _menu.DemoSkill = MathX.Clamp(saved.DemoSkill, 0, 5);
 
         if (_audio != null) _audio.MasterVolume = volume;

@@ -23,7 +23,7 @@ $authored = @{
     10 = '19 38 45 14'      # Liandri      — high in the shaft, looking down the glowing core
     11 = '78 64 90 42'      # Morpheus     — far enough out to hold all three rooftops
     12 = '40 24 30 6'       # HyperBlast   — along the ship's spine
-    15 = '132 52 236 16'    # Facing Worlds— near tower left, bridge running out to the far one
+    15 = '46 24 90 18'      # Facing Worlds— down the split bridge at a tower's three openings
     16 = '58 36 45 4'       # Lava Giant   — above the island, both forts in frame
 }
 

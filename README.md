@@ -136,7 +136,7 @@ artifacts\installer\Unreal99Installer.exe --help
 | 12 | DM-超載星艦 | *HyperBlast* | 對稱星艦內艙，上層天橋貫穿全船 |
 | 13 | CTF-科瑞特設施 | *Coret Facility* | 上下兩條路線從基地直通中央大廳 |
 | 14 | CTF-十一月號 | *November* | 潛艦碼頭，中央水道的潛艦艦身是最高的爭奪點 |
-| 15 | CTF-對峙世界 | *Facing Worlds* | 兩座小行星塔樓、螺旋坡道，中央狹橋上放著救世主 |
+| 15 | CTF-對峙世界 | *Facing Worlds* | 兩座塔樓各開三個面向場中的洞口，傳送器連接各層，中央一無所有 |
 | 16 | CTF-熔岩巨人 | *Lava Giant* | 熔岩海中的紅藍雙堡，中央山脊是必爭之地 |
 
 低重力關卡由 `Level.GravityScale` 控制；角色重力、投射物重力、跳台的彈道解算與電腦對手的
