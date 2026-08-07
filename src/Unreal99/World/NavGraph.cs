@@ -130,6 +130,7 @@ public sealed class NavGraph
         var edges = new List<NavEdge>(Nodes.Length * 6);
         float linkRadius = spacing * 1.55f;
         float maxStep = world.StepHeight + 0.05f;
+        const float maxSafeDrop = 2.4f;
         Vector3 half = new(pawnRadius, pawnHeight * 0.5f, pawnRadius);
         var scratch = new List<int>(32);
         var neighbours = new List<int>(16);
@@ -149,7 +150,11 @@ public sealed class NavGraph
                 float horizontal = flat.Length();
                 if (horizontal > linkRadius || horizontal < 1e-3f) continue;
                 float dy = b.Y - a.Y;
-                if (MathF.Abs(dy) > maxStep) continue;
+                // Walking upward is limited to a normal step. Downward edges may take a safe,
+                // one-way drop; without these, a 1.4 m flag dais becomes a navigation island
+                // even though players can simply step off it.
+                if (dy > maxStep || dy < -maxSafeDrop) continue;
+                bool dropping = dy < -maxStep;
 
                 // Sample the span at torso height to make sure a pawn can actually pass.
                 bool clear = true;
@@ -158,6 +163,9 @@ public sealed class NavGraph
                 {
                     float t = s / (float)samples;
                     Vector3 p = Vector3.Lerp(a, b, t);
+                    // During a drop the pawn's torso crosses above the ledge before descending;
+                    // interpolating straight through the ledge would reject every valid edge.
+                    if (dropping) p.Y = a.Y;
                     Vector3 c = new(p.X, p.Y + pawnHeight * 0.5f + 0.05f, p.Z);
                     if (world.BoxOverlapsSolid(c - half, c + half, scratch)) { clear = false; break; }
                 }
@@ -351,6 +359,55 @@ public sealed class NavGraph
             }
         }
         return false;
+    }
+
+    /// <summary>
+    /// Paths to <paramref name="goal"/>, or—when that node belongs to a disconnected navigation
+    /// island—to the reachable node closest to it. Objective-driven bots must keep advancing
+    /// instead of standing still merely because a flag dais sampled onto the wrong nav island.
+    /// </summary>
+    public bool FindPathToward(int start, int goal, List<int> outPath, int maxExpansions = 4000)
+    {
+        if (FindPath(start, goal, outPath, maxExpansions)) return true;
+        outPath.Clear();
+        if (start < 0 || goal < 0 || start >= Nodes.Length || goal >= Nodes.Length) return false;
+        if (_gScore.Length != Nodes.Length) AllocateSearchBuffers();
+
+        _searchStamp++;
+        int read = 0, write = 0;
+        _openHeap[write++] = start;
+        Touch(start);
+        _cameFrom[start] = -1;
+
+        int closest = start;
+        float closestDistance = Vector3.DistanceSquared(Nodes[start].Position, Nodes[goal].Position);
+        int expansions = 0;
+        while (read < write && expansions++ < maxExpansions)
+        {
+            int current = _openHeap[read++];
+            var node = Nodes[current];
+            for (int e = 0; e < node.EdgeCount; e++)
+            {
+                int next = Edges[node.FirstEdge + e].To;
+                if (_stamp[next] == _searchStamp) continue;
+                Touch(next);
+                _cameFrom[next] = current;
+                _openHeap[write++] = next;
+
+                float distance = Vector3.DistanceSquared(Nodes[next].Position, Nodes[goal].Position);
+                if (distance < closestDistance)
+                {
+                    closestDistance = distance;
+                    closest = next;
+                }
+            }
+        }
+
+        if (closest == start) return false;
+        for (int node = closest; node != -1 && node != start; node = _cameFrom[node])
+            outPath.Add(node);
+        outPath.Reverse();
+        return outPath.Count > 0;
     }
 
     private void Touch(int i)

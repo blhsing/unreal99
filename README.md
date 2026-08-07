@@ -29,7 +29,8 @@ dotnet run --project src/Unreal99/Unreal99.csproj -c Release
 ```
 
 然後開啟 `artifacts\installer\Unreal99Installer.exe`。安裝程式可選擇其他安裝位置、建立目前使用者的
-開始選單捷徑、更新現有安裝，並可安全移除由它加入的檔案；全程不需要系統管理員權限。
+開始選單捷徑、更新現有安裝，並可安全移除由它加入的檔案；全程不需要系統管理員權限。安裝程式
+與遊戲皆使用 Windows GUI 子系統，從開始選單或檔案總管開啟時不會附帶終端視窗。
 
 ### 命令列安裝
 
@@ -60,7 +61,7 @@ artifacts\installer\Unreal99Installer.exe --help
 | `--players N` | 同機玩家人數，1～4 |
 | `--bots N` | 電腦對手數量，0～15 |
 | `--skill N` | 電腦難度，0（新手）～5（神級） |
-| `--map N` | 競技場編號 0～14，見下方〈競技場〉 |
+| `--map N` | 競技場編號 0～16，見下方〈競技場〉 |
 | `--mode N` | 0 死亡競賽、1 團隊死亡競賽、2 奪旗大戰、3 最後生還者、4 瞬殺模式 |
 | `--frags N` / `--time N` | 擊殺上限／時間上限（分鐘） |
 | `--quality N` | 0 低、1 中、2 高、3 史詩 |
@@ -71,6 +72,7 @@ artifacts\installer\Unreal99Installer.exe --help
 | `--menutest X Y` / `--menuclick` | 將系統游標移到指定座標並可注入點擊，用於自動驗證選單滑鼠操作 |
 | `--flyby` | 讓玩家一的鏡頭在場中環繞巡航，用於檢視競技場全貌 |
 | `--nohud` | 隱藏介面與第一人稱槍枝，用於擷取文件用畫面 |
+| `--weaponshot N` | 強制裝備第 N 把武器，只隱藏 HUD 而保留第一人稱武器，用於擷取武器指南 |
 | `--loadslot N` | 直接從第 N 個存檔位接續對戰 |
 | `--savetest` | 存檔與設定的往返自我測試（寫入、讀回、還原到實際世界並比對） |
 | `--flycam 半徑 高度 角度 注視高度` | 手動指定巡航鏡頭的取景，用於為個別競技場擷取滿意的角度 |
@@ -153,7 +155,45 @@ artifacts\installer\Unreal99Installer.exe --help
 約 1:3 的坡道，電腦對手都無法沿著它上樓——每一處高低落差都必須另外配上跳台、升降梯或傳送門，
 否則整層樓對電腦而言等於不存在。
 
-競技場圖庫中的每張卡片都有專屬的預覽插圖與介紹，滑鼠移過即可查看。
+競技場圖庫中的每張卡片直接使用上方 README 的實機截圖，並附有專屬介紹；滑鼠移過或以鍵盤反白
+即可查看。
+
+---
+
+## 武器指南
+
+以下圖片不是概念圖或重繪插畫，而是遊戲以 `--weaponshot` 從 OpenGL 畫面緩衝直接擷取的
+**實際第一人稱武器模型**。主要射擊使用滑鼠左鍵，次要射擊使用滑鼠右鍵。
+
+<table>
+<tr>
+<td width="50%"><img src="docs/weapons/impact-hammer.jpg" width="100%"><br><b>1 · 衝擊錘</b><br><sub>主要：按住蓄力後近身重擊。<br>次要：快速揮擊。<br>無需彈藥；適合貼身反擊與最後手段。</sub></td>
+<td width="50%"><img src="docs/weapons/enforcer.jpg" width="100%"><br><b>2 · 執法者手槍</b><br><sub>主要：穩定的單發即時命中。<br>次要：射速更快，但散佈更大。<br>中近距離可靠的出生武器。</sub></td>
+</tr>
+<tr>
+<td><img src="docs/weapons/bio-rifle.jpg" width="100%"><br><b>3 · 生化步槍</b><br><sub>主要：連射會濺射的生化凝膠。<br>次要：按住蓄積大型高傷害凝膠。<br>用於封鎖門口、轉角與狹窄通道。</sub></td>
+<td><img src="docs/weapons/shock-rifle.jpg" width="100%"><br><b>4 · 震盪步槍</b><br><sub>主要：精準的遠距能量光束。<br>次要：發射較慢的震盪球。<br>用主要光束擊中自己的震盪球可引發震盪連鎖。</sub></td>
+</tr>
+<tr>
+<td><img src="docs/weapons/pulse-gun.jpg" width="100%"><br><b>5 · 脈衝步槍</b><br><sub>主要：高速連射電漿彈。<br>次要：近距離持續能量束。<br>追蹤走位中的敵人時尤其有效。</sub></td>
+<td><img src="docs/weapons/ripper.jpg" width="100%"><br><b>6 · 撕裂者</b><br><sub>主要：發射可在牆面反彈的刀刃。<br>次要：發射具有爆炸範圍的刀刃。<br>可利用轉角與反彈路線打擊掩體後方。</sub></td>
+</tr>
+<tr>
+<td><img src="docs/weapons/minigun.jpg" width="100%"><br><b>7 · 速射機槍</b><br><sub>主要：較精準的高速連射。<br>次要：極高射速、較大散佈。<br>持續壓制中近距離目標。</sub></td>
+<td><img src="docs/weapons/flak-cannon.jpg" width="100%"><br><b>8 · 破片加農砲</b><br><sub>主要：一次散射九枚高速破片。<br>次要：拋射會爆炸的破片砲彈。<br>近距離正面命中具有極強爆發力。</sub></td>
+</tr>
+<tr>
+<td><img src="docs/weapons/rocket-launcher.jpg" width="100%"><br><b>9 · 火箭發射器</b><br><sub>主要：直線飛行的高傷害火箭。<br>次要：受重力影響、可越過障礙的榴彈。<br>瞄準敵人腳下，以爆炸範圍封鎖退路。</sub></td>
+<td><img src="docs/weapons/sniper-rifle.jpg" width="100%"><br><b>狙擊步槍</b><br><sub>主要：高傷害、零散佈的遠距射擊。<br>次要：啟用放大瞄準。<br>制高點與跨場通道上的首選。</sub></td>
+</tr>
+<tr>
+<td><img src="docs/weapons/redeemer.jpg" width="100%"><br><b>0 · 救世主核彈</b><br><sub>主要：發射大範圍核彈頭。<br>次要：速度較慢，但爆炸半徑與傷害更高。<br>極稀有；發射前先確認自己有安全距離。</sub></td>
+<td><br><b>切換提示</b><br><sub>數字鍵 1～9 選擇衝擊錘至火箭發射器，0 選擇救世主；Q／E 或滑鼠滾輪循環切換。狙擊步槍可用循環切換或自行綁定快捷鍵。</sub></td>
+</tr>
+</table>
+
+圖庫可由 [`docs/capture-weapons.ps1`](docs/capture-weapons.ps1) 重新擷取，確保文件展示的永遠是
+目前引擎實際繪製的模型。
 
 ---
 

@@ -827,9 +827,10 @@ public static partial class Maps
             b.Weapon(new Vector3(0f, Upper + 0.9f, sz * 20f), WeaponKind.SniperRifle);
             b.Ammo(new Vector3(0f, Upper + 0.7f, sz * 24f), AmmoKind.SniperRounds);
 
-            // Pad from the flag room onto the high route, for a fast exit. A lift here would
-            // top out past the end of the catwalk and drop you into the gap.
-            b.AddJumpPad(new Vector3(0f, 0.1f, sz * 37f), new Vector3(0f, Upper + 1.6f, sz * 28f),
+            // Pad from the flag room onto the high route, for a fast exit. Keep it behind the
+            // flag dais on exposed floor: the old ±37 position was buried halfway up the ramp,
+            // so bots followed its nav link into solid geometry and stalled there indefinitely.
+            b.AddJumpPad(new Vector3(0f, 0.1f, sz * (EndZ - 3f)), new Vector3(0f, Upper + 1.6f, sz * 28f),
                 new Vector3(0.4f, 0.85f, 1f));
 
             for (int i = 0; i < 4; i++)

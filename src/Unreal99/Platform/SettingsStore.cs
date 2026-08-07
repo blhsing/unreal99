@@ -11,7 +11,7 @@ namespace Unreal99.Platform;
 /// </summary>
 public sealed class UserSettings
 {
-    public int Version = 1;
+    public int Version = 2;
 
     // --- video ---
     public int Quality = (int)QualityLevel.High;
@@ -53,6 +53,8 @@ public sealed class UserSettings
 
 public sealed class PlayerProfileData
 {
+    public string DisplayName = "";
+
     /// <summary>
     /// Devices are remembered by name, not by Raw Input handle. Handles are reassigned on every
     /// boot and even on replug, so persisting one would pair a player to whatever happened to
@@ -76,7 +78,8 @@ public static class SettingsStore
     public static bool Save(UserSettings settings) => UserData.WriteJson(UserData.SettingsPath, settings);
 
     public static UserSettings Capture(RenderSettings render, ControlSettings controls, float masterVolume,
-        bool vsync, bool showFps, PlayerDevice[] devices, MatchSetup setup)
+        bool vsync, bool showFps, PlayerDevice[] devices, IReadOnlyList<string> playerNames,
+        MatchSetup setup)
     {
         var s = new UserSettings
         {
@@ -106,10 +109,12 @@ public static class SettingsStore
             TimeLimitMinutes = setup.TimeLimitMinutes,
         };
 
-        foreach (var d in devices)
+        for (int i = 0; i < devices.Length; i++)
         {
+            var d = devices[i];
             var p = new PlayerProfileData
             {
+                DisplayName = i < playerNames.Count ? playerNames[i] ?? "" : "",
                 MouseName = d.MouseName ?? "",
                 KeyboardName = d.KeyboardName ?? "",
                 MouseAssignedManually = d.MouseAssignedManually,
@@ -126,7 +131,8 @@ public static class SettingsStore
     }
 
     public static void Apply(UserSettings s, RenderSettings render, ControlSettings controls,
-        PlayerDevice[] devices, MatchSetup setup, out float masterVolume, out bool vsync, out bool showFps)
+        PlayerDevice[] devices, string[] playerNames, MatchSetup setup,
+        out float masterVolume, out bool vsync, out bool showFps)
     {
         // Apply() first so the quality preset does not stamp over the individual toggles below.
         render.Apply((QualityLevel)Math.Clamp(s.Quality, 0, 3));
@@ -157,10 +163,20 @@ public static class SettingsStore
         setup.CaptureLimit = Math.Clamp(s.CaptureLimit, 0, 20);
         setup.TimeLimitMinutes = Math.Clamp(s.TimeLimitMinutes, 0, 60);
 
+        for (int i = 0; i < playerNames.Length; i++)
+            playerNames[i] = i < Unreal99.UI.Loc.PlayerDefaultNames.Length
+                ? Unreal99.UI.Loc.PlayerDefaultNames[i]
+                : $"玩家 {i + 1}";
+
         for (int i = 0; i < devices.Length && i < s.Players.Count; i++)
         {
             var p = s.Players[i];
             var d = devices[i];
+            if (i < playerNames.Length && !string.IsNullOrWhiteSpace(p.DisplayName))
+            {
+                string displayName = p.DisplayName.Trim();
+                playerNames[i] = displayName.Length <= 18 ? displayName : displayName[..18];
+            }
             d.MouseName = p.MouseName ?? "";
             d.KeyboardName = p.KeyboardName ?? "";
             d.MouseAssignedManually = p.MouseAssignedManually;

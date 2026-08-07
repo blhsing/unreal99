@@ -29,6 +29,7 @@ public sealed class App : IDisposable
     private FontSystem _fonts;
     private UiRenderer _ui;
     private Texture2D _logoTexture;
+    private readonly Texture2D[] _mapThumbnails = new Texture2D[(int)MapId.Count];
     private Renderer _renderer;
     private AudioSystem _audio;
     private readonly Hud _hud = new();
@@ -66,12 +67,17 @@ public sealed class App : IDisposable
 
     private int _autoShotFrames = -1;
     private string _autoShotPath;
+    private readonly Dictionary<int, Vector3> _autoShotLastPositions = new();
+    private readonly Dictionary<int, float> _autoShotTravelDistances = new();
+    private readonly Dictionary<int, float> _autoShotStallTimes = new();
+    private readonly Dictionary<int, float> _autoShotLongestStalls = new();
     private bool _autoStartMatch;
     private int _loadSlotAtBoot = -1;
     private bool _demoMode;
     private bool _windowed;
     private bool _flyby;
     private bool _noHud;
+    private int _weaponGuideCapture = -1;
     private bool _flyManual;
     private float _flyRadius, _flyHeight, _flyAngleDeg, _flyLookY;
     private MenuScreen _bootMenuScreen = MenuScreen.Main;
@@ -166,6 +172,16 @@ public sealed class App : IDisposable
                 case "--nohud":
                     // Hides the HUD and the first-person weapon, for documentation captures.
                     _noHud = true;
+                    break;
+                case "--weaponshot" when i + 1 < args.Length:
+                    // Documentation capture: keep the real first-person weapon, hide only the
+                    // HUD, and force the requested weapon into the local player's hands.
+                    _weaponGuideCapture = MathX.Clamp(
+                        int.TryParse(args[i + 1], out int weapon) ? weapon : 0,
+                        0, (int)WeaponKind.Count - 1);
+                    _autoStartMatch = true;
+                    _windowed = true;
+                    i++;
                     break;
                 case "--flycam" when i + 4 < args.Length:
                     // Explicit fly-by framing: radius, camera height, orbit angle, look-at height.
@@ -291,10 +307,12 @@ public sealed class App : IDisposable
         LoadFonts();
         _ui = new UiRenderer(_gl, _fonts);
         _logoTexture = LoadLogoTexture();
+        LoadMapThumbnails();
 
         _menu.FaceRegular = _hud.FaceRegular;
         _menu.FaceBold = _hud.FaceBold;
         _menu.LogoTexture = _logoTexture;
+        _menu.MapThumbnail = MapThumbnail;
         _menu.Render = _renderSettings;
         _menu.Controls = _controls;
         _menu.OnStartMatch = BeginMatch;
@@ -383,7 +401,7 @@ public sealed class App : IDisposable
         if (saved == null) return;
 
         var setup = new MatchSetup();
-        SettingsStore.Apply(saved, _renderSettings, _controls, _playerDevices, setup,
+        SettingsStore.Apply(saved, _renderSettings, _controls, _playerDevices, _menu.PlayerNames, setup,
             out float volume, out bool vsync, out bool showFps);
 
         if (!_cliOverrides.Contains("map")) _menu.Map = (MapId)MathX.Clamp(setup.Map, 0, (int)MapId.Count - 1);
@@ -424,7 +442,7 @@ public sealed class App : IDisposable
         _settingsDirty = false;
         _settingsSaveTimer = 0f;
         var s = SettingsStore.Capture(_renderSettings, _controls, _audio?.MasterVolume ?? 0.75f,
-            _window?.VSync ?? true, _showDebug, _playerDevices, CaptureSetup());
+            _window?.VSync ?? true, _showDebug, _playerDevices, _menu.PlayerNames, CaptureSetup());
         s.DemoMode = _menu.DemoMode;
         s.DemoSkill = _menu.DemoSkill;
         SettingsStore.Save(s);
@@ -471,6 +489,41 @@ public sealed class App : IDisposable
             Console.WriteLine($"標誌載入失敗，使用文字標題: {ex.Message}");
             return null;
         }
+    }
+
+    /// <summary>Loads the exact arena captures used by the README, linked into Assets at build time.</summary>
+    private void LoadMapThumbnails()
+    {
+        string directory = Path.Combine(AppContext.BaseDirectory, "Assets", "Arenas");
+        string[] files =
+        [
+            "00-morbias.jpg", "01-stalwart.jpg", "02-curse.jpg", "03-grinder.jpg",
+            "04-codex.jpg", "05-gothic.jpg", "06-deck16.jpg", "07-turbine.jpg",
+            "08-phobos.jpg", "09-peak.jpg", "10-liandri.jpg", "11-morpheus.jpg",
+            "12-hyperblast.jpg", "13-coret.jpg", "14-november.jpg",
+            "15-facingworlds.jpg", "16-lavagiant.jpg",
+        ];
+
+        for (int i = 0; i < files.Length && i < _mapThumbnails.Length; i++)
+        {
+            try
+            {
+                using var stream = File.OpenRead(Path.Combine(directory, files[i]));
+                ImageResult image = ImageResult.FromStream(stream, ColorComponents.RedGreenBlueAlpha);
+                _mapThumbnails[i] = Texture2D.FromRgba(_gl, image.Width, image.Height, image.Data,
+                    mipmaps: true, srgb: true, anisotropy: 4);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"競技場預覽載入失敗（{files[i]}）: {ex.Message}");
+            }
+        }
+    }
+
+    private Texture2D MapThumbnail(MapId map)
+    {
+        int index = (int)map;
+        return index >= 0 && index < _mapThumbnails.Length ? _mapThumbnails[index] : null;
     }
 
     // ---------------------------------------------------------------- saved games
@@ -627,7 +680,7 @@ public sealed class App : IDisposable
         var controller = new PlayerController(_input, slot, _playerDevices[slot], settings);
         if (_demoMode || _menu.DemoMode)
             controller.AutoPilot = new BotController((uint)(101 + slot * 977),
-                Loc.PlayerDefaultNames[slot], DemoSkillValue());
+                _menu.PlayerNames[slot], DemoSkillValue());
         return controller;
     }
 
@@ -944,6 +997,7 @@ public sealed class App : IDisposable
         if (_inputTest) UpdateInputSelfTest();
         if (_saveTest) UpdateSaveSelfTest();
         if (_menuTestPoint.HasValue) UpdateMenuPointerTest();
+        UpdateAutoShotMovement(dt);
         UpdateSettingsPersistence(dt);
         // The save's preview must come from a frame the world drew on its own; taking it here,
         // after the scene and before any menu overlay of the next frame, gets exactly that.
@@ -1129,7 +1183,17 @@ public sealed class App : IDisposable
             if (stick.X > 0.5f) right = true;
         }
 
-        _menu.HandleInput(up, down, left, right, accept, back, dt);
+        if (_menu.EditingPlayerName)
+        {
+            // Animate/rebuild without allowing Enter or Escape to hit the row underneath after
+            // the modal closes on the same frame.
+            _menu.HandleInput(false, false, false, false, false, false, dt);
+            _menu.HandlePlayerNameInput(_input.TypedCharacters, _input.KeyPressed(Key.Backspace), accept, back);
+        }
+        else
+        {
+            _menu.HandleInput(up, down, left, right, accept, back, dt);
+        }
         if (_state != AppState.Menu) return;   // a menu action may have started a match
         FeedMenuMouse();
         if (_state != AppState.Menu) return;
@@ -1276,10 +1340,18 @@ public sealed class App : IDisposable
             // their own skill so the autopilot need not play at the opponents' difficulty.
             if (_demoMode || _menu.DemoMode)
                 controller.AutoPilot = new BotController((uint)(101 + i * 977),
-                    Loc.PlayerDefaultNames[i], DemoSkillValue());
+                    _menu.PlayerNames[i], DemoSkillValue());
             Team team = mode.TeamBased ? (Team)(i % 2) : Team.None;
-            var pawn = _world.AddPawn(controller, Loc.PlayerDefaultNames[i], team, false, i,
+            var pawn = _world.AddPawn(controller, _menu.PlayerNames[i], team, false, i,
                 GameTypes.PlayerColor(i));
+            if (i == 0 && _weaponGuideCapture >= 0)
+            {
+                WeaponKind weapon = (WeaponKind)_weaponGuideCapture;
+                pawn.GiveWeapon(weapon, autoSwitch: false);
+                pawn.Weapon = weapon;
+                pawn.PendingWeapon = WeaponKind.Count;
+                pawn.SwitchTimer = 0f;
+            }
             _players.Add(controller);
             _viewPawnIds.Add(pawn.Id);
         }
@@ -1487,7 +1559,7 @@ public sealed class App : IDisposable
         }
 
         // --- HUD per view ---
-        for (int i = 0; i < viewCount && !_noHud; i++)
+        for (int i = 0; i < viewCount && !_noHud && _weaponGuideCapture < 0; i++)
         {
             var rect = viewports[Math.Min(i, viewports.Length - 1)];
             _gl.Viewport(rect.X, rect.Y, (uint)rect.Width, (uint)rect.Height);
@@ -1894,6 +1966,43 @@ public sealed class App : IDisposable
 
     // ---------------------------------------------------------------- screenshots
 
+    /// <summary>
+    /// Measures the whole automated run rather than trusting velocity on its final frame. The
+    /// countdown is excluded; a real route stall appears as a long consecutive stationary span.
+    /// </summary>
+    private void UpdateAutoShotMovement(float dt)
+    {
+        if (_autoShotFrames < 0 || _state != AppState.Playing || _world == null ||
+            _world.ResumeCountdown > 0f) return;
+
+        foreach (int pawnId in _viewPawnIds)
+        {
+            var pawn = _world.FindPawn(pawnId);
+            if (pawn is not { Alive: true })
+            {
+                _autoShotLastPositions.Remove(pawnId);
+                _autoShotStallTimes[pawnId] = 0f;
+                continue;
+            }
+
+            if (!_autoShotLastPositions.TryGetValue(pawnId, out Vector3 previous))
+            {
+                _autoShotLastPositions[pawnId] = pawn.Position;
+                continue;
+            }
+
+            float distance = (pawn.Position - previous).FlatXZ().Length();
+            _autoShotLastPositions[pawnId] = pawn.Position;
+            _autoShotTravelDistances[pawnId] = _autoShotTravelDistances.GetValueOrDefault(pawnId) + distance;
+
+            float stall = distance / MathF.Max(dt, 1e-4f) < 0.20f
+                ? _autoShotStallTimes.GetValueOrDefault(pawnId) + dt
+                : 0f;
+            _autoShotStallTimes[pawnId] = stall;
+            _autoShotLongestStalls[pawnId] = MathF.Max(_autoShotLongestStalls.GetValueOrDefault(pawnId), stall);
+        }
+    }
+
     private void QueueScreenshot()
     {
         string dir = Path.Combine(AppContext.BaseDirectory, "screenshots");
@@ -1937,6 +2046,18 @@ public sealed class App : IDisposable
         Console.WriteLine($"效能: {_fps:0.0} FPS · 視角 {_renderSettings.ViewCount} · " +
                           $"算圖比例 {_renderSettings.EffectiveResolutionScale * 100f:0}% · " +
                           $"繪製呼叫 {_renderer?.DrawCallCount ?? 0} · 三角形 {_renderer?.TriangleCount ?? 0}");
+        if (_world != null)
+        {
+            Console.WriteLine($"環境陣亡: 深淵 {_world.VoidDeaths} · 摔落 {_world.FallDeaths} · 熔岩 {_world.LavaDeaths}");
+            foreach (string detail in _world.EnvironmentalDeathDetails) Console.WriteLine($"環境陣亡明細: {detail}");
+        }
+        foreach (int pawnId in _viewPawnIds)
+            if (_world?.FindPawn(pawnId) is { } pawn)
+                Console.WriteLine($"自動截圖玩家 {pawn.PlayerIndex + 1}: " +
+                                  $"位置 ({pawn.Position.X:0.00}, {pawn.Position.Y:0.00}, {pawn.Position.Z:0.00}) · " +
+                                  $"速度 {pawn.Velocity.Length():0.00} m/s · " +
+                                  $"行進 {_autoShotTravelDistances.GetValueOrDefault(pawnId):0.0} m · " +
+                                  $"最長停滯 {_autoShotLongestStalls.GetValueOrDefault(pawnId):0.00} s");
         _window.Close();
     }
 
@@ -1959,6 +2080,8 @@ public sealed class App : IDisposable
         _menuLevel?.Dispose();
         _renderer?.Dispose();
         _logoTexture?.Dispose();
+        foreach (var thumbnail in _mapThumbnails) thumbnail?.Dispose();
+        foreach (var thumbnail in _slotThumbnails.Values) thumbnail?.Dispose();
         _ui?.Dispose();
         _fonts?.Dispose();
         _input?.Dispose();

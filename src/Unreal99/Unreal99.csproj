@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <OutputType>Exe</OutputType>
+    <!-- WinExe prevents Windows from opening a console when the Start Menu shortcut launches. -->
+    <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>disable</Nullable>
@@ -31,6 +32,12 @@
 
   <ItemGroup>
     <Content Include="Assets\Unreal99Logo.png" CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
+    <!-- These are the same in-game captures embedded by README.md. Link them into the
+         packaged asset tree so the README and the map picker have one source of truth. -->
+    <Content Include="..\..\docs\arenas\*.jpg"
+             Link="Assets\Arenas\%(Filename)%(Extension)"
+             CopyToOutputDirectory="PreserveNewest"
              CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 

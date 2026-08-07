@@ -31,6 +31,8 @@ public sealed class Menu
     public int FaceRegular;
     public int FaceBold;
     public Texture2D LogoTexture;
+    /// <summary>Real in-game arena captures shared with the README gallery.</summary>
+    public Func<World.MapId, Texture2D> MapThumbnail;
     public MenuScreen Screen = MenuScreen.Main;
     public int SelectedIndex;
     public bool Active = true;
@@ -50,6 +52,11 @@ public sealed class Menu
     private bool _pointerActive;
     private Vector2 _pointer;
     private ItemRect? _captureCancelRect;
+    private ItemRect? _nameConfirmRect;
+    private ItemRect? _nameCancelRect;
+    private int _editingNameSlot = -1;
+    private string _editingName = "";
+    private string _originalName = "";
 
     private readonly record struct ItemRect(int Index, float X, float Y, float Width, float Height,
         float LeftArrowX, float RightArrowX, float ArrowWidth);
@@ -57,6 +64,7 @@ public sealed class Menu
     /// <summary>True once the mouse has moved, so the pointer only appears when actually used.</summary>
     public bool PointerVisible => _pointerActive;
     public Vector2 PointerPosition => _pointer;
+    public bool EditingPlayerName => _editingNameSlot >= 0;
 
     /// <summary>
     /// Grid width for the arena gallery. Widens as the roster grows so the cards stay a
@@ -78,6 +86,8 @@ public sealed class Menu
     public bool DemoMode;
     /// <summary>Skill of the autopilot driving the local players, independent of the opponents'.</summary>
     public int DemoSkill = 3;
+    /// <summary>Persistent display names for the four local player slots.</summary>
+    public readonly string[] PlayerNames = [.. Loc.PlayerDefaultNames];
 
     public Action OnStartMatch;
     public Action OnResume;
@@ -155,6 +165,8 @@ public sealed class Menu
         _selectPulse = MathF.Max(0f, _selectPulse - dt * 3f);
         Rebuild();
 
+        if (EditingPlayerName) return;
+
         if (_navCooldown <= 0f)
         {
             if (Screen == MenuScreen.MapGallery)
@@ -209,6 +221,21 @@ public sealed class Menu
         else if (_pointerActive)
         {
             _pointer = position;
+        }
+
+        if (EditingPlayerName)
+        {
+            if (rightClick || (leftClick && _nameCancelRect is { } cancel && Contains(cancel, position)))
+            {
+                CancelPlayerNameEdit();
+                PlaySound?.Invoke(SoundId.MenuBack);
+            }
+            else if (leftClick && _nameConfirmRect is { } confirm && Contains(confirm, position))
+            {
+                CommitPlayerNameEdit();
+                PlaySound?.Invoke(SoundId.MenuSelect);
+            }
+            return;
         }
 
         // Device assignment and key binding prompts are modal.  Keep clicks from falling
@@ -301,6 +328,63 @@ public sealed class Menu
     private static bool Contains(in ItemRect rect, Vector2 position)
         => position.X >= rect.X && position.X <= rect.X + rect.Width
         && position.Y >= rect.Y && position.Y <= rect.Y + rect.Height;
+
+    /// <summary>Feeds character input to the modal local-player name editor.</summary>
+    public void HandlePlayerNameInput(IReadOnlyList<char> typed, bool backspace, bool accept, bool cancel)
+    {
+        if (!EditingPlayerName) return;
+        if (cancel)
+        {
+            CancelPlayerNameEdit();
+            PlaySound?.Invoke(SoundId.MenuBack);
+            return;
+        }
+
+        if (backspace && _editingName.Length > 0)
+            _editingName = _editingName[..^1];
+
+        foreach (char c in typed)
+        {
+            if (char.IsControl(c) || _editingName.Length >= 18) continue;
+            _editingName += c;
+        }
+
+        if (accept)
+        {
+            CommitPlayerNameEdit();
+            PlaySound?.Invoke(SoundId.MenuSelect);
+        }
+    }
+
+    private void BeginPlayerNameEdit(int slot)
+    {
+        _editingNameSlot = MathX.Clamp(slot, 0, PlayerNames.Length - 1);
+        _originalName = PlayerNames[_editingNameSlot];
+        _editingName = _originalName;
+    }
+
+    private void CommitPlayerNameEdit()
+    {
+        if (!EditingPlayerName) return;
+        string cleaned = new(_editingName.Where(c => !char.IsControl(c)).ToArray());
+        cleaned = cleaned.Trim();
+        PlayerNames[_editingNameSlot] = string.IsNullOrWhiteSpace(cleaned)
+            ? Loc.PlayerDefaultNames[_editingNameSlot]
+            : cleaned.Length <= 18 ? cleaned : cleaned[..18];
+        _editingNameSlot = -1;
+        _editingName = "";
+        _originalName = "";
+        OnSettingsChanged?.Invoke();
+        Rebuild();
+    }
+
+    private void CancelPlayerNameEdit()
+    {
+        if (EditingPlayerName) PlayerNames[_editingNameSlot] = _originalName;
+        _editingNameSlot = -1;
+        _editingName = "";
+        _originalName = "";
+    }
 
     public void Back()
     {
@@ -464,6 +548,13 @@ public sealed class Menu
         AddChoice(Loc.OptPlayers, () => Loc.PlayerCount(LocalPlayers),
             d => LocalPlayers = MathX.Clamp(LocalPlayers + d, 1, 4),
             "第一位玩家使用鍵盤滑鼠，其餘玩家使用手把。");
+
+        for (int i = 0; i < LocalPlayers; i++)
+        {
+            int slot = i;
+            Add($"{Loc.OptPlayerName} {i + 1}　{PlayerNames[i]}", () => BeginPlayerNameEdit(slot),
+                Loc.PlayerNameHint);
+        }
 
         AddChoice(Loc.OptBots, () => Loc.BotCount(BotCount),
             d => BotCount = MathX.Clamp(BotCount + d, 0, 15), "戰場上的電腦對手數量。");
@@ -916,6 +1007,64 @@ public sealed class Menu
             UiRenderer.Rgba(0.55f, 0.62f, 0.75f, 0.8f), TextAlign.Center);
 
         DrawCaptureOverlay(ui, width, height, s);
+        DrawPlayerNameEditor(ui, width, height, s);
+    }
+
+    private void DrawPlayerNameEditor(UiRenderer ui, int width, int height, float s)
+    {
+        if (!EditingPlayerName)
+        {
+            _nameConfirmRect = null;
+            _nameCancelRect = null;
+            return;
+        }
+
+        ui.Rect(0, 0, width, height, UiRenderer.Rgba(0f, 0f, 0f, 0.76f));
+        float boxW = MathF.Min(width * 0.74f, 660f * s);
+        float boxH = 260f * s;
+        float bx = (width - boxW) * 0.5f;
+        float by = (height - boxH) * 0.5f;
+        ui.ChamferRect(bx, by, boxW, boxH, 18f * s, UiRenderer.Rgba(0.035f, 0.055f, 0.10f, 0.98f));
+        ui.RectOutline(bx, by, boxW, boxH, 2f * s, UiRenderer.Rgba(0.35f, 0.72f, 1f, 0.78f));
+
+        ui.TextOutline(FaceBold, 29f * s, width * 0.5f, by + 30f * s,
+            $"{Loc.PlayerNameTitle} {_editingNameSlot + 1}", UiRenderer.Rgba(0.96f, 0.98f, 1f),
+            UiRenderer.Rgba(0f, 0f, 0f, 0.9f), 2f * s, TextAlign.Center);
+
+        float fieldX = bx + 42f * s;
+        float fieldY = by + 88f * s;
+        float fieldW = boxW - 84f * s;
+        float fieldH = 52f * s;
+        ui.ChamferRect(fieldX, fieldY, fieldW, fieldH, 8f * s, UiRenderer.Rgba(0.01f, 0.02f, 0.04f, 0.95f));
+        ui.RectOutline(fieldX, fieldY, fieldW, fieldH, 2f * s, UiRenderer.Rgba(1f, 0.67f, 0.22f, 0.85f));
+        string shown = _editingName + (MathF.Sin(_time * 4.5f) > -0.1f ? "│" : "");
+        ui.Text(FaceRegular, 25f * s, fieldX + 16f * s, fieldY + 10f * s, shown,
+            UiRenderer.Rgba(1f, 0.95f, 0.84f));
+        ui.Text(FaceRegular, 16f * s, width * 0.5f, fieldY + fieldH + 12f * s,
+            Loc.PlayerNameTypingHint, UiRenderer.Rgba(0.66f, 0.76f, 0.91f), TextAlign.Center);
+
+        float buttonW = 148f * s;
+        float buttonH = 40f * s;
+        float gap = 18f * s;
+        float buttonY = by + boxH - 58f * s;
+        float cancelX = width * 0.5f - gap * 0.5f - buttonW;
+        float confirmX = width * 0.5f + gap * 0.5f;
+        _nameCancelRect = new ItemRect(-1, cancelX, buttonY, buttonW, buttonH, 0f, 0f, 0f);
+        _nameConfirmRect = new ItemRect(-1, confirmX, buttonY, buttonW, buttonH, 0f, 0f, 0f);
+        DrawNameButton(ui, _nameCancelRect.Value, Loc.MenuCancel, s);
+        DrawNameButton(ui, _nameConfirmRect.Value, Loc.MenuConfirm, s);
+    }
+
+    private void DrawNameButton(UiRenderer ui, in ItemRect rect, string label, float s)
+    {
+        bool hovered = _pointerActive && Contains(rect, _pointer);
+        ui.ChamferRect(rect.X, rect.Y, rect.Width, rect.Height, 8f * s,
+            hovered ? UiRenderer.Rgba(0.30f, 0.50f, 0.84f, 0.94f)
+                    : UiRenderer.Rgba(0.14f, 0.22f, 0.36f, 0.94f));
+        ui.RectOutline(rect.X, rect.Y, rect.Width, rect.Height, 1.5f * s,
+            UiRenderer.Rgba(0.65f, 0.80f, 1f, hovered ? 0.95f : 0.48f));
+        ui.Text(FaceBold, 19f * s, rect.X + rect.Width * 0.5f, rect.Y + 8f * s, label,
+            UiRenderer.Rgba(0.96f, 0.98f, 1f), TextAlign.Center);
     }
 
     private void DrawMapGallery(UiRenderer ui, int width, int height, float s)
@@ -1120,9 +1269,38 @@ public sealed class Menu
             Loc.MapGalleryControls, UiRenderer.Rgba(0.56f, 0.64f, 0.77f), TextAlign.Center);
     }
 
-    private static void DrawMapPreview(UiRenderer ui, World.MapId map, float x, float y,
+    private void DrawMapPreview(UiRenderer ui, World.MapId map, float x, float y,
         float w, float h, bool enabled)
     {
+        var texture = MapThumbnail?.Invoke(map);
+        if (texture != null)
+        {
+            // Fill the card without distorting the capture. The README shots are 16:9, but
+            // gallery cards change aspect ratio with window size and arena count.
+            float imageAspect = texture.Width / (float)texture.Height;
+            float frameAspect = w / h;
+            Vector2 uv0 = Vector2.Zero;
+            Vector2 uv1 = Vector2.One;
+            if (imageAspect > frameAspect)
+            {
+                float visible = frameAspect / imageAspect;
+                uv0.X = (1f - visible) * 0.5f;
+                uv1.X = 1f - uv0.X;
+            }
+            else if (imageAspect < frameAspect)
+            {
+                float visible = imageAspect / frameAspect;
+                uv0.Y = (1f - visible) * 0.5f;
+                uv1.Y = 1f - uv0.Y;
+            }
+
+            ui.Texture(texture, x, y, w, h, UiRenderer.Rgba(1f, 1f, 1f, enabled ? 1f : 0.42f), uv0, uv1);
+            if (!enabled)
+                ui.Rect(x, y, w, h, UiRenderer.Rgba(0.02f, 0.025f, 0.04f, 0.38f));
+            return;
+        }
+
+        // Keep the stylised preview as a graceful fallback if an installation is missing assets.
         uint top = map switch
         {
             World.MapId.Deck16 => UiRenderer.Rgba(0.09f, 0.11f, 0.14f),

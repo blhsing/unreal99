@@ -23,6 +23,7 @@ public sealed class BotController : Controller
 
     private BotState _state = BotState.Roam;
     private int _goalNode = -1;
+    private bool _objectiveGoal;
     private int _pathCursor;
     private float _repathTimer;
     private float _targetTimer;
@@ -47,6 +48,8 @@ public sealed class BotController : Controller
     private PickupEntity _itemGoal;
     private float _threatTimer;
     private Vector3 _threatDirection;
+    private int _navDebugReports;
+    private bool _jumpPadFlight;
 
     /// <summary>Kept so a saved match can rebuild this bot as the same opponent, not a new one.</summary>
     public uint Seed { get; }
@@ -90,6 +93,7 @@ public sealed class BotController : Controller
     {
         _state = BotState.Roam;
         _goalNode = -1;
+        _objectiveGoal = false;
         _path.Clear();
         _targetId = -1;
         _aimYaw = Pawn.Yaw;
@@ -100,6 +104,7 @@ public sealed class BotController : Controller
         _reactionTimer = Skill < 0.85f ? ReactionTime * _rng.Range(0.85f, 1.15f) : 0f;
         _fireBurstTimer = 0f;
         _firePauseTimer = 0f;
+        _jumpPadFlight = false;
     }
 
     public override void OnDamaged(GameWorld world, Pawn attacker, float amount, Vector3 direction)
@@ -423,6 +428,18 @@ public sealed class BotController : Controller
         var nav = world.Level.Nav;
         if (nav.NodeCount == 0) return Vector2.Zero;
 
+        // A jump pad already solved the ballistic trajectory. Air-strafing—especially the
+        // aggressive strafing used at maximum skill—changes that velocity enough to miss a roof.
+        // Preserve the launch until the bot has landed, then resume normal path planning.
+        if (_jumpPadFlight)
+        {
+            input.Jump = false;
+            input.Dodge = Vector2.Zero;
+            if (!Pawn.OnGround) return Vector2.Zero;
+            _jumpPadFlight = false;
+            _repathTimer = 0f;
+        }
+
         // --- choose a goal ---
         if (_goalTimer <= 0f || _goalNode < 0 || (_path.Count > 0 && _pathCursor >= _path.Count))
         {
@@ -436,28 +453,74 @@ public sealed class BotController : Controller
         {
             _repathTimer = _rng.Range(0.7f, 1.3f);
             int start = nav.FindNearest(Pawn.Position);
-            if (start >= 0 && nav.FindPath(start, _goalNode, _path)) _pathCursor = 0;
+            bool found = start >= 0 && (_objectiveGoal
+                ? nav.FindPathToward(start, _goalNode, _path)
+                : nav.FindPath(start, _goalNode, _path));
+            if (found) _pathCursor = 0;
             else { _path.Clear(); _pathCursor = 0; }
+            if (Environment.GetEnvironmentVariable("UNREAL99_NAV_DEBUG") == "1" &&
+                Pawn.PlayerIndex >= 0 && _navDebugReports++ < 16)
+            {
+                Vector3 startPosition = start >= 0 ? nav.Nodes[start].Position : Pawn.Position;
+                Vector3 goalPosition = _goalNode >= 0 ? nav.Nodes[_goalNode].Position : Pawn.Position;
+                Vector3 firstPosition = _path.Count > 0 ? nav.Nodes[_path[0]].Position : Pawn.Position;
+                Vector3 lastPosition = _path.Count > 0 ? nav.Nodes[_path[^1]].Position : Pawn.Position;
+                Console.WriteLine($"CTF導航: 玩家 {Pawn.PlayerIndex + 1} · 起點 {startPosition} · " +
+                    $"目標 {goalPosition} · 路徑 {_path.Count} · 首點 {firstPosition} · " +
+                    $"末點 {lastPosition} · 角色位置 {Pawn.Position}");
+            }
         }
 
         // --- follow the path ---
         Vector3 steer = Vector3.Zero;
         if (_path.Count > 0 && _pathCursor < _path.Count)
         {
-            Vector3 node = nav.Nodes[_path[_pathCursor]].Position;
+            int waypointIndex = _path[_pathCursor];
+            Vector3 node = nav.Nodes[waypointIndex].Position;
+            bool waitingForJumpPad = false;
+
+            // A special nav edge starts at the grid node nearest the pad, which can still be
+            // outside the pad's trigger. Do not advance to the far-side node and steer into the
+            // gap until the pawn has actually entered the physical launcher.
+            if ((nav.Nodes[waypointIndex].Flags & NavFlags.JumpPad) != 0
+                && TryNearestJumpPad(world, node, out JumpPad pad))
+            {
+                float padDistance = (pad.Position - Pawn.Position).FlatXZ().Length();
+                bool launched = !Pawn.OnGround && padDistance < 1.8f
+                    && Pawn.Position.Y < pad.Position.Y + 3.2f;
+                if (launched && _pathCursor + 1 < _path.Count)
+                {
+                    _jumpPadFlight = true;
+                    _pathCursor++;
+                    return Vector2.Zero;
+                }
+                else
+                {
+                    node = pad.Position;
+                    waitingForJumpPad = true;
+                }
+            }
+
             Vector3 flat = (node - Pawn.Position).FlatXZ();
             float dist = flat.Length();
             float heightDelta = node.Y - Pawn.Position.Y;
 
-            if (dist < 1.25f && MathF.Abs(heightDelta) < 2.2f)
+            if (!waitingForJumpPad && dist < 1.25f && MathF.Abs(heightDelta) < 2.2f)
             {
                 _pathCursor++;
-                if (_pathCursor < _path.Count) node = nav.Nodes[_path[_pathCursor]].Position;
+                if (_pathCursor < _path.Count)
+                {
+                    node = nav.Nodes[_path[_pathCursor]].Position;
+                    flat = (node - Pawn.Position).FlatXZ();
+                    dist = flat.Length();
+                    heightDelta = node.Y - Pawn.Position.Y;
+                }
             }
             steer = MathX.SafeNormalize(flat, Vector3.Zero);
 
             // Jump when the next waypoint is meaningfully above us or the link needs it.
-            if (heightDelta > 0.65f && dist < 3.2f && Pawn.OnGround && _jumpTimer <= 0f)
+            if (!waitingForJumpPad && heightDelta > 0.65f && dist < 3.2f
+                && Pawn.OnGround && _jumpTimer <= 0f)
             {
                 input.Jump = true;
                 _jumpTimer = 0.5f;
@@ -536,9 +599,26 @@ public sealed class BotController : Controller
         return new Vector2(rightAmount, forwardAmount) * MovementScale;
     }
 
+    private static bool TryNearestJumpPad(GameWorld world, Vector3 navPosition, out JumpPad nearest)
+    {
+        nearest = default;
+        float best = 4.5f * 4.5f;
+        bool found = false;
+        foreach (JumpPad pad in world.Level.JumpPads)
+        {
+            float distance = Vector3.DistanceSquared(navPosition, pad.Position);
+            if (distance >= best) continue;
+            best = distance;
+            nearest = pad;
+            found = true;
+        }
+        return found;
+    }
+
     private void ChooseGoal(GameWorld world, Pawn target, bool visible)
     {
         var nav = world.Level.Nav;
+        _objectiveGoal = false;
 
         // CTF objectives always win.
         if (world.Mode.Kind == GameModeKind.CaptureTheFlag && Pawn.Team != Team.None)
@@ -547,25 +627,28 @@ public sealed class BotController : Controller
             if (Pawn.HasFlag && world.FlagHome.TryGetValue(Pawn.Team, out Vector3 home))
             {
                 _goalNode = nav.FindNearest(home);
-                if (_goalNode >= 0) return;
+                if (_goalNode >= 0) { _objectiveGoal = true; return; }
             }
-            if (!Pawn.HasFlag && world.FlagPosition.TryGetValue(enemy, out Vector3 enemyFlag))
-            {
-                bool taken = world.FlagCarrier.TryGetValue(enemy, out int carrier) && carrier >= 0;
-                if (!taken && _rng.Chance(0.7f))
-                {
-                    _goalNode = nav.FindNearest(enemyFlag);
-                    if (_goalNode >= 0) return;
-                }
-            }
-            // Defend if our own flag has been taken.
+
+            // Recover our flag before beginning another attack. This must precede the enemy-flag
+            // branch or an untouched enemy flag would always mask the defensive objective.
             if (world.FlagCarrier.TryGetValue(Pawn.Team, out int ourCarrier) && ourCarrier >= 0)
             {
                 var thief = world.FindPawn(ourCarrier);
                 if (thief != null)
                 {
                     _goalNode = nav.FindNearest(thief.Position);
-                    if (_goalNode >= 0) return;
+                    if (_goalNode >= 0) { _objectiveGoal = true; return; }
+                }
+            }
+
+            if (!Pawn.HasFlag && world.FlagPosition.TryGetValue(enemy, out Vector3 enemyFlag))
+            {
+                bool taken = world.FlagCarrier.TryGetValue(enemy, out int carrier) && carrier >= 0;
+                if (!taken)
+                {
+                    _goalNode = nav.FindNearest(enemyFlag);
+                    if (_goalNode >= 0) { _objectiveGoal = true; return; }
                 }
             }
         }
@@ -628,32 +711,117 @@ public sealed class BotController : Controller
         if (_goalNode < 0) _goalNode = nav.RandomNode(_rng);
     }
 
-    /// <summary>Refuses to walk off a ledge into the void or lava while not actively fighting.</summary>
+    /// <summary>
+    /// Brakes before unsafe drops and cancels combat dodges that would carry a bot over an edge.
+    /// Jump pads provide their own launch velocity, so normal steering must never invent a blind
+    /// gap jump merely because it can see floor on the far side.
+    /// </summary>
     private void AvoidLedges(GameWorld world, ref PawnInput input)
     {
-        if (input.Move == Vector2.Zero || !Pawn.OnGround) return;
+        if (!Pawn.OnGround)
+        {
+            // Preserve intentional pad ballistics, but use the game's generous air control to
+            // recover any ordinary jump, dodge or knockback whose projected path misses all
+            // playable ground. Highest-skill combat movement otherwise turns a single dodge at
+            // a roof edge into a guaranteed death.
+            if (_jumpPadFlight) return;
+            Vector3 projected = Pawn.Position + Pawn.Velocity.FlatXZ() * 0.75f;
+            if (!HasGroundAt(world, projected, 14f))
+            {
+                Vector3 recovery = (Pawn.LastGroundPosition - Pawn.Position).FlatXZ();
+                Vector3 direction = MathX.SafeNormalize(recovery, -Pawn.Velocity.FlatXZ());
+                if (direction != Vector3.Zero)
+                {
+                    float speed = MathX.Clamp(Pawn.Velocity.Horizontal(), Physics.GroundSpeed,
+                        Physics.MaxAirSpeed);
+                    Pawn.Velocity = direction * speed + MathX.Up * Pawn.Velocity.Y;
+                    input.Move = new Vector2(Vector3.Dot(direction, Pawn.RightFlat),
+                        Vector3.Dot(direction, Pawn.ForwardFlat));
+                }
+                input.Jump = false;
+                input.Dodge = Vector2.Zero;
+            }
+            return;
+        }
+
+        // Do not begin any voluntary airborne move while standing inside the edge buffer. This
+        // also covers a jump queued by stuck recovery or by a higher waypoint, not only dodges.
+        if (IsNearLethalEdge(world))
+        {
+            input.Jump = false;
+            input.Dodge = Vector2.Zero;
+        }
+
+        // High-skill bots dodge more often. Validate the full dodge direction first so greater
+        // combat reflexes do not paradoxically make them more likely to leap into the void.
+        if (input.Dodge != Vector2.Zero)
+        {
+            Vector3 dodgeDir = Pawn.ForwardFlat * input.Dodge.Y + Pawn.RightFlat * input.Dodge.X;
+            dodgeDir = MathX.SafeNormalize(dodgeDir, Vector3.Zero);
+            if (dodgeDir != Vector3.Zero
+                && !HasSafePath(world, dodgeDir, 3.0f))
+            {
+                input.Dodge = Vector2.Zero;
+                _dodgeTimer = MathF.Max(_dodgeTimer, 0.35f);
+            }
+        }
+
+        if (input.Move == Vector2.Zero) return;
 
         Vector3 dir = Pawn.ForwardFlat * input.Move.Y + Pawn.RightFlat * input.Move.X;
         dir = MathX.SafeNormalize(dir, Vector3.Zero);
         if (dir == Vector3.Zero) return;
 
-        Vector3 probe = Pawn.Position + dir * 1.35f + new Vector3(0, 0.35f, 0);
-        var hit = world.Level.Collision.Raycast(probe, probe - new Vector3(0, 5.5f, 0));
+        float stoppingProbe = MathX.Clamp(1.45f + Pawn.Velocity.Horizontal() * 0.16f, 1.45f, 3.6f);
+        if (HasSafePath(world, dir, stoppingProbe)) return;
 
-        bool danger = !hit.Hit || hit.Kind == BrushKind.Lava;
-        if (!danger) return;
-
-        // Jump the gap when there is ground on the other side, otherwise back off.
-        Vector3 far = Pawn.Position + dir * 4.2f + new Vector3(0, 0.35f, 0);
-        var farHit = world.Level.Collision.Raycast(far, far - new Vector3(0, 4.5f, 0));
-        if (farHit.Hit && farHit.Kind != BrushKind.Lava && _jumpTimer <= 0f)
-        {
-            input.Jump = true;
-            _jumpTimer = 0.6f;
-            return;
-        }
+        input.Jump = false;
+        input.Dodge = Vector2.Zero;
         input.Move = -input.Move * 0.6f;
+
+        // Remove velocity aimed over the edge immediately. Input reversal alone can take several
+        // frames to overcome the momentum of a running or dodging master-level bot.
+        Vector3 flatVelocity = Pawn.Velocity.FlatXZ();
+        float outwardSpeed = Vector3.Dot(flatVelocity, dir);
+        if (outwardSpeed > 0f) Pawn.Velocity -= dir * outwardSpeed;
+
         _goalNode = -1;
         _goalTimer = 0f;
+    }
+
+    private bool HasSafeGround(GameWorld world, Vector3 direction, float distance)
+    {
+        // Start well above the pawn's feet so an uphill ramp is not mistaken for empty space.
+        Vector3 probe = Pawn.Position + direction * distance;
+        return HasGroundAt(world, probe, 4.25f);
+    }
+
+    private static bool HasGroundAt(GameWorld world, Vector3 point, float maximumDrop)
+    {
+        Vector3 probe = point + new Vector3(0f, 2.4f, 0f);
+        var hit = world.Level.Collision.Raycast(probe,
+            probe - new Vector3(0f, maximumDrop + 2.4f, 0f));
+        return hit.Hit && hit.Kind != BrushKind.Lava;
+    }
+
+    private bool HasSafePath(GameWorld world, Vector3 direction, float distance)
+    {
+        // Sampling only the landing point lets a bot accept a narrow void with floor beyond it.
+        // Check the whole projected run/dodge instead, at sub-pawn-length intervals.
+        for (float d = 0.9f; d < distance; d += 0.8f)
+            if (!HasSafeGround(world, direction, d)) return false;
+        return HasSafeGround(world, direction, distance);
+    }
+
+    private bool IsNearLethalEdge(GameWorld world)
+    {
+        const float radius = 1.25f;
+        for (int i = 0; i < 8; i++)
+        {
+            float angle = i * (MathX.TwoPi / 8f);
+            Vector3 direction = new(MathF.Cos(angle), 0f, MathF.Sin(angle));
+            if (!HasSafeGround(world, direction, radius)) return true;
+        }
+        return false;
     }
 }

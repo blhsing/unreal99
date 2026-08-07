@@ -179,6 +179,44 @@ public sealed class MeshBuilder
         AddPolygon([d0, a0, a, d], col);        // -X side
     }
 
+    /// <summary>
+    /// A sloped structural slab with a parallel underside. Unlike a wedge, the low edge keeps
+    /// its full depth, so exposed ramps do not collapse visually into a paper-thin triangle.
+    /// </summary>
+    public void AddRampSlab(Vector3 min, Vector3 max, int risingAxis, float thickness,
+        uint? color = null)
+    {
+        uint col = color ?? Color;
+        float lowY = min.Y, highY = max.Y;
+        thickness = MathF.Max(0.05f, thickness);
+
+        float h00, h10, h11, h01;
+        switch (risingAxis)
+        {
+            case 0: h00 = lowY; h01 = lowY; h10 = highY; h11 = highY; break;
+            case 1: h00 = highY; h01 = highY; h10 = lowY; h11 = lowY; break;
+            case 2: h00 = lowY; h10 = lowY; h01 = highY; h11 = highY; break;
+            default: h00 = highY; h10 = highY; h01 = lowY; h11 = lowY; break;
+        }
+
+        Vector3 a = new(min.X, h00, min.Z);
+        Vector3 b = new(max.X, h10, min.Z);
+        Vector3 c = new(max.X, h11, max.Z);
+        Vector3 d = new(min.X, h01, max.Z);
+        Vector3 depth = new(0f, thickness, 0f);
+        Vector3 a0 = a - depth;
+        Vector3 b0 = b - depth;
+        Vector3 c0 = c - depth;
+        Vector3 d0 = d - depth;
+
+        AddPolygon([a, b, c, d], col);          // sloped top
+        AddPolygon([d0, c0, b0, a0], col);      // parallel underside
+        AddPolygon([a0, b0, b, a], col);        // -Z fascia
+        AddPolygon([c0, d0, d, c], col);        // +Z fascia
+        AddPolygon([b0, c0, c, b], col);        // +X end
+        AddPolygon([d0, a0, a, d], col);        // -X end
+    }
+
     /// <summary>Convex polygon, wound counter-clockwise when viewed from the front.</summary>
     public void AddPolygon(ReadOnlySpan<Vector3> pts, uint? color = null)
     {

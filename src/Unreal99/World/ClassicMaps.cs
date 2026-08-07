@@ -324,7 +324,11 @@ public static partial class Maps
             {
                 if (other == t) continue;
                 Vector3 d = towers[other] - c;
-                padFaces.Add(MathF.Abs(d.X) >= MathF.Abs(d.Z)
+                // The north tower sees both southern towers through the same dominant (+Z)
+                // face. Give those routes separate ±X launch bays instead of stacking two pads
+                // with different destinations in one trigger volume.
+                bool alongX = MathF.Abs(d.X) >= MathF.Abs(d.Z) || t == 0;
+                padFaces.Add(alongX
                     ? ((int)MathF.Sign(d.X), 0)
                     : (0, (int)MathF.Sign(d.Z)));
             }
@@ -436,7 +440,7 @@ public static partial class Maps
                 Vector3 delta = towers[to] - towers[from];
                 // Launch from whichever face points most directly at the target, so the two pads
                 // on a roof never land on the same gap.
-                bool alongX = MathF.Abs(delta.X) >= MathF.Abs(delta.Z);
+                bool alongX = MathF.Abs(delta.X) >= MathF.Abs(delta.Z) || from == 0;
                 Vector3 pad = towers[from] + (alongX
                     ? new Vector3(MathF.Sign(delta.X) * (Half - 1.5f), 0f, 0f)
                     : new Vector3(0f, 0f, MathF.Sign(delta.Z) * (Half - 1.5f)));

@@ -116,6 +116,11 @@ public sealed class GameWorld
     public readonly Dictionary<Team, Vector3> FlagPosition = new();
     public readonly Dictionary<Team, int> FlagCarrier = new();
     public readonly Dictionary<Team, float> FlagDroppedTimer = new();
+    /// <summary>QA telemetry for detecting navigation-related environmental deaths.</summary>
+    public int VoidDeaths { get; private set; }
+    public int FallDeaths { get; private set; }
+    public int LavaDeaths { get; private set; }
+    public readonly List<string> EnvironmentalDeathDetails = new();
 
     public ParticleSystem Particles => _renderer.Particles;
     public EffectRenderer Effects => _renderer.Effects;
@@ -152,6 +157,10 @@ public sealed class GameWorld
         Effects.Clear();
         Time = 0f;
         NextPawnId = 1;
+        VoidDeaths = 0;
+        FallDeaths = 0;
+        LavaDeaths = 0;
+        EnvironmentalDeathDetails.Clear();
 
         foreach (var p in level.Pickups)
         {
@@ -942,6 +951,15 @@ public sealed class GameWorld
     public void Kill(Pawn victim, Pawn killer, DamageType type, bool headshot = false)
     {
         if (!victim.Alive) return;
+        if (type == DamageType.Void) VoidDeaths++;
+        else if (type == DamageType.Fall) FallDeaths++;
+        else if (type == DamageType.Lava) LavaDeaths++;
+        if (type is DamageType.Void or DamageType.Fall or DamageType.Lava)
+        {
+            if (EnvironmentalDeathDetails.Count >= 32) EnvironmentalDeathDetails.RemoveAt(0);
+            EnvironmentalDeathDetails.Add($"{victim.Name}: {type} at {victim.Position} velocity {victim.Velocity} " +
+                $"last-ground {victim.LastGroundPosition}");
+        }
         victim.Alive = false;
         victim.Health = 0f;
         victim.DeathTime = 0.0001f;

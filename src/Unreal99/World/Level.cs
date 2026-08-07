@@ -258,6 +258,37 @@ public sealed class LevelBuilder
 
     public void Solid(Vector3 min, Vector3 max, MatId material, bool collide = true, float uvScale = 1f)
     {
+        // Symmetric arenas frequently author the opposite side with signed coordinates. Always
+        // canonicalise the brush first; reversed bounds otherwise create inward-facing geometry
+        // and invalid collision boxes that look like paper-thin or missing walls.
+        Vector3 low = Vector3.Min(min, max);
+        Vector3 high = Vector3.Max(min, max);
+
+        // A structural wall needs enough depth for its exposed edges to read as masonry or metal,
+        // rather than as a texture painted onto a plane. This only affects tall, colliding sheets;
+        // floors, catwalk decks, trim, railings and compact pillars retain their authored size.
+        if (collide && high.Y - low.Y >= 1.5f)
+        {
+            const float MinimumWallDepth = 0.45f;
+            const float MinimumWallLength = 1.0f;
+            float width = high.X - low.X;
+            float depth = high.Z - low.Z;
+            if (width < MinimumWallDepth && depth >= MinimumWallLength)
+            {
+                float center = (low.X + high.X) * 0.5f;
+                low.X = center - MinimumWallDepth * 0.5f;
+                high.X = center + MinimumWallDepth * 0.5f;
+            }
+            if (depth < MinimumWallDepth && width >= MinimumWallLength)
+            {
+                float center = (low.Z + high.Z) * 0.5f;
+                low.Z = center - MinimumWallDepth * 0.5f;
+                high.Z = center + MinimumWallDepth * 0.5f;
+            }
+        }
+
+        min = low;
+        max = high;
         _mesh.Material = (int)material;
         _mesh.WorldUv = true;
         _mesh.WorldUvScale = uvScale;
@@ -271,14 +302,25 @@ public sealed class LevelBuilder
 
     public void Ramp(Vector3 min, Vector3 max, int risingAxis, MatId material, bool collide = true, float uvScale = 1f)
     {
+        // Brush.Ramp already canonicalises collision bounds. Do the same for the visible mesh so
+        // mirrored ramps do not become inverted, zero-looking sheets while collision stays solid.
+        Vector3 low = Vector3.Min(min, max);
+        Vector3 high = Vector3.Max(min, max);
+        min = low;
+        max = high;
         _mesh.Material = (int)material;
         _mesh.WorldUv = true;
         _mesh.WorldUvScale = uvScale;
-        _mesh.AddRamp(min, max, risingAxis);
+
+        // The old wedge tapered to exactly zero at its low end. A constant-thickness sloped slab
+        // gives both side fascias and both ends an unmistakably structural profile.
+        const float RampThickness = 0.65f;
+        Vector3 visualMin = new(min.X, min.Y - RampThickness, min.Z);
+        _mesh.AddRampSlab(min, max, risingAxis, RampThickness);
         if (collide)
         {
             _level.Collision.Add(Brush.Ramp(min, max, risingAxis));
-            _occluders.Add((min, max));
+            _occluders.Add((visualMin, max));
         }
     }
 
