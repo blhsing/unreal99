@@ -103,12 +103,15 @@ public static partial class Maps
 
             b.Weapon(new Vector3(-17.5f, 7.9f, z), WeaponKind.SniperRifle);
             b.Weapon(new Vector3(17.5f, 7.9f, z), WeaponKind.ShockRifle);
-            b.Weapon(new Vector3(-14f, 0.9f, z - 8f * sign), WeaponKind.FlakCannon);
-            b.Weapon(new Vector3(14f, 0.9f, z - 8f * sign), WeaponKind.Minigun);
+            // A fort holds a rifle, a shock rifle, a ripper, a pulse gun, its armour and a pair
+            // of jump boots — the flak, minigun and bio rifles all live out in the middle.
+            b.Weapon(new Vector3(-14f, 0.9f, z - 8f * sign), WeaponKind.Ripper);
             b.Weapon(new Vector3(0f, 0.9f, z - 12f * sign), WeaponKind.PulseGun);
             b.Item(new Vector3(0f, 2.0f, z + 11f * sign), PickupKind.BodyArmor);
-            b.Item(new Vector3(-8f, 0.7f, z - 4f * sign), PickupKind.HealthPack);
-            b.Item(new Vector3(8f, 0.7f, z - 4f * sign), PickupKind.HealthPack);
+            b.Item(new Vector3(14f, 0.9f, z - 8f * sign), PickupKind.JumpBoots);
+            for (int i = 0; i < 8; i++)
+                b.Item(new Vector3(-10f + (i % 4) * 6.5f, 0.7f, z - (i < 4 ? 4f : 6.5f) * sign),
+                    PickupKind.HealthPack);
             b.Ammo(new Vector3(-17.5f, 7.7f, z + 4f), AmmoKind.SniperRounds);
             b.Ammo(new Vector3(17.5f, 7.7f, z + 4f), AmmoKind.ShockCore);
             b.Ammo(new Vector3(-12f, 0.7f, z - 8f * sign), AmmoKind.FlakShells);
@@ -134,12 +137,18 @@ public static partial class Maps
             b.Solid(new Vector3(x - r, 0f, z - r), new Vector3(x + r, r * 1.3f, z + r), MatId.Rock, true, 0.6f);
         }
         b.Weapon(new Vector3(0f, RidgeTop - 2.5f, 0f), WeaponKind.RocketLauncher);
+        // The middle carries the Redeemer, the belt, the thigh pads and the keg; each fort keeps
+        // only its own rifle, armour and jump boots. Everything worth fighting over is out here.
         b.Item(new Vector3(-6f, RidgeTop - 2.6f, 0f), PickupKind.ShieldBelt);
-        b.Item(new Vector3(6f, RidgeTop - 2.6f, 0f), PickupKind.DamageAmp);
+        b.Item(new Vector3(6f, RidgeTop - 2.6f, 0f), PickupKind.ThighPads);
+        b.Weapon(new Vector3(0f, RidgeTop - 2.6f, 0f), WeaponKind.Redeemer, respawn: 100f);
         b.Weapon(new Vector3(-34f, 0.9f, 0f), WeaponKind.BioRifle);
-        b.Weapon(new Vector3(34f, 0.9f, 0f), WeaponKind.Ripper);
-        b.Item(new Vector3(-34f, 0.7f, 16f), PickupKind.SuperHealth);
-        b.Item(new Vector3(34f, 0.7f, -16f), PickupKind.SuperHealth);
+        b.Weapon(new Vector3(34f, 0.9f, 0f), WeaponKind.BioRifle);
+        b.Weapon(new Vector3(-34f, 0.9f, 16f), WeaponKind.FlakCannon);
+        b.Weapon(new Vector3(34f, 0.9f, -16f), WeaponKind.FlakCannon);
+        b.Weapon(new Vector3(-34f, 0.9f, -16f), WeaponKind.Minigun);
+        b.Weapon(new Vector3(34f, 0.9f, 16f), WeaponKind.Minigun);
+        b.Item(new Vector3(0f, 0.7f, 20f), PickupKind.SuperHealth);
         for (int i = 0; i < 5; i++)
         {
             float x = -28f + i * 14f;
@@ -249,8 +258,10 @@ public static partial class Maps
         b.Weapon(new Vector3(0f, 0.9f, 0f), WeaponKind.BioRifle);
         b.Item(new Vector3(-20f, Upper + 0.8f, 0f), PickupKind.BodyArmor);
         b.Item(new Vector3(20f, Upper + 0.8f, 0f), PickupKind.BodyArmor);
-        b.Item(new Vector3(0f, 0.7f, -18f), PickupKind.SuperHealth);
-        b.Item(new Vector3(0f, LedgeY + 0.8f, 8f), PickupKind.Invisibility);
+        // Thigh pads, belt and one amplifier — no keg and no invisibility on this one.
+        b.Item(new Vector3(0f, 0.7f, -18f), PickupKind.ThighPads);
+        for (int i = 0; i < 6; i++)
+            b.Item(new Vector3(-14f + i * 5.6f, LedgeY + 0.7f, 8f), PickupKind.HealthPack);
         b.Ammo(new Vector3(-26f, 0.7f, -18f), AmmoKind.FlakShells);
         b.Ammo(new Vector3(26f, 0.7f, 18f), AmmoKind.MinigunBullets);
         b.Ammo(new Vector3(26f, 0.7f, -18f), AmmoKind.ShockCore);
@@ -349,7 +360,7 @@ public static partial class Maps
         b.AddJumpPad(new Vector3(0f, PitFloor + 0.1f, 0f), new Vector3(0f, Balcony + 2f, 15f),
             new Vector3(0.45f, 0.85f, 1f));
         b.AddLight(new Vector3(0f, PitFloor + 4f, 0f), new Vector3(0.4f, 0.7f, 1f), 18f, 4.5f);
-        b.Item(new Vector3(0f, PitFloor + 0.8f, 0f), PickupKind.SuperHealth);
+        b.Item(new Vector3(0f, PitFloor + 0.8f, 0f), PickupKind.HealthPack);
         b.Weapon(new Vector3(-4f, PitFloor + 0.9f, -4f), WeaponKind.RocketLauncher);
         b.Ammo(new Vector3(4f, PitFloor + 0.7f, 4f), AmmoKind.Rockets);
 
@@ -362,9 +373,15 @@ public static partial class Maps
 
         // --- placements ---
         b.Weapon(new Vector3(0f, Balcony + 0.9f, 16f), WeaponKind.SniperRifle);
+        // Belt, body armour and one invisibility. No amplifier and no keg here.
         b.Item(new Vector3(0f, Balcony + 0.8f, -16f), PickupKind.ShieldBelt);
-        b.Item(new Vector3(16f, Balcony + 0.8f, 0f), PickupKind.DamageAmp);
+        b.Item(new Vector3(16f, Balcony + 0.8f, 0f), PickupKind.BodyArmor);
         b.Item(new Vector3(-16f, Balcony + 0.8f, 0f), PickupKind.Invisibility);
+        for (int i = 0; i < 8; i++)
+        {
+            float a = i / 8f * MathX.TwoPi + 0.4f;
+            b.Item(new Vector3(MathF.Cos(a) * 17f, 0.7f, MathF.Sin(a) * 17f), PickupKind.HealthPack);
+        }
         for (int i = 0; i < 4; i++)
         {
             float a = i / 4f * MathX.TwoPi + MathX.Pi / 4f;
@@ -398,7 +415,10 @@ public static partial class Maps
     private static Level BuildPhobos(GL gl)
     {
         var b = new LevelBuilder(Loc.MapPhobos, Loc.MapPhobosDesc);
-        b.Level.GravityScale = 0.78f;
+        // Normal gravity. This map gets mistaken for a low-gravity one because of where it is,
+        // but the original is explicit that the station's gravity generators work — the height
+        // is climbed with jump boots, not by floating.
+        b.Level.GravityScale = 1f;
         var env = b.Level.Environment;
         env.SunDirection = Vector3.Normalize(new Vector3(0.55f, -0.55f, -0.62f));
         env.SunColor = new Vector3(3.6f, 3.5f, 3.4f);
@@ -484,14 +504,21 @@ public static partial class Maps
             b.Solid(new Vector3(i * 26f - 5f, 0f, -18f), new Vector3(i * 26f + 5f, 3.2f, 18f), MatId.Rock, true, 0.5f);
             b.Ramp(new Vector3(i * 26f - 5f, 0f, -24f), new Vector3(i * 26f + 5f, 3.2f, -18f), 2, MatId.Rock, true, 0.5f);
             b.Ramp(new Vector3(i * 26f - 5f, 0f, 18f), new Vector3(i * 26f + 5f, 3.2f, 24f), 3, MatId.Rock, true, 0.5f);
-            b.Item(new Vector3(i * 26f, 4.0f, 0f), PickupKind.SuperHealth);
+            // Anti-grav boots, a pair of them, which is how the original expects you to reach
+            // the upper deck and the roof.
+            b.Item(new Vector3(i * 26f, 4.0f, 0f), PickupKind.JumpBoots);
             b.AddJumpPad(new Vector3(i * 26f, 3.3f, 8f), new Vector3(i * 14f, Upper + 2f, BlockZ - 14f),
                 new Vector3(0.4f, 0.85f, 1f));
         }
 
         b.Weapon(new Vector3(0f, 0.9f, 0f), WeaponKind.BioRifle);
+        // A second ripper and a second rifle, and the Redeemer the original puts on the roof.
+        b.Weapon(new Vector3(-4f, 0.9f, 12f), WeaponKind.Ripper);
+        b.Weapon(new Vector3(4f, 0.9f, -12f), WeaponKind.SniperRifle);
+        b.Weapon(new Vector3(0f, 10.1f, 0f), WeaponKind.Redeemer, respawn: 100f);
         b.Item(new Vector3(0f, 0.8f, 8f), PickupKind.DamageAmp);
         b.Item(new Vector3(0f, 0.8f, -8f), PickupKind.Invisibility);
+        b.Item(new Vector3(-6f, 0.8f, 0f), PickupKind.ThighPads);
         for (int i = 0; i < 4; i++)
         {
             float z = -12f + i * 8f;
@@ -591,7 +618,7 @@ public static partial class Maps
             b.CeilingLamp(new Vector3(x, 8.8f, 0f), new Vector3(0.92f, 0.85f, 0.72f), 20f, 6.5f, 1.2f);
             b.Weapon(new Vector3(x, 0.9f, i * 5f), i < 0 ? WeaponKind.FlakCannon : WeaponKind.RocketLauncher);
             b.Ammo(new Vector3(x + i * 3f, 0.7f, i * 5f), i < 0 ? AmmoKind.FlakShells : AmmoKind.Rockets);
-            b.Item(new Vector3(x, 0.8f, -i * 5f), i < 0 ? PickupKind.BodyArmor : PickupKind.ShieldBelt);
+            b.Item(new Vector3(x, 0.8f, -i * 5f), i < 0 ? PickupKind.BodyArmor : PickupKind.ThighPads);
             b.Spawn(new Vector3(x, 0.2f, 0f), i < 0 ? -90f : 90f);
             b.AddJumpPad(new Vector3(x, 0.1f, i * 6f), new Vector3(i * (HX - 2.5f), Gallery + 1.6f, 0f),
                 new Vector3(0.4f, 0.85f, 1f));
@@ -600,17 +627,19 @@ public static partial class Maps
         b.CeilingLamp(new Vector3(0f, CeilY - 1.5f, -8f), new Vector3(0.95f, 0.88f, 0.74f), 26f, 8f, 1.5f);
         b.CeilingLamp(new Vector3(0f, CeilY - 1.5f, 8f), new Vector3(0.95f, 0.88f, 0.74f), 26f, 8f, 1.5f);
 
-        // --- placements: everything within a few seconds of everything else ---
+        // --- placements ---
+        // Four weapons on the whole map — shock, pulse, flak, rocket — plus a keg, body armour
+        // and thigh pads. No sniper rifle, no belt, no amplifier: this is the smallest roster of
+        // the seventeen and the map is built to be won on positioning, not on pickups.
         b.Weapon(new Vector3(0f, 5.1f, 0f), WeaponKind.ShockRifle);
-        b.Item(new Vector3(0f, 5.0f, -2.5f), PickupKind.DamageAmp);
-        b.Weapon(new Vector3(0f, Gallery + 0.9f, -HZ + 2.5f), WeaponKind.SniperRifle);
-        b.Weapon(new Vector3(-HX + 2.5f, Gallery + 0.9f, 0f), WeaponKind.Minigun);
         b.Weapon(new Vector3(HX - 2.5f, Gallery + 0.9f, 0f), WeaponKind.PulseGun);
-        b.Weapon(new Vector3(-14f, 0.9f, 12f), WeaponKind.Ripper);
-        b.Weapon(new Vector3(14f, 0.9f, 12f), WeaponKind.BioRifle);
+        b.Item(new Vector3(0f, Gallery + 0.8f, -HZ + 2.5f), PickupKind.HealthPack);
+        b.Item(new Vector3(-HX + 2.5f, Gallery + 0.8f, 0f), PickupKind.HealthPack);
         b.Item(new Vector3(-14f, 0.8f, -12f), PickupKind.HealthPack);
         b.Item(new Vector3(14f, 0.8f, -12f), PickupKind.HealthPack);
         b.Item(new Vector3(0f, 0.7f, 13f), PickupKind.SuperHealth);
+        for (int i = 0; i < 9; i++)
+            b.Item(new Vector3(-16f + i * 4f, 0.6f, i % 2 == 0 ? 6f : -6f), PickupKind.HealthVial);
         b.Ammo(new Vector3(3f, Gallery + 0.7f, -HZ + 2.5f), AmmoKind.SniperRounds);
         b.Ammo(new Vector3(-14f, 0.7f, 9f), AmmoKind.Blades);
         b.Ammo(new Vector3(14f, 0.7f, 9f), AmmoKind.BioSludge);

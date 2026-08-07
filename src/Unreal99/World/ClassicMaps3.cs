@@ -136,15 +136,25 @@ public static partial class Maps
         b.Weapon(new Vector3(20f, 1.0f, HZ - 4f), WeaponKind.PulseGun);
         b.Weapon(new Vector3(-20f, 1.0f, HZ - 4f), WeaponKind.BioRifle);
         b.Weapon(new Vector3(20f, 1.0f, -HZ + 4f), WeaponKind.Ripper);
+        // Second of each doubled weapon, per the original's list: shock x2, flak x2, rocket x2,
+        // sniper x2, and the Redeemer it has always had.
+        b.Weapon(new Vector3(0f, 0.9f, -20f), WeaponKind.ShockRifle);
+        b.Weapon(new Vector3(20f, 1.0f, 4f), WeaponKind.FlakCannon);
+        b.Weapon(new Vector3(-20f, 1.0f, -4f), WeaponKind.RocketLauncher);
+        b.Weapon(new Vector3(0f, Upper + 0.9f, 20f), WeaponKind.SniperRifle);
+        // Down on the channel ledge, where taking it means standing next to the slime.
+        b.Weapon(new Vector3(0f, -5.4f, 20f), WeaponKind.Redeemer, respawn: 100f);
+
         b.Item(new Vector3(-(Chan - 1.3f), -5.4f, 0f), PickupKind.ShieldBelt);
-        b.Item(new Vector3(Chan - 1.3f, -5.4f, 0f), PickupKind.SuperHealth);
+        b.Item(new Vector3(Chan - 1.3f, -5.4f, 0f), PickupKind.JumpBoots);
         b.Item(new Vector3(0f, Upper + 0.8f, -HZ + 3f), PickupKind.DamageAmp);
-        b.Item(new Vector3(0f, Upper + 0.8f, HZ - 3f), PickupKind.Invisibility);
+        b.Item(new Vector3(0f, Upper + 0.8f, HZ - 3f), PickupKind.ThighPads);
         b.Item(new Vector3(-26f, 0.8f, 0f), PickupKind.BodyArmor);
-        b.Item(new Vector3(26f, 0.8f, 0f), PickupKind.BodyArmor);
-        for (int i = 0; i < 5; i++)
+        for (int i = 0; i < 4; i++)
+            b.Item(new Vector3(26f, 0.8f, -12f + i * 8f), PickupKind.HealthPack);
+        for (int i = 0; i < 6; i++)
         {
-            float t = -20f + i * 10f;
+            float t = -25f + i * 10f;
             b.Item(new Vector3(-14f, 0.6f, t), PickupKind.HealthVial);
             b.Item(new Vector3(14f, 0.6f, t), PickupKind.HealthVial);
         }
@@ -259,14 +269,22 @@ public static partial class Maps
         b.Weapon(new Vector3(0f, Gallery + 0.9f, H - 2.5f), WeaponKind.Minigun);
         b.Ammo(new Vector3(3f, Gallery + 0.7f, -H + 2.5f), AmmoKind.ShockCore);
         b.Ammo(new Vector3(3f, Gallery + 0.7f, H - 2.5f), AmmoKind.MinigunBullets);
+        // The original's list for this map is short and has no power-ups at all: seven weapons
+        // (no sniper rifle — there is nowhere on it worth a long shot), body armour, thigh pads,
+        // ten health packs and four vials. An earlier pass had a sniper rifle, an amplifier and
+        // a keg, which is a different and much swingier map.
+        b.Weapon(new Vector3(12f, 0.9f, -12f), WeaponKind.Ripper);
         b.Item(new Vector3(-H + 2.5f, Gallery + 0.8f, 0f), PickupKind.BodyArmor);
-        b.Item(new Vector3(H - 2.5f, Gallery + 0.8f, 0f), PickupKind.DamageAmp);
-        b.Item(new Vector3(-12f, 0.8f, -12f), PickupKind.SuperHealth);
-        b.Item(new Vector3(12f, 0.8f, 12f), PickupKind.ThighPads);
-        for (int i = 0; i < 8; i++)
+        b.Item(new Vector3(H - 2.5f, Gallery + 0.8f, 0f), PickupKind.ThighPads);
+        for (int i = 0; i < 10; i++)
         {
-            float a = i / 8f * MathX.TwoPi;
-            b.Item(new Vector3(MathF.Cos(a) * 13f, 0.6f, MathF.Sin(a) * 13f), PickupKind.HealthVial);
+            float a = i / 10f * MathX.TwoPi;
+            b.Item(new Vector3(MathF.Cos(a) * 13f, 0.7f, MathF.Sin(a) * 13f), PickupKind.HealthPack);
+        }
+        for (int i = 0; i < 4; i++)
+        {
+            float a = i / 4f * MathX.TwoPi + 0.4f;
+            b.Item(new Vector3(MathF.Cos(a) * 19f, 0.6f, MathF.Sin(a) * 19f), PickupKind.HealthVial);
         }
         for (int i = 0; i < 6; i++)
         {
@@ -386,7 +404,9 @@ public static partial class Maps
         b.Weapon(new Vector3(0f, 0.9f, -H + 3f), WeaponKind.FlakCannon);
         b.Weapon(new Vector3(0f, 0.9f, H - 3f), WeaponKind.BioRifle);
         b.Weapon(new Vector3(-H + 3f, 0.9f, 0f), WeaponKind.PulseGun);
-        b.Weapon(new Vector3(H - 3f, 0.9f, 0f), WeaponKind.Ripper);
+        // No Ripper on this one — the original's list has eight entries and that is not among
+        // them. It does carry a second rocket launcher instead.
+        b.Weapon(new Vector3(H - 3f, 0.9f, 0f), WeaponKind.RocketLauncher);
         b.Ammo(new Vector3(3f, 0.7f, -H + 3f), AmmoKind.FlakShells);
         b.Weapon(new Vector3(H - Ledge * 0.5f, levels[1] + 0.9f, 0f), WeaponKind.RocketLauncher);
         b.Ammo(new Vector3(H - Ledge * 0.5f, levels[1] + 0.7f, 3f), AmmoKind.Rockets);
@@ -395,8 +415,14 @@ public static partial class Maps
         b.Weapon(new Vector3(0f, levels[3] + 0.9f, -H + Ledge * 0.5f), WeaponKind.SniperRifle);
         b.Ammo(new Vector3(3f, levels[3] + 0.7f, -H + Ledge * 0.5f), AmmoKind.SniperRounds);
         b.Weapon(new Vector3(H - Ledge * 0.5f, levels[4] + 0.9f, 0f), WeaponKind.Redeemer, respawn: 55f);
+        // Belt, body armour and one amplifier; twelve vials and six packs. No keg, no boots.
         b.Item(new Vector3(0f, levels[4] + 0.8f, -H + Ledge * 0.5f), PickupKind.ShieldBelt);
         b.Item(new Vector3(0f, levels[2] + 0.8f, -H + Ledge * 0.5f), PickupKind.DamageAmp);
+        for (int i = 0; i < 6; i++)
+        {
+            float a = i / 6f * MathX.TwoPi + 0.3f;
+            b.Item(new Vector3(MathF.Cos(a) * 16f, 0.7f, MathF.Sin(a) * 16f), PickupKind.HealthPack);
+        }
         b.Item(new Vector3(-H + Ledge * 0.5f, levels[1] + 0.8f, 0f), PickupKind.BodyArmor);
         b.Item(new Vector3(0f, 0.8f, 0f), PickupKind.SuperHealth);
         b.Item(new Vector3(-H + Ledge * 0.5f, levels[2] + 0.8f, 0f), PickupKind.JumpBoots);
@@ -533,8 +559,12 @@ public static partial class Maps
         b.Weapon(new Vector3(0f, Shrine + 1.4f, 0f), WeaponKind.FlakCannon);
         b.Ammo(new Vector3(0f, Shrine + 0.7f, 4.5f), AmmoKind.FlakShells);
         b.Item(new Vector3(0f, Shrine + 1.3f, -4.5f), PickupKind.ShieldBelt);
-        b.Weapon(new Vector3(-HX + 7f, Corner + 0.9f, -HZ + 6f), WeaponKind.SniperRifle);
-        b.Ammo(new Vector3(-HX + 10f, Corner + 0.7f, -HZ + 6f), AmmoKind.SniperRounds);
+        // Four flak cannons and no sniper rifle: this map is all short sightlines and drops,
+        // and the original arms it accordingly.
+        b.Weapon(new Vector3(-HX + 7f, Corner + 0.9f, -HZ + 6f), WeaponKind.FlakCannon);
+        b.Weapon(new Vector3(0f, 0.9f, -18f), WeaponKind.FlakCannon);
+        b.Weapon(new Vector3(0f, 0.9f, 18f), WeaponKind.FlakCannon);
+        b.Ammo(new Vector3(-HX + 10f, Corner + 0.7f, -HZ + 6f), AmmoKind.FlakShells);
         b.Weapon(new Vector3(HX - 7f, Corner + 0.9f, HZ - 6f), WeaponKind.RocketLauncher);
         b.Ammo(new Vector3(HX - 10f, Corner + 0.7f, HZ - 6f), AmmoKind.Rockets);
         b.Weapon(new Vector3(HX - 7f, Corner + 0.9f, -HZ + 6f), WeaponKind.Minigun);
@@ -568,8 +598,13 @@ public static partial class Maps
     // ================================================================ DM-莫比亞斯
 
     /// <summary>
-    /// One room. A pillar in the middle, a step ring around it, and a wall you cannot leave.
-    /// Deliberately almost bare: two heavy weapons and nowhere to run is the entire design.
+    /// An octagonal dome of two floors, pillars on both for cover, and a corridor at the north
+    /// and south ends. The lifts in those corridors are the only way between the floors.
+    ///
+    /// The armoury is four rocket launchers and a Redeemer, and that is the entire pickup list —
+    /// no armour, no health, nothing. An earlier version was one flat room with a rocket
+    /// launcher, a flak cannon and a scattering of health, which is a different map wearing the
+    /// name: half the geometry and none of the reason it is remembered.
     /// </summary>
     private static Level BuildMorbias(GL gl)
     {
@@ -587,63 +622,89 @@ public static partial class Maps
         env.FogColor = new Vector3(0.10f, 0.09f, 0.11f);
         env.FogDensity = 0.020f;
 
-        const float OuterR = 17f;
-        const float PillarR = 4.6f;
-        const float WallTop = 19f;
+        const float OuterR = 18f;
+        const float Upper = 9f;          // second floor
+        const float DomeTop = 20f;
+        const float CorridorHalfX = 5f;
+        const float CorridorEnd = 30f;   // north/south corridors run out to here
 
-        // --- the floor ring and the wall around it ---
-        b.Annulus(Vector3.Zero, -2.4f, 0f, 0f, OuterR + 2.6f, MatId.TechFloor, slabs: 30, collide: true, uvScale: 0.8f);
-        b.Annulus(Vector3.Zero, 0f, WallTop, OuterR, OuterR + 2.6f, MatId.Concrete, slabs: 30, collide: true, uvScale: 0.9f);
-        // A partial roof: the rim is covered, the middle is open to the sky above the pillar.
-        b.Annulus(Vector3.Zero, WallTop, WallTop + 1.6f, PillarR + 2f, OuterR + 2.6f, MatId.TechPanelDark,
+        // --- shell: floor, octagonal wall, dome ---
+        b.Annulus(Vector3.Zero, -2.4f, 0f, 0f, OuterR + 3f, MatId.TechFloor, slabs: 30, collide: true, uvScale: 0.8f);
+        b.Annulus(Vector3.Zero, 0f, DomeTop, OuterR, OuterR + 3f, MatId.Concrete, slabs: 30, collide: true, uvScale: 0.9f);
+        b.Annulus(Vector3.Zero, DomeTop, DomeTop + 1.6f, 0f, OuterR + 3f, MatId.TechPanelDark,
             slabs: 30, collide: true, uvScale: 0.9f);
 
-        // --- the pillar, and the step that rings it ---
-        b.Prism(new Vector3(0f, 0f, 0f), PillarR, WallTop + 1.6f, 10, MatId.TechPanelDark);
-        // Three shallow steps rather than one 1.5m block: a single riser that tall is cover
-        // nobody can climb, and it would strand the vials sitting on top of it.
-        for (int i = 0; i < 3; i++)
-            b.Annulus(Vector3.Zero, 0f, 0.5f + i * 0.5f, PillarR + (2 - i) * 1.2f, PillarR + 3.6f,
-                MatId.Trim, slabs: 22, collide: true, uvScale: 0.8f);
-        // Thin strips only. In a room this small an emissive panel of any real size stops being
-        // a light source and becomes the scenery.
-        for (int i = 0; i < 10; i++)
-        {
-            float a = i / 10f * MathX.TwoPi;
-            Vector3 d = new(MathF.Cos(a), 0f, MathF.Sin(a));
-            b.Decor(d * (PillarR + 0.10f) + new Vector3(-0.22f, 2.4f, -0.22f),
-                    d * (PillarR + 0.10f) + new Vector3(0.22f, 7.5f, 0.22f), MatId.EnergyPanel, 0.4f);
-        }
-        b.AddLight(new Vector3(0f, 7f, 0f), new Vector3(0.95f, 0.6f, 0.32f), 26f, 4.5f, 1.4f, 0.08f);
+        // --- second floor: a gallery ring, open over the middle so both levels fight each other ---
+        b.Annulus(Vector3.Zero, Upper - 0.6f, Upper, 8.5f, OuterR, MatId.MetalGrate,
+            slabs: 28, collide: true, uvScale: 0.9f);
+        RingPosts(b, Upper, 8.9f, 16, 0.95f);
 
-        // --- wall sconces, evenly spaced, purely so the ring reads as a ring ---
+        // --- pillars on both floors, as the original has ---
+        for (int i = 0; i < 4; i++)
+        {
+            float a = i / 4f * MathX.TwoPi + MathX.Pi * 0.25f;
+            Vector3 d = new(MathF.Cos(a), 0f, MathF.Sin(a));
+            b.Prism(d * 12.5f, 1.5f, Upper - 0.6f, 8, MatId.TechPanelDark);
+            b.Prism(d * 13.5f + new Vector3(0f, Upper, 0f), 1.4f, DomeTop - Upper, 8, MatId.TechPanelDark);
+            b.Decor(d * 12.5f + new Vector3(-0.28f, 2.2f, -0.28f),
+                    d * 12.5f + new Vector3(0.28f, 6.6f, 0.28f), MatId.EnergyPanel, 0.45f);
+            b.AddLight(d * 12.5f + new Vector3(0f, 7.2f, 0f), new Vector3(0.9f, 0.62f, 0.35f), 17f, 3.0f);
+        }
+
+        // --- north and south corridors, each with the lift that is the only way upstairs ---
+        foreach (int s in new[] { -1, 1 })
+        {
+            float zi = s * (OuterR - 1f), zo = s * CorridorEnd;
+            float z0 = MathF.Min(zi, zo), z1 = MathF.Max(zi, zo);
+            b.Solid(new Vector3(-CorridorHalfX, -2.4f, z0), new Vector3(CorridorHalfX, 0f, z1), MatId.TechFloor, true, 0.8f);
+            b.Solid(new Vector3(-CorridorHalfX - 1.6f, 0f, z0), new Vector3(-CorridorHalfX, DomeTop, z1), MatId.Concrete, true, 0.9f);
+            b.Solid(new Vector3(CorridorHalfX, 0f, z0), new Vector3(CorridorHalfX + 1.6f, DomeTop, z1), MatId.Concrete, true, 0.9f);
+            b.Solid(new Vector3(-CorridorHalfX - 1.6f, 0f, s * CorridorEnd), new Vector3(CorridorHalfX + 1.6f, DomeTop, s * (CorridorEnd + 1.6f)),
+                MatId.Concrete, true, 0.9f);
+            b.Solid(new Vector3(-CorridorHalfX - 1.6f, DomeTop, z0), new Vector3(CorridorHalfX + 1.6f, DomeTop + 1.6f, z1),
+                MatId.TechPanelDark, true, 0.9f);
+            // Upper landing joining the corridor to the gallery ring.
+            b.Solid(new Vector3(-CorridorHalfX, Upper - 0.6f, s * (OuterR - 4f)), new Vector3(CorridorHalfX, Upper, s * (CorridorEnd - 4f)),
+                MatId.MetalGrate, true, 0.9f);
+            b.Lift(new Vector3(-3f, -0.2f, s * (CorridorEnd - 6f) - 3f), new Vector3(3f, 0.3f, s * (CorridorEnd - 6f) + 3f),
+                new Vector3(0f, Upper + 0.3f, 0f), MatId.TechPanelDark, period: 6f, phase: s < 0 ? 0f : 3f);
+            b.CeilingLamp(new Vector3(0f, DomeTop - 1.4f, s * (CorridorEnd - 8f)), new Vector3(0.9f, 0.85f, 0.75f), 22f, 6f, 1.2f);
+        }
+
         for (int i = 0; i < 8; i++)
         {
             float a = i / 8f * MathX.TwoPi + MathX.Pi / 8f;
             Vector3 d = new(MathF.Cos(a), 0f, MathF.Sin(a));
-            b.Decor(d * (OuterR - 0.2f) + new Vector3(-0.3f, 6f, -0.3f),
-                    d * (OuterR - 0.2f) + new Vector3(0.3f, 8.4f, 0.3f), MatId.EnergyPanel, 0.5f);
-            b.AddLight(d * (OuterR - 2f) + new Vector3(0f, 8f, 0f), new Vector3(0.8f, 0.85f, 1f), 15f, 2.4f);
+            b.Decor(d * (OuterR - 0.2f) + new Vector3(-0.3f, 12f, -0.3f),
+                    d * (OuterR - 0.2f) + new Vector3(0.3f, 14.4f, 0.3f), MatId.EnergyPanel, 0.5f);
+            b.AddLight(d * (OuterR - 2f) + new Vector3(0f, 13f, 0f), new Vector3(0.8f, 0.85f, 1f), 16f, 2.6f);
         }
+        b.AddLight(new Vector3(0f, 6f, 0f), new Vector3(0.95f, 0.7f, 0.4f), 30f, 5f);
 
-        // --- placements: sparse on purpose ---
+        // --- the whole armoury: four rocket launchers and a Redeemer. Nothing else, by design. ---
         b.Weapon(new Vector3(0f, 0.9f, -12f), WeaponKind.RocketLauncher);
-        b.Ammo(new Vector3(3f, 0.7f, -12f), AmmoKind.Rockets);
-        b.Ammo(new Vector3(-3f, 0.7f, -12f), AmmoKind.Rockets);
-        b.Weapon(new Vector3(0f, 0.9f, 12f), WeaponKind.FlakCannon);
-        b.Ammo(new Vector3(3f, 0.7f, 12f), AmmoKind.FlakShells);
-        b.Ammo(new Vector3(-3f, 0.7f, 12f), AmmoKind.FlakShells);
-        b.Item(new Vector3(-12f, 0.8f, 0f), PickupKind.BodyArmor);
-        b.Item(new Vector3(12f, 0.8f, 0f), PickupKind.HealthPack);
+        b.Weapon(new Vector3(0f, 0.9f, 12f), WeaponKind.RocketLauncher);
+        b.Weapon(new Vector3(0f, Upper + 0.9f, -13f), WeaponKind.RocketLauncher);
+        b.Weapon(new Vector3(0f, Upper + 0.9f, 13f), WeaponKind.RocketLauncher);
+        b.Weapon(new Vector3(0f, Upper + 0.9f, 0f), WeaponKind.Redeemer, respawn: 90f);
+        // The Redeemer platform: without it the middle of the gallery ring is open air.
+        b.Annulus(Vector3.Zero, Upper - 0.6f, Upper, 0f, 3.4f, MatId.Trim, slabs: 14, collide: true, uvScale: 0.8f);
+        foreach (int s in new[] { -1, 1 })
+            b.AddJumpPad(new Vector3(0f, Upper + 0.1f, s * 6.5f), new Vector3(0f, Upper + 2.2f, 0f),
+                new Vector3(0.45f, 0.85f, 1f));
+        for (int i = 0; i < 11; i++)
+            b.Ammo(new Vector3(MathF.Cos(i / 11f * MathX.TwoPi) * 15f, 0.7f,
+                               MathF.Sin(i / 11f * MathX.TwoPi) * 15f), AmmoKind.Rockets);
+
         for (int i = 0; i < 6; i++)
         {
-            float a = i / 6f * MathX.TwoPi + 0.5f;
-            b.Item(new Vector3(MathF.Cos(a) * 8.5f, 1.7f, MathF.Sin(a) * 8.5f), PickupKind.HealthVial);
+            float a = i / 6f * MathX.TwoPi;
+            b.Spawn(new Vector3(MathF.Cos(a) * 15f, 0.2f, MathF.Sin(a) * 15f), -a * MathX.Rad2Deg + 90f);
         }
-        for (int i = 0; i < 8; i++)
+        for (int i = 0; i < 4; i++)
         {
-            float a = i / 8f * MathX.TwoPi;
-            b.Spawn(new Vector3(MathF.Cos(a) * 14f, 0.2f, MathF.Sin(a) * 14f), -a * MathX.Rad2Deg + 90f);
+            float a = i / 4f * MathX.TwoPi + 0.6f;
+            b.Spawn(new Vector3(MathF.Cos(a) * 14f, Upper + 0.2f, MathF.Sin(a) * 14f), -a * MathX.Rad2Deg + 90f);
         }
 
         return b.Build(gl);
@@ -729,9 +790,19 @@ public static partial class Maps
             b.Ramp(new Vector3(-11f, 0f, baseZ - 3f), new Vector3(-7f, 1.4f, baseZ + 3f), 0, MatId.TechFloor);
             b.Ramp(new Vector3(7f, 0f, baseZ - 3f), new Vector3(11f, 1.4f, baseZ + 3f), 1, MatId.TechFloor);
             // Back wall alcove with the base armour.
+            // Both bases carry the same six weapons, so the map's sixteen entries are two of
+            // each plus the four Enforcers. Nothing is exclusive to one side.
             b.Item(new Vector3(0f, 0.8f, sz * (EndZ - 4f)), PickupKind.BodyArmor);
+            b.Item(new Vector3(-4f, 0.8f, sz * (EndZ - 4f)), PickupKind.ThighPads);
             b.Weapon(new Vector3(-14f, 0.9f, sz * (EndZ - 5f)), WeaponKind.FlakCannon);
             b.Weapon(new Vector3(14f, 0.9f, sz * (EndZ - 5f)), WeaponKind.Minigun);
+            b.Weapon(new Vector3(-18f, 0.9f, sz * (EndZ - 10f)), WeaponKind.Ripper);
+            b.Weapon(new Vector3(18f, 0.9f, sz * (EndZ - 10f)), WeaponKind.ShockRifle);
+            b.Weapon(new Vector3(-10f, 0.9f, sz * 20f), WeaponKind.RocketLauncher);
+            b.Weapon(new Vector3(10f, 0.9f, sz * 20f), WeaponKind.Enforcer);
+            b.Weapon(new Vector3(-16f, 0.9f, sz * 26f), WeaponKind.Enforcer);
+            for (int h = 0; h < 7; h++)
+                b.Item(new Vector3(-12f + h * 4f, 0.7f, sz * (EndZ - 14f)), PickupKind.HealthPack);
             b.Ammo(new Vector3(-14f, 0.7f, sz * (EndZ - 8f)), AmmoKind.FlakShells);
             b.Ammo(new Vector3(14f, 0.7f, sz * (EndZ - 8f)), AmmoKind.MinigunBullets);
 
@@ -767,14 +838,18 @@ public static partial class Maps
         }
 
         // --- neutral middle: the contested pickups ---
-        b.Weapon(new Vector3(0f, 0.9f, -7f), WeaponKind.RocketLauncher);
-        b.Weapon(new Vector3(0f, 0.9f, 7f), WeaponKind.PulseGun);
+        b.Weapon(new Vector3(0f, 0.9f, -7f), WeaponKind.SniperRifle);
+        b.Weapon(new Vector3(0f, 0.9f, 7f), WeaponKind.SniperRifle);
         b.Ammo(new Vector3(3f, 0.7f, -7f), AmmoKind.Rockets);
-        b.Weapon(new Vector3(-18f, 0.9f, 0f), WeaponKind.ShockRifle);
-        b.Weapon(new Vector3(18f, 0.9f, 0f), WeaponKind.BioRifle);
-        b.Item(new Vector3(0f, Upper + 0.8f, 0f), PickupKind.ShieldBelt);
-        b.Item(new Vector3(-18f, Upper + 0.8f, 0f), PickupKind.DamageAmp);
-        b.Item(new Vector3(18f, Upper + 0.8f, 0f), PickupKind.SuperHealth);
+        b.Weapon(new Vector3(-18f, 0.9f, 0f), WeaponKind.Enforcer);
+        b.Weapon(new Vector3(18f, 0.9f, 0f), WeaponKind.Enforcer);
+        // One amplifier, up in the middle's top area, and nothing else out here.
+        b.Item(new Vector3(0f, Upper + 0.8f, 0f), PickupKind.DamageAmp);
+        for (int i = 0; i < 6; i++)
+        {
+            b.Item(new Vector3(-16f, 0.6f, -10f + i * 4f), PickupKind.HealthVial);
+            b.Item(new Vector3(16f, 0.6f, -10f + i * 4f), PickupKind.HealthVial);
+        }
         for (int s = -1; s <= 1; s += 2)
             for (int i = -1; i <= 1; i++)
                 b.CeilingLamp(new Vector3(i * 12f, CeilY - 1.4f, s * 11f), new Vector3(0.9f, 0.92f, 1f), 26f, 7f, 1.4f);
