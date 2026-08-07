@@ -48,9 +48,13 @@ public sealed class BotController : Controller
     private float _threatTimer;
     private Vector3 _threatDirection;
 
+    /// <summary>Kept so a saved match can rebuild this bot as the same opponent, not a new one.</summary>
+    public uint Seed { get; }
+
     public BotController(uint seed, string name, float skill)
     {
-        _rng = new Rng(seed == 0 ? 1u : seed);
+        Seed = seed == 0 ? 1u : seed;
+        _rng = new Rng(Seed);
         DisplayName = name;
         Skill = MathX.Clamp(skill, 0f, 1f);
     }

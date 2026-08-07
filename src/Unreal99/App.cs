@@ -182,6 +182,12 @@ public sealed class App : IDisposable
                     _inputTest = true;
                     _windowed = true;
                     break;
+                case "--savetest":
+                    // Round-trips settings and a saved match without needing anyone to drive menus.
+                    _saveTest = true;
+                    _windowed = true;
+                    _autoStartMatch = true;
+                    break;
                 case "--menutest" when i + 2 < args.Length:
                     // Drives the real system cursor to a screen position so menu hover and
                     // hit-testing can be verified from an automated run.
@@ -322,6 +328,85 @@ public sealed class App : IDisposable
             _playerDevices[MathX.Clamp(i, 0, 3)].Bindings.MirrorFrom(_playerDevices[0].Bindings);
             SetStatus($"{Loc.BindingsPlayer}{i + 1} {Loc.BindingsMirror}");
         };
+
+        _menu.OnSettingsChanged = MarkSettingsDirty;
+        _menu.RefreshSaveSlots = RefreshSaveSlots;
+        _menu.SlotThumbnail = SlotThumbnail;
+        _menu.OnSaveToSlot = SaveToSlot;
+        _menu.OnLoadFromSlot = LoadFromSlot;
+        _menu.OnDeleteSlot = DeleteSlot;
+
+        LoadUserSettings();
+        RefreshSaveSlots();
+    }
+
+    // ---------------------------------------------------------------- persisted settings
+
+    private bool _settingsDirty;
+    private float _settingsSaveTimer;
+
+    private MatchSetup CaptureSetup() => new()
+    {
+        Map = (int)_menu.Map,
+        ModeKind = (int)_menu.ModeKind,
+        LocalPlayers = _menu.LocalPlayers,
+        BotCount = _menu.BotCount,
+        BotSkill = _menu.BotSkill,
+        FragLimit = _menu.FragLimit,
+        CaptureLimit = _menu.CaptureLimit,
+        TimeLimitMinutes = _menu.TimeLimitMinutes,
+    };
+
+    private void LoadUserSettings()
+    {
+        var saved = SettingsStore.Load();
+        if (saved == null) return;
+
+        var setup = new MatchSetup();
+        SettingsStore.Apply(saved, _renderSettings, _controls, _playerDevices, setup,
+            out float volume, out bool vsync, out bool showFps);
+
+        _menu.Map = (MapId)MathX.Clamp(setup.Map, 0, (int)MapId.Count - 1);
+        _menu.ModeKind = (GameModeKind)setup.ModeKind;
+        _menu.LocalPlayers = setup.LocalPlayers;
+        _menu.BotCount = setup.BotCount;
+        _menu.BotSkill = setup.BotSkill;
+        _menu.FragLimit = setup.FragLimit;
+        _menu.CaptureLimit = setup.CaptureLimit;
+        _menu.TimeLimitMinutes = setup.TimeLimitMinutes;
+        _menu.DemoMode = saved.DemoMode;
+        _menu.DemoSkill = MathX.Clamp(saved.DemoSkill, 0, 5);
+
+        if (_audio != null) _audio.MasterVolume = volume;
+        if (_window != null) _window.VSync = vsync;
+        _showDebug = showFps;
+        _renderer?.OnQualityChanged();
+    }
+
+    /// <summary>
+    /// Marks settings as needing a write. Menus change values every frame while an option is
+    /// held, so the write is deferred rather than done per keystroke — otherwise adjusting a
+    /// slider would rewrite the file dozens of times.
+    /// </summary>
+    private void MarkSettingsDirty() => _settingsDirty = true;
+
+    private void UpdateSettingsPersistence(float dt)
+    {
+        if (!_settingsDirty) return;
+        _settingsSaveTimer += dt;
+        if (_settingsSaveTimer < 0.75f) return;
+        SaveUserSettings();
+    }
+
+    private void SaveUserSettings()
+    {
+        _settingsDirty = false;
+        _settingsSaveTimer = 0f;
+        var s = SettingsStore.Capture(_renderSettings, _controls, _audio?.MasterVolume ?? 0.75f,
+            _window?.VSync ?? true, _showDebug, _playerDevices, CaptureSetup());
+        s.DemoMode = _menu.DemoMode;
+        s.DemoSkill = _menu.DemoSkill;
+        SettingsStore.Save(s);
     }
 
     /// <summary>
@@ -365,6 +450,167 @@ public sealed class App : IDisposable
             Console.WriteLine($"標誌載入失敗，使用文字標題: {ex.Message}");
             return null;
         }
+    }
+
+    // ---------------------------------------------------------------- saved games
+
+    private readonly Dictionary<int, Texture2D> _slotThumbnails = new();
+    /// <summary>Deferred to end of frame: reading the framebuffer mid-UI would capture the menu.</summary>
+    private int _pendingSaveSlot = -1;
+
+    private void RefreshSaveSlots()
+    {
+        _menu.SaveSlots = SaveStore.ListSlots();
+        _menu.CanSave = _state is AppState.Playing or AppState.Paused;
+        foreach (var t in _slotThumbnails.Values) t?.Dispose();
+        _slotThumbnails.Clear();
+    }
+
+    /// <summary>Thumbnails are decoded on first request and cached until the slot list is refreshed.</summary>
+    private Texture2D SlotThumbnail(int slot)
+    {
+        if (_slotThumbnails.TryGetValue(slot, out var cached)) return cached;
+        Texture2D texture = null;
+        string path = SaveStore.ThumbnailFor(slot);
+        if (File.Exists(path))
+        {
+            try
+            {
+                using var stream = File.OpenRead(path);
+                ImageResult image = ImageResult.FromStream(stream, ColorComponents.RedGreenBlueAlpha);
+                texture = Texture2D.FromRgba(_gl, image.Width, image.Height, image.Data,
+                    mipmaps: false, srgb: true, anisotropy: 1);
+            }
+            catch (Exception ex) { Console.WriteLine($"存檔預覽載入失敗: {ex.Message}"); }
+        }
+        _slotThumbnails[slot] = texture;
+        return texture;
+    }
+
+    private void SaveToSlot(int slot)
+    {
+        _quickSlot = slot;
+        if (_world?.Level == null) { SetStatus(Loc.SaveFailed); return; }
+        var save = SaveStore.Capture(_world, _menu.Map, _menu.LocalPlayers, _menu.BotCount, _menu.BotSkill);
+        if (!SaveStore.Write(slot, save)) { SetStatus(Loc.SaveFailed); return; }
+        // The preview has to come from a frame with no menu over it, so ask for one and let the
+        // end-of-frame hook grab it once the world has been drawn on its own.
+        _pendingSaveSlot = slot;
+        SetStatus($"{Loc.SaveSaved}：{Loc.SaveSlotName(slot)}");
+        RefreshSaveSlots();
+    }
+
+    /// <summary>
+    /// Writes the slot's preview from the current framebuffer, scaled down to a thumbnail.
+    /// Box-filtered rather than point-sampled: a nearest-neighbour eighth-size image of a
+    /// detailed arena is mostly aliasing.
+    /// </summary>
+    private unsafe void CaptureSaveThumbnail(int slot)
+    {
+        const int ThumbW = 480;
+        int w = Width, h = Height;
+        if (w <= 0 || h <= 0) return;
+        int thumbH = Math.Max(1, (int)((long)ThumbW * h / w));
+
+        var pixels = new byte[w * h * 4];
+        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+        _gl.PixelStore(PixelStoreParameter.PackAlignment, 1);
+        fixed (byte* p = pixels)
+            _gl.ReadPixels(0, 0, (uint)w, (uint)h, PixelFormat.Rgba, PixelType.UnsignedByte, p);
+
+        var thumb = new byte[ThumbW * thumbH * 4];
+        for (int y = 0; y < thumbH; y++)
+        {
+            int sy0 = y * h / thumbH, sy1 = Math.Max(sy0 + 1, (y + 1) * h / thumbH);
+            for (int x = 0; x < ThumbW; x++)
+            {
+                int sx0 = x * w / ThumbW, sx1 = Math.Max(sx0 + 1, (x + 1) * w / ThumbW);
+                int r = 0, g = 0, b = 0, n = 0;
+                for (int sy = sy0; sy < sy1; sy++)
+                    for (int sx = sx0; sx < sx1; sx++)
+                    {
+                        int i = (sy * w + sx) * 4;
+                        r += pixels[i]; g += pixels[i + 1]; b += pixels[i + 2]; n++;
+                    }
+                int o = (y * ThumbW + x) * 4;
+                thumb[o] = (byte)(r / n); thumb[o + 1] = (byte)(g / n);
+                thumb[o + 2] = (byte)(b / n); thumb[o + 3] = 255;
+            }
+        }
+
+        try { Png.Write(SaveStore.ThumbnailFor(slot), ThumbW, thumbH, thumb, 4, flipVertically: true); }
+        catch (Exception ex) { Console.WriteLine($"存檔預覽儲存失敗: {ex.Message}"); }
+    }
+
+    private void LoadFromSlot(int slot)
+    {
+        _quickSlot = slot;
+        var save = SaveStore.Read(slot);
+        if (save == null) { SetStatus(Loc.SaveLoadFailed); return; }
+        _pendingLoad = save;
+        _state = AppState.LoadingMatch;
+        _loadStep = 0;
+        _menu.Active = false;
+    }
+
+    private void DeleteSlot(int slot)
+    {
+        SaveStore.Delete(slot);
+        SetStatus($"{Loc.SaveDeleted}：{Loc.SaveSlotName(slot)}");
+        RefreshSaveSlots();
+    }
+
+    private SaveGame _pendingLoad;
+
+    /// <summary>Rebuilds a match from a save instead of from the menu's settings.</summary>
+    private void SpawnFromSave(SaveGame save)
+    {
+        int localPlayers = MathX.Clamp(save.LocalPlayers, 1, 4);
+        ConfigureMatchDevices(localPlayers);
+
+        SaveStore.Restore(save, _world, _level, MakePlayerController,
+            _playersAsControllers, _viewPawnIds);
+
+        _players.Clear();
+        foreach (var c in _playersAsControllers)
+            if (c is PlayerController pc) _players.Add(pc);
+        _playersAsControllers.Clear();
+
+        for (int i = 0; i < _cameras.Length; i++) _cameras[i] = Camera.Default;
+        _menu.ResultsWorld = null;
+        _menu.ResultsViewer = null;
+
+        // Verify here, before the world has ticked once. Checking a few frames later would be
+        // measuring how far the bots walked, not whether the restore was faithful.
+        if (_saveTest) VerifySaveTestRestore();
+    }
+
+    private readonly List<Controller> _playersAsControllers = new();
+
+    private Controller MakePlayerController(int playerIndex)
+    {
+        int slot = MathX.Clamp(playerIndex, 0, 3);
+        var settings = new ControlSettings
+        {
+            MouseSensitivity = _controls.MouseSensitivity,
+            PadLookSensitivity = _controls.PadLookSensitivity,
+            KeyboardLookSpeed = _controls.KeyboardLookSpeed,
+            PadDeadzone = _controls.PadDeadzone,
+            InvertY = _controls.InvertY,
+            Fov = _controls.Fov,
+        };
+        var controller = new PlayerController(_input, slot, _playerDevices[slot], settings);
+        if (_demoMode || _menu.DemoMode)
+            controller.AutoPilot = new BotController((uint)(101 + slot * 977),
+                Loc.PlayerDefaultNames[slot], DemoSkillValue());
+        return controller;
+    }
+
+    /// <summary>Demo autopilot skill, on the same curve the opponent bots use.</summary>
+    private float DemoSkillValue()
+    {
+        ReadOnlySpan<float> curve = [0f, 0.08f, 0.22f, 0.42f, 0.68f, 1f];
+        return curve[MathX.Clamp(_menu.DemoSkill, 0, curve.Length - 1)];
     }
 
     // ---------------------------------------------------------------- input device assignment
@@ -632,6 +878,9 @@ public sealed class App : IDisposable
 
     private void OnClosing()
     {
+        // Writes are debounced while menus are being driven; flush anything still pending so
+        // quitting straight after changing an option does not throw the change away.
+        if (_settingsDirty) SaveUserSettings();
         Dispose();
     }
 
@@ -668,7 +917,17 @@ public sealed class App : IDisposable
         }
 
         if (_inputTest) UpdateInputSelfTest();
+        if (_saveTest) UpdateSaveSelfTest();
         if (_menuTestPoint.HasValue) UpdateMenuPointerTest();
+        UpdateSettingsPersistence(dt);
+        // The save's preview must come from a frame the world drew on its own; taking it here,
+        // after the scene and before any menu overlay of the next frame, gets exactly that.
+        if (_pendingSaveSlot >= 0)
+        {
+            CaptureSaveThumbnail(_pendingSaveSlot);
+            _pendingSaveSlot = -1;
+            RefreshSaveSlots();
+        }
         HandleAutoScreenshot();
         _input.EndFrame(dt);
     }
@@ -710,7 +969,23 @@ public sealed class App : IDisposable
             _window.WindowState = _window.WindowState == WindowState.Fullscreen
                 ? WindowState.Normal : WindowState.Fullscreen;
         }
+
+        // Quick save and quick load both target the last slot the player touched, so repeated
+        // F5/F9 behaves like a single scratch save rather than marching through the slots.
+        if (_input.KeyPressed(Key.F5) && _state is AppState.Playing or AppState.Paused)
+        {
+            SaveToSlot(_quickSlot);
+            SetStatus($"{Loc.SaveQuickSaved}：{Loc.SaveSlotName(_quickSlot)}");
+        }
+        if (_input.KeyPressed(Key.F9) && _state is AppState.Playing or AppState.Paused or AppState.Menu)
+        {
+            if (SaveStore.Read(_quickSlot) != null) LoadFromSlot(_quickSlot);
+            else SetStatus(Loc.SaveNothingToLoad);
+        }
     }
+
+    /// <summary>Slot used by F5/F9, and updated whenever a slot is chosen from the menu.</summary>
+    private int _quickSlot;
 
     // ---------------------------------------------------------------- boot
 
@@ -754,7 +1029,11 @@ public sealed class App : IDisposable
                 else
                 {
                     _state = AppState.Menu;
-                    _menu.Open(_bootMenuScreen);
+                    // Route through the same entry points the menu uses, so the save screens get
+                    // their slot list refreshed and their selection placed as they would in play.
+                    if (_bootMenuScreen == MenuScreen.LoadGame) _menu.OpenLoadGame();
+                    else if (_bootMenuScreen == MenuScreen.SaveGame) _menu.OpenSaveGame();
+                    else _menu.Open(_bootMenuScreen);
                     _input.SetMouseCapture(false);
                 }
                 break;
@@ -913,11 +1192,21 @@ public sealed class App : IDisposable
             case 1:
                 {
                     if (_level != null && _level != _menuLevel) _level.Dispose();
-                    _level = Maps.Build(_gl, _menu.Map);
+                    // A pending load dictates the arena; otherwise the menu does.
+                    MapId map = _pendingLoad != null
+                        ? (MapId)MathX.Clamp(_pendingLoad.MapId, 0, (int)MapId.Count - 1)
+                        : _menu.Map;
+                    _level = Maps.Build(_gl, map);
                     break;
                 }
             default:
-                SpawnMatch();
+                if (_pendingLoad != null)
+                {
+                    SpawnFromSave(_pendingLoad);
+                    SetStatus(Loc.SaveLoaded);
+                    _pendingLoad = null;
+                }
+                else SpawnMatch();
                 _state = AppState.Playing;
                 _input.SetMouseCapture(true);
                 break;
@@ -956,8 +1245,11 @@ public sealed class App : IDisposable
                 Fov = _controls.Fov,
             };
             var controller = new PlayerController(_input, i, _playerDevices[i], settings);
-            if (_demoMode)
-                controller.AutoPilot = new BotController((uint)(101 + i * 977), Loc.PlayerDefaultNames[i], 0.72f);
+            // Demo can come from the command line or from the match options; the options carry
+            // their own skill so the autopilot need not play at the opponents' difficulty.
+            if (_demoMode || _menu.DemoMode)
+                controller.AutoPilot = new BotController((uint)(101 + i * 977),
+                    Loc.PlayerDefaultNames[i], DemoSkillValue());
             Team team = mode.TeamBased ? (Team)(i % 2) : Team.None;
             var pawn = _world.AddPawn(controller, Loc.PlayerDefaultNames[i], team, false, i,
                 GameTypes.PlayerColor(i));
@@ -1431,6 +1723,118 @@ public sealed class App : IDisposable
             Console.WriteLine($"           滾輪累計={_inputTestWheel[i]:0.0} 來源={wheelSource}");
         }
         Console.WriteLine("  測試期間請分別轉動兩個滑鼠的滾輪；兩列的累計值應各自變動。");
+        Console.WriteLine("──────────────────────");
+        _window.Close();
+    }
+
+    // ---------------------------------------------------------------- save/load self-test
+
+    private bool _saveTest;
+    private int _saveTestFrame;
+    private SaveGame _saveTestExpected;
+
+    /// <summary>
+    /// Drives <c>--savetest</c>: writes the settings file and a saved match, reads both back and
+    /// compares. Proves the persistence path end to end without a person working the menus.
+    /// </summary>
+    private void UpdateSaveSelfTest()
+    {
+        _saveTestFrame++;
+        if (_state != AppState.Playing) return;
+
+        const int SaveAt = 90;
+        const int VerifyAt = 150;
+
+        if (_saveTestFrame == SaveAt)
+        {
+            // Change a couple of settings first so the comparison proves values survive, not
+            // just that a file appeared.
+            _controls.MouseSensitivity = 0.0037f;
+            _controls.InvertY = true;
+            _playerDevices[1].Bindings.Rebind(GameAction.Jump, InputBinding.OnKey(Key.Keypad7));
+            SaveUserSettings();
+
+            SaveToSlot(0);
+            _saveTestExpected = SaveStore.Read(0);
+            return;
+        }
+
+        if (_saveTestFrame != VerifyAt) return;
+
+        Console.WriteLine("──── 存檔自我測試 ────");
+        Console.WriteLine($"資料夾: {UserData.Root}");
+
+        var settings = SettingsStore.Load();
+        bool settingsOk = settings != null
+            && MathF.Abs(settings.MouseSensitivity - 0.0037f) < 1e-6f
+            && settings.InvertY
+            && settings.Players.Count > 1
+            && settings.Players[1].BindingKeys.Count > (int)GameAction.Jump
+            && settings.Players[1].BindingKeys[(int)GameAction.Jump] == (int)Key.Keypad7;
+        Console.WriteLine($"  設定檔: {(File.Exists(UserData.SettingsPath) ? "已寫入" : "缺少")}　" +
+                          $"靈敏度/反轉/按鍵還原: {(settingsOk ? "通過" : "失敗")}");
+
+        var reread = SaveStore.Read(0);
+        var expected = _saveTestExpected;
+        bool saveOk = reread != null && expected != null
+            && reread.MapId == expected.MapId
+            && reread.Pawns.Count == expected.Pawns.Count
+            && reread.Pickups.Count == expected.Pickups.Count
+            && MathF.Abs(reread.WorldTime - expected.WorldTime) < 0.001f;
+        Console.WriteLine($"  存檔位 0: {(reread != null ? "已寫入" : "缺少")}　" +
+                          $"角色 {reread?.Pawns.Count ?? 0} 個　道具 {reread?.Pickups.Count ?? 0} 個　" +
+                          $"往返一致: {(saveOk ? "通過" : "失敗")}");
+
+        string thumb = SaveStore.ThumbnailFor(0);
+        long thumbSize = File.Exists(thumb) ? new FileInfo(thumb).Length : 0;
+        Console.WriteLine($"  預覽圖: {(thumbSize > 0 ? $"已寫入 ({thumbSize / 1024} KB)" : "缺少")}");
+
+        var slots = SaveStore.ListSlots();
+        int used = slots.Count(x => x.Exists);
+        Console.WriteLine($"  存檔位清單: {used}/{SaveStore.SlotCount} 已使用");
+        if (reread != null)
+            Console.WriteLine($"  內容: {Maps.Name((MapId)reread.MapId)}　" +
+                              $"{Loc.ModeName((GameModeKind)reread.ModeKind)}　" +
+                              $"{Loc.SaveElapsed} {Loc.Clock(reread.WorldTime)}　" +
+                              $"{Loc.SaveLeader} {reread.LeaderName} {reread.LeaderScore}");
+
+        _saveTestFilesOk = settingsOk && saveOk && thumbSize > 0;
+        // Writing a file only proves half of it. Load the slot back into a live world and check
+        // the match actually comes back — same roster, same positions, same score.
+        LoadFromSlot(0);
+    }
+
+    private bool _saveTestFilesOk;
+
+    private void VerifySaveTestRestore()
+    {
+        var expected = _saveTestExpected;
+        var byId = _world.Pawns.ToDictionary(p => p.Id);
+        int matched = 0;
+        float worstDrift = 0f;
+        bool rosterOk = expected != null && _world.Pawns.Count == expected.Pawns.Count;
+
+        if (expected != null)
+            foreach (var ps in expected.Pawns)
+            {
+                if (!byId.TryGetValue(ps.Id, out var pawn)) continue;
+                float drift = Vector3.Distance(pawn.Position, new Vector3(ps.X, ps.Y, ps.Z));
+                worstDrift = MathF.Max(worstDrift, drift);
+                bool same = pawn.Name == ps.Name && pawn.Frags == ps.Frags
+                    && MathF.Abs(pawn.Health - ps.Health) < 0.01f
+                    && pawn.Weapon == (WeaponKind)ps.Weapon;
+                if (same) matched++;
+            }
+
+        int activePickups = _world.Pickups.Count(p => p.Active);
+        int expectedActive = expected?.Pickups.Count(p => p.Active) ?? -1;
+        bool restoreOk = rosterOk && matched == expected.Pawns.Count
+                         && activePickups == expectedActive && worstDrift < 0.01f;
+
+        Console.WriteLine($"  載入還原: 角色 {matched}/{expected?.Pawns.Count ?? 0} 相符　" +
+                          $"位置最大誤差 {worstDrift:0.000} m　" +
+                          $"道具狀態 {activePickups}/{expectedActive}　{(restoreOk ? "通過" : "失敗")}");
+        Console.WriteLine(_saveTestFilesOk && restoreOk ? "  結果: 全部通過" : "  結果: 有項目失敗");
         Console.WriteLine("──────────────────────");
         _window.Close();
     }

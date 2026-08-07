@@ -5,7 +5,7 @@ using Unreal99.Rendering;
 
 namespace Unreal99.UI;
 
-public enum MenuScreen { Main, Setup, MapGallery, Video, Controls, Devices, Bindings, Paused, Results }
+public enum MenuScreen { Main, Setup, MapGallery, Video, Controls, Devices, Bindings, Paused, Results, SaveGame, LoadGame }
 
 public enum MenuItemKind { Action, Choice, Header, Info }
 
@@ -74,6 +74,10 @@ public sealed class Menu
     public int FragLimit = 20;
     public int TimeLimitMinutes = 10;
     public int CaptureLimit = 5;
+    /// <summary>Hands the local players to an autopilot so the match plays itself.</summary>
+    public bool DemoMode;
+    /// <summary>Skill of the autopilot driving the local players, independent of the opponents'.</summary>
+    public int DemoSkill = 3;
 
     public Action OnStartMatch;
     public Action OnResume;
@@ -85,6 +89,8 @@ public sealed class Menu
     public RenderSettings Render;
     public Platform.ControlSettings Controls;
     public Action OnVideoChanged;
+    /// <summary>Raised whenever the player changes an option, so the app can persist it.</summary>
+    public Action OnSettingsChanged;
 
     // Settings that live outside RenderSettings: the window owns vsync, the app owns the overlay.
     public Func<bool> GetVsync;
@@ -116,6 +122,20 @@ public sealed class Menu
 
     public GameWorld ResultsWorld;
     public Pawn ResultsViewer;
+
+    // --- saved games, owned by the app ---
+    /// <summary>Slot metadata for the picker. Refreshed whenever a save screen opens.</summary>
+    public Game.SaveSlotInfo[] SaveSlots = [];
+    /// <summary>Thumbnail texture per slot, or null when the slot has no preview image.</summary>
+    public Func<int, Texture2D> SlotThumbnail;
+    public Action RefreshSaveSlots;
+    public Action<int> OnSaveToSlot;
+    public Action<int> OnLoadFromSlot;
+    public Action<int> OnDeleteSlot;
+    /// <summary>False in the front-end, where there is no match to write.</summary>
+    public bool CanSave;
+    /// <summary>Slot the preview panel is showing; sticks when the cursor leaves the slot list.</summary>
+    private int _previewSlot;
 
     // ---------------------------------------------------------------- navigation
 
@@ -299,6 +319,13 @@ public sealed class Menu
             case MenuScreen.Bindings:
                 Open(MenuScreen.Devices);
                 break;
+            case MenuScreen.SaveGame:
+                Open(MenuScreen.Paused);
+                break;
+            case MenuScreen.LoadGame:
+                // Reachable from both the front-end and a paused match; go back where we came from.
+                Open(CanSave ? MenuScreen.Paused : MenuScreen.Main);
+                break;
             case MenuScreen.Paused:
                 OnResume?.Invoke();
                 break;
@@ -353,6 +380,10 @@ public sealed class Menu
         if (item is not { Kind: MenuItemKind.Choice }) return;
         item.OnAdjust?.Invoke(direction);
         PlaySound?.Invoke(SoundId.MenuMove);
+        // Every option in the game is a Choice, so this is the one place a preference can
+        // change. The app debounces the actual write.
+        OnSettingsChanged?.Invoke();
+        Rebuild();
     }
 
     // ---------------------------------------------------------------- screen definitions
@@ -371,6 +402,8 @@ public sealed class Menu
             case MenuScreen.Bindings: BuildBindings(); break;
             case MenuScreen.Paused: BuildPaused(); break;
             case MenuScreen.Results: BuildResults(); break;
+            case MenuScreen.SaveGame:
+            case MenuScreen.LoadGame: BuildSaveSlots(); break;
         }
         if (SelectedIndex >= _items.Count) SelectedIndex = Math.Max(0, _items.Count - 1);
     }
@@ -404,6 +437,8 @@ public sealed class Menu
             Loc.ModeDescription(ModeKind));
         Add(Loc.MenuSplitScreen, () => { LocalPlayers = Math.Max(2, LocalPlayers); Open(MenuScreen.Setup); },
             "與最多三位朋友在同一台機器上對戰。");
+        Add(Loc.MenuLoadGame, OpenLoadGame, "接續先前儲存的對戰。",
+            () => SaveSlots.Any(s => s.Exists));
         Add(Loc.MenuSettings, () => Open(MenuScreen.Video), "調整畫質、視野與滑鼠靈敏度。");
         Add(Loc.DevicesOpen, () => Open(MenuScreen.Devices),
             "指派每位玩家專屬的滑鼠與鍵盤，並自訂按鍵配置。");
@@ -436,6 +471,14 @@ public sealed class Menu
         AddChoice(Loc.OptBotSkill, () => Loc.SkillNames[MathX.Clamp(BotSkill, 0, Loc.SkillNames.Length - 1)],
             d => BotSkill = MathX.Clamp(BotSkill + d, 0, Loc.SkillNames.Length - 1),
             "影響電腦的反應速度、瞄準精度與閃避頻率。");
+
+        AddChoice(Loc.OptDemoMode, () => DemoMode ? Loc.OptOn : Loc.OptOff,
+            d => DemoMode = !DemoMode,
+            "由電腦接手所有本機玩家，適合展示或觀戰。畫面與 HUD 仍照常分割。");
+        if (DemoMode)
+            AddChoice(Loc.OptDemoSkill, () => Loc.SkillNames[MathX.Clamp(DemoSkill, 0, Loc.SkillNames.Length - 1)],
+                d => DemoSkill = MathX.Clamp(DemoSkill + d, 0, Loc.SkillNames.Length - 1),
+                "代打電腦的程度，與對手的難度分開設定。");
 
         if (ModeKind == GameModeKind.CaptureTheFlag)
             AddChoice(Loc.OptCaptureLimit, () => CaptureLimit > 0 ? CaptureLimit.ToString() : Loc.OptNoLimit,
@@ -625,10 +668,47 @@ public sealed class Menu
     private void BuildPaused()
     {
         Add(Loc.MenuResume, () => OnResume?.Invoke());
+        Add(Loc.MenuSaveGame, OpenSaveGame, "把目前的戰況寫入存檔位，稍後可原樣接續。");
+        Add(Loc.MenuLoadGame, OpenLoadGame, "載入另一場存檔，目前進度將被取代。",
+            () => SaveSlots.Any(s => s.Exists));
         Add(Loc.MenuRestart, () => OnRestart?.Invoke());
         Add(Loc.MenuSettings, () => Open(MenuScreen.Video));
         Add(Loc.MenuBackToMenu, () => OnQuitToMenu?.Invoke());
         Add(Loc.MenuQuit, () => OnQuitGame?.Invoke());
+    }
+
+    // ---------------------------------------------------------------- saved games
+
+    public void OpenSaveGame()
+    {
+        RefreshSaveSlots?.Invoke();
+        Open(MenuScreen.SaveGame);
+    }
+
+    public void OpenLoadGame()
+    {
+        RefreshSaveSlots?.Invoke();
+        Open(MenuScreen.LoadGame);
+        // Land on the first slot that actually holds something, so Enter does the obvious thing.
+        _previewSlot = 0;
+        for (int i = 0; i < SaveSlots.Length && i < _items.Count; i++)
+            if (SaveSlots[i].Exists) { SelectedIndex = i; _previewSlot = i; break; }
+    }
+
+    private void BuildSaveSlots()
+    {
+        bool saving = Screen == MenuScreen.SaveGame;
+        for (int i = 0; i < Game.SaveStore.SlotCount; i++)
+        {
+            int slot = i;
+            bool occupied = slot < SaveSlots.Length && SaveSlots[slot].Exists;
+            // On the load screen an empty slot is not a destination, so it cannot be selected.
+            Add(Loc.SaveSlotName(slot),
+                () => { if (saving) OnSaveToSlot?.Invoke(slot); else OnLoadFromSlot?.Invoke(slot); },
+                saving ? Loc.SaveOverwriteHint : Loc.SaveLoadHint,
+                () => saving || occupied);
+        }
+        Add(Loc.MenuBack, Back);
     }
 
     private void BuildResults()
@@ -660,6 +740,7 @@ public sealed class Menu
 
         if (Screen == MenuScreen.Results && ResultsWorld != null) DrawResults(ui, width, height, s);
         else if (Screen == MenuScreen.MapGallery) DrawMapGallery(ui, width, height, s);
+        else if (Screen is MenuScreen.SaveGame or MenuScreen.LoadGame) DrawSaveSlots(ui, width, height, s);
         else DrawStandard(ui, width, height, s);
 
         DrawPointer(ui, width, height);
@@ -909,6 +990,132 @@ public sealed class Menu
             $"{Loc.MapIntroduction}　{arenaName}", UiRenderer.Rgba(1f, 0.70f, 0.28f));
         ui.Text(FaceRegular, 17f * s, introX + 22f * s, introY + 39f * s, description,
             UiRenderer.Rgba(0.76f, 0.84f, 0.95f));
+        ui.Text(FaceRegular, 15f * s, width * 0.5f, height - 48f * s,
+            Loc.MapGalleryControls, UiRenderer.Rgba(0.56f, 0.64f, 0.77f), TextAlign.Center);
+    }
+
+    /// <summary>
+    /// Slot list on the left, a full preview of the highlighted slot on the right: the shot the
+    /// game took at save time, the arena and mode it was, and the settings the match was run
+    /// with. Reading a row of timestamps tells you nothing about which save you actually want.
+    /// </summary>
+    private void DrawSaveSlots(UiRenderer ui, int width, int height, float s)
+    {
+        bool saving = Screen == MenuScreen.SaveGame;
+        ui.TextOutline(FaceBold, 44f * s, width * 0.5f, height * 0.065f,
+            saving ? Loc.SaveTitle : Loc.LoadTitle,
+            UiRenderer.Rgba(0.96f, 0.98f, 1f), UiRenderer.Rgba(0f, 0f, 0f, 0.9f), 3f * s, TextAlign.Center);
+        ui.Text(FaceRegular, 17f * s, width * 0.5f, height * 0.065f + 58f * s,
+            saving ? Loc.SaveOverwriteHint : Loc.SaveLoadHint,
+            UiRenderer.Rgba(0.66f, 0.76f, 0.91f), TextAlign.Center);
+
+        float panelW = MathF.Min(width * 0.90f, 1120f * s);
+        float startX = (width - panelW) * 0.5f;
+        float top = height * 0.20f;
+        float listW = panelW * 0.38f;
+        float rowH = 58f * s;
+        float gap = 8f * s;
+
+        _itemRects.Clear();
+        _maxScroll = 0f;
+        for (int i = 0; i < _items.Count; i++)
+        {
+            float y = top + i * (rowH + gap);
+            bool selected = i == SelectedIndex;
+            bool enabled = _items[i].Enabled();
+            bool isSlot = i < Game.SaveStore.SlotCount;
+            var info = isSlot && i < SaveSlots.Length ? SaveSlots[i] : null;
+
+            _itemRects.Add(new ItemRect(i, startX, y, listW, rowH, 0f, 0f, 0f));
+            ui.ChamferRect(startX, y, listW, rowH, 9f * s,
+                selected ? UiRenderer.Rgba(0.12f, 0.25f, 0.48f, 0.94f)
+                         : UiRenderer.Rgba(0.035f, 0.05f, 0.09f, 0.88f));
+            if (selected)
+                ui.RectOutline(startX + 2f * s, y + 2f * s, listW - 4f * s, rowH - 4f * s,
+                    2.2f * s, UiRenderer.Rgba(1f, 0.66f, 0.20f, 0.95f));
+
+            uint labelColor = enabled
+                ? selected ? UiRenderer.Rgba(1f, 0.91f, 0.72f) : UiRenderer.Rgba(0.84f, 0.90f, 0.98f)
+                : UiRenderer.Rgba(0.42f, 0.45f, 0.52f, 0.75f);
+            ui.Text(selected ? FaceBold : FaceRegular, 19f * s, startX + 18f * s, y + 8f * s,
+                _items[i].Label, labelColor);
+
+            if (!isSlot) continue;
+            string sub = info is { Exists: true }
+                ? $"{World.Maps.Name((World.MapId)info.Data.MapId)}　{Loc.SaveTimestamp(info.SavedAtLocal)}"
+                : Loc.SaveEmptySlot;
+            ui.Text(FaceRegular, 14f * s, startX + 18f * s, y + 33f * s, sub,
+                info is { Exists: true } ? UiRenderer.Rgba(0.62f, 0.72f, 0.88f)
+                                         : UiRenderer.Rgba(0.42f, 0.45f, 0.52f, 0.8f));
+        }
+
+        // --- preview of the highlighted slot ---
+        float previewX = startX + listW + 22f * s;
+        float previewW = panelW - listW - 22f * s;
+        float previewH = height - top - 110f * s;
+        ui.ChamferRect(previewX, top, previewW, previewH, 12f * s,
+            UiRenderer.Rgba(0.035f, 0.055f, 0.095f, 0.94f));
+
+        // Keep the panel on the last slot the cursor was over. Moving down onto "back" should not
+        // blank out the preview the player was just reading.
+        if (SelectedIndex >= 0 && SelectedIndex < SaveSlots.Length) _previewSlot = SelectedIndex;
+        var shown = _previewSlot >= 0 && _previewSlot < SaveSlots.Length ? SaveSlots[_previewSlot] : null;
+        float imgX = previewX + 14f * s, imgY = top + 14f * s;
+        float imgW = previewW - 28f * s;
+        float imgH = imgW * 9f / 16f;
+
+        if (shown is { Exists: true })
+        {
+            var texture = SlotThumbnail?.Invoke(shown.Slot);
+            if (texture != null)
+                ui.Texture(texture, imgX, imgY, imgW, imgH, UiRenderer.Rgba(1f, 1f, 1f, 1f),
+                    new Vector2(0f, 0f), new Vector2(1f, 1f));
+            else
+            {
+                ui.Rect(imgX, imgY, imgW, imgH, UiRenderer.Rgba(0.02f, 0.03f, 0.05f, 0.95f));
+                ui.Text(FaceRegular, 16f * s, imgX + imgW * 0.5f, imgY + imgH * 0.5f - 10f * s,
+                    Loc.SaveNoThumbnail, UiRenderer.Rgba(0.45f, 0.50f, 0.60f), TextAlign.Center);
+            }
+            ui.RectOutline(imgX, imgY, imgW, imgH, 1.5f * s, UiRenderer.Rgba(0.30f, 0.45f, 0.65f, 0.7f));
+
+            var d = shown.Data;
+            float ty = imgY + imgH + 16f * s;
+            ui.Text(FaceBold, 22f * s, imgX, ty, World.Maps.Name((World.MapId)d.MapId),
+                UiRenderer.Rgba(1f, 0.72f, 0.28f));
+            ty += 30f * s;
+            ui.Text(FaceRegular, 15f * s, imgX, ty, Loc.SaveTimestamp(shown.SavedAtLocal),
+                UiRenderer.Rgba(0.62f, 0.72f, 0.88f));
+            ty += 26f * s;
+
+            ui.Text(FaceBold, 15f * s, imgX, ty, Loc.SaveConfigTitle, UiRenderer.Rgba(0.55f, 0.85f, 1f));
+            ty += 24f * s;
+
+            string limit = d.ModeKind == (int)GameModeKind.CaptureTheFlag
+                ? (d.CaptureLimit > 0 ? $"{Loc.OptCaptureLimit} {d.CaptureLimit}" : Loc.OptNoLimit)
+                : (d.FragLimit > 0 ? $"{Loc.OptFragLimit} {d.FragLimit}" : Loc.OptNoLimit);
+            string timeLimit = d.TimeLimit > 0f ? Loc.Minutes((int)MathF.Round(d.TimeLimit / 60f)) : Loc.OptNoLimit;
+            string skill = Loc.SkillNames[MathX.Clamp(d.BotSkill, 0, Loc.SkillNames.Length - 1)];
+
+            ReadOnlySpan<string> lines =
+            [
+                $"{Loc.OptGameMode}：{Loc.ModeName((GameModeKind)d.ModeKind)}",
+                $"{Loc.OptPlayers}：{Loc.PlayerCount(d.LocalPlayers)}　{Loc.OptBots}：{Loc.BotCount(d.BotCount)}（{skill}）",
+                $"{limit}　{Loc.OptTimeLimit}：{timeLimit}",
+                $"{Loc.SaveElapsed}：{Loc.Clock(d.WorldTime)}　{Loc.SaveLeader}：{d.LeaderName} {d.LeaderScore}",
+            ];
+            foreach (string line in lines)
+            {
+                ui.Text(FaceRegular, 16f * s, imgX, ty, line, UiRenderer.Rgba(0.78f, 0.86f, 0.96f));
+                ty += 24f * s;
+            }
+        }
+        else
+        {
+            ui.Text(FaceRegular, 17f * s, previewX + previewW * 0.5f, top + previewH * 0.45f,
+                saving ? Loc.SaveEmptySlot : Loc.SaveNoneYet,
+                UiRenderer.Rgba(0.55f, 0.62f, 0.74f), TextAlign.Center);
+        }
+
         ui.Text(FaceRegular, 15f * s, width * 0.5f, height - 48f * s,
             Loc.MapGalleryControls, UiRenderer.Rgba(0.56f, 0.64f, 0.77f), TextAlign.Center);
     }

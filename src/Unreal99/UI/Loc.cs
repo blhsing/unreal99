@@ -44,6 +44,8 @@ public static class Loc
     public const string OptFragLimit = "擊殺上限";
     public const string OptTimeLimit = "時間上限";
     public const string OptCaptureLimit = "奪旗上限";
+    public const string OptDemoMode = "示範模式";
+    public const string OptDemoSkill = "代打電腦程度";
     public const string OptStartMatch = "開始戰鬥";
     public const string OptMinutes = "分鐘";
     public const string OptNoLimit = "無限制";
@@ -89,6 +91,37 @@ public static class Loc
     public const string ModeDominationDesc = "佔領並守住控制點以累積分數。";
     public const string ModeLastManStandingDesc = "生命有限，最後存活者獲勝。";
     public const string ModeInstagibDesc = "只有震盪步槍，一擊必殺。";
+
+    // ---------------------------------------------------------------- saves
+    public const string MenuSaveGame = "儲存進度";
+    public const string MenuLoadGame = "載入進度";
+    public const string SaveTitle = "儲存進度";
+    public const string LoadTitle = "載入進度";
+    public const string SaveEmptySlot = "空的存檔位";
+    public const string SaveSlotLabel = "存檔位";
+    public const string SaveOverwriteHint = "選擇一個存檔位以覆寫，Delete 可刪除。";
+    public const string SaveLoadHint = "選擇一個存檔位以載入該場對戰。";
+    public const string SaveNoneYet = "尚無存檔。可在對戰中按 F5 快速儲存。";
+    public const string SaveSaved = "進度已儲存";
+    public const string SaveLoaded = "進度已載入";
+    public const string SaveFailed = "儲存失敗";
+    public const string SaveLoadFailed = "載入失敗";
+    public const string SaveDeleted = "存檔已刪除";
+    public const string SaveQuickSaved = "快速儲存完成";
+    public const string SaveNothingToLoad = "沒有可載入的存檔";
+    public const string SaveConfigTitle = "對戰設定";
+    public const string SaveElapsed = "已進行";
+    public const string SaveLeader = "領先";
+    public const string SaveNoThumbnail = "無預覽畫面";
+
+    public static string SaveSlotName(int i) => $"{SaveSlotLabel} {i + 1}";
+    /// <summary>Elapsed match time as m:ss.</summary>
+    public static string Clock(float seconds)
+    {
+        int total = Math.Max(0, (int)seconds);
+        return $"{total / 60}:{total % 60:00}";
+    }
+    public static string SaveTimestamp(DateTime t) => t == DateTime.MinValue ? "" : t.ToString("yyyy/MM/dd HH:mm");
 
     // ---------------------------------------------------------------- arenas
     // Every arena is an homage to a layout that defined the 1999 original.
