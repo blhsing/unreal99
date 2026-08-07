@@ -86,9 +86,10 @@ public sealed class PawnSave
     public int JumpBootCharges;
     public bool HasShieldBelt;
 
-    public int Frags, Deaths, Suicides, Captures, Streak;
+    public int Frags, Deaths, Suicides, Captures, FlagCarrierKills, Streak;
     public int ShotsFired, ShotsHit;
     public bool HasFlag;
+    public int CarriedFlag = -1;
 }
 
 public sealed class PickupSave
@@ -101,7 +102,7 @@ public sealed class FlagSave
 {
     public int Team;
     public float X, Y, Z;
-    public int Carrier;
+    public int Carrier = -1;
     public float DroppedTimer;
 }
 
@@ -222,9 +223,10 @@ public static class SaveStore
                 JumpBootCharges = p.JumpBootCharges,
                 HasShieldBelt = p.HasShieldBelt,
                 Frags = p.Frags, Deaths = p.Deaths, Suicides = p.Suicides,
-                Captures = p.Captures, Streak = p.Streak,
+                Captures = p.Captures, FlagCarrierKills = p.FlagCarrierKills, Streak = p.Streak,
                 ShotsFired = p.ShotsFired, ShotsHit = p.ShotsHit,
                 HasFlag = p.HasFlag,
+                CarriedFlag = (int)p.CarriedFlag,
             };
             foreach (bool w in p.HasWeapon) ps.HasWeapon.Add(w);
             foreach (int a in p.Ammo) ps.Ammo.Add(a);
@@ -246,7 +248,7 @@ public static class SaveStore
             {
                 Team = (int)kv.Key,
                 X = kv.Value.X, Y = kv.Value.Y, Z = kv.Value.Z,
-                Carrier = world.FlagCarrier.TryGetValue(kv.Key, out int c) ? c : 0,
+                Carrier = world.FlagCarrier.TryGetValue(kv.Key, out int c) ? c : -1,
                 DroppedTimer = world.FlagDroppedTimer.TryGetValue(kv.Key, out float d) ? d : 0f,
             });
         }
@@ -312,9 +314,11 @@ public static class SaveStore
             pawn.JumpBootCharges = ps.JumpBootCharges;
             pawn.HasShieldBelt = ps.HasShieldBelt;
             pawn.Frags = ps.Frags; pawn.Deaths = ps.Deaths; pawn.Suicides = ps.Suicides;
-            pawn.Captures = ps.Captures; pawn.Streak = ps.Streak;
+            pawn.Captures = ps.Captures; pawn.FlagCarrierKills = ps.FlagCarrierKills;
+            pawn.Streak = ps.Streak;
             pawn.ShotsFired = ps.ShotsFired; pawn.ShotsHit = ps.ShotsHit;
             pawn.HasFlag = ps.HasFlag;
+            pawn.CarriedFlag = (Team)ps.CarriedFlag;
 
             for (int i = 0; i < pawn.HasWeapon.Length && i < ps.HasWeapon.Count; i++)
                 pawn.HasWeapon[i] = ps.HasWeapon[i];
@@ -344,6 +348,28 @@ public static class SaveStore
             world.FlagPosition[team] = new Vector3(f.X, f.Y, f.Z);
             world.FlagCarrier[team] = f.Carrier;
             world.FlagDroppedTimer[team] = f.DroppedTimer;
+        }
+
+        // Flag dictionaries are authoritative. Reconstruct pawn ownership as well so old saves,
+        // which stored HasFlag but not CarriedFlag, cannot produce a carrier with Team.None.
+        foreach (Pawn pawn in world.Pawns)
+        {
+            pawn.HasFlag = false;
+            pawn.CarriedFlag = Team.None;
+        }
+        foreach (var entry in world.FlagCarrier.ToArray())
+        {
+            if (entry.Value < 0) continue;
+            Pawn carrier = world.FindPawn(entry.Value);
+            if (carrier == null || carrier.Team == entry.Key)
+            {
+                world.FlagCarrier[entry.Key] = -1;
+                world.FlagPosition[entry.Key] = world.FlagHome[entry.Key];
+                world.FlagDroppedTimer[entry.Key] = 0f;
+                continue;
+            }
+            carrier.HasFlag = true;
+            carrier.CarriedFlag = entry.Key;
         }
 
         mode.State = (MatchState)save.MatchState;

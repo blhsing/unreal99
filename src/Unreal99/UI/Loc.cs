@@ -91,7 +91,7 @@ public static class Loc
 
     public const string ModeDeathmatchDesc = "全員互為敵人，率先達成擊殺上限者獲勝。";
     public const string ModeTeamDeathmatchDesc = "紅藍兩隊對抗，隊伍總擊殺數決定勝負。";
-    public const string ModeCaptureTheFlagDesc = "奪取敵方旗幟並帶回己方基地。";
+    public const string ModeCaptureTheFlagDesc = "奪取敵方旗幟並帶回己方旗座；己方旗幟必須先安全歸位才能得分。";
     public const string ModeDominationDesc = "佔領並守住控制點以累積分數。";
     public const string ModeLastManStandingDesc = "生命有限，最後存活者獲勝。";
     public const string ModeInstagibDesc = "只有震盪步槍，一擊必殺。";
@@ -215,6 +215,8 @@ public static class Loc
     public const string HudFlagDropped = "旗幟掉落";
     public const string HudFlagReturned = "旗幟已歸還";
     public const string HudHasFlag = "持有旗幟";
+    public const string HudFlagCaptured = "完成奪旗";
+    public const string HudFlagAtBase = "旗幟在基地";
 
     // ---------------------------------------------------------------- scoreboard
     public const string ScoreboardTitle = "戰績排行";
@@ -365,6 +367,8 @@ public static class Loc
 
     public static string PickedUp(string item) => $"取得 {item}";
     public static string NeedWeapon(string weapon) => $"沒有 {weapon} 的彈藥";
+    public static string FlagHeldBy(string player) => $"持旗：{player}";
+    public static string YouHoldFlag(string team) => $"你持有{team}旗幟";
 
     public static string TimeRemaining(float seconds)
     {

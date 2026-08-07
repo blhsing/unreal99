@@ -951,6 +951,7 @@ public sealed class GameWorld
     public void Kill(Pawn victim, Pawn killer, DamageType type, bool headshot = false)
     {
         if (!victim.Alive) return;
+        bool killedFlagCarrier = Mode.Kind == GameModeKind.CaptureTheFlag && victim.HasFlag;
         if (type == DamageType.Void) VoidDeaths++;
         else if (type == DamageType.Fall) FallDeaths++;
         else if (type == DamageType.Lava) LavaDeaths++;
@@ -984,7 +985,7 @@ public sealed class GameWorld
         }
         Effects.AddBloodSplat(victim.Position + new Vector3(0, 0.05f, 0), MathX.Up, 0.62f);
 
-        DropFlag(victim);
+        DropFlag(victim, type);
 
         // --- scoring and announcements ---
         if (killer != null && killer != victim)
@@ -996,6 +997,7 @@ public sealed class GameWorld
                 killer.Streak++;
                 killer.MultiKillCount++;
                 killer.MultiKillTimer = 3.2f;
+                if (killedFlagCarrier) killer.FlagCarrierKills++;
                 Mode.OnFrag(this, killer, victim);
                 AnnounceKill(killer, victim, headshot);
             }
@@ -1293,7 +1295,8 @@ public sealed class GameWorld
 
     private void UpdateCarriedFlag(Pawn pawn)
     {
-        if (Mode.Kind != GameModeKind.CaptureTheFlag) return;
+        if (Mode.Kind != GameModeKind.CaptureTheFlag
+            || Mode.State is MatchState.Warmup or MatchState.Finished) return;
 
         foreach (var team in FlagHome.Keys)
         {
@@ -1312,11 +1315,7 @@ public sealed class GameWorld
             {
                 if (!atHome)
                 {
-                    FlagPosition[team] = FlagHome[team];
-                    FlagDroppedTimer[team] = 0f;
-                    Broadcast(team == Team.Red ? Loc.AnnRedFlagReturned : Loc.AnnBlueFlagReturned,
-                        GameTypes.TeamColor(team), 1.8f);
-                    OnSound?.Invoke(SoundId.FlagReturn, pawn.Position, 1f);
+                    ReturnFlag(team, pawn.Position);
                 }
                 else if (pawn.HasFlag && pawn.CarriedFlag != pawn.Team)
                 {
@@ -1324,19 +1323,21 @@ public sealed class GameWorld
                     Team enemy = pawn.CarriedFlag;
                     FlagCarrier[enemy] = -1;
                     FlagPosition[enemy] = FlagHome[enemy];
+                    FlagDroppedTimer[enemy] = 0f;
                     pawn.HasFlag = false;
                     pawn.CarriedFlag = Team.None;
                     pawn.Captures++;
                     Mode.OnCapture(this, pawn);
                     Broadcast(pawn.Team == Team.Red ? Loc.AnnRedScores : Loc.AnnBlueScores,
                         GameTypes.TeamColor(pawn.Team), 2.4f);
-                    AddKillFeed($"{pawn.Name} {Loc.HudFlagTaken}", GameTypes.TeamColor(pawn.Team));
+                    AddKillFeed($"{pawn.Name} {Loc.HudFlagCaptured}", GameTypes.TeamColor(pawn.Team));
                     OnSound?.Invoke(SoundId.FlagCapture, pawn.Position, 1.4f);
                 }
             }
             else if (!pawn.HasFlag)
             {
                 FlagCarrier[team] = pawn.Id;
+                FlagDroppedTimer[team] = 0f;
                 pawn.HasFlag = true;
                 pawn.CarriedFlag = team;
                 Broadcast(team == Team.Red ? Loc.AnnFlagTakenRed : Loc.AnnFlagTakenBlue,
@@ -1354,22 +1355,41 @@ public sealed class GameWorld
             if (FlagCarrier[team] >= 0) continue;
             if (Vector3.Distance(FlagPosition[team], FlagHome[team]) < 0.4f) continue;
             FlagDroppedTimer[team] += dt;
-            if (FlagDroppedTimer[team] > 25f)
+            if (FlagDroppedTimer[team] > 15f)
             {
-                FlagPosition[team] = FlagHome[team];
-                FlagDroppedTimer[team] = 0f;
-                Broadcast(team == Team.Red ? Loc.AnnRedFlagReturned : Loc.AnnBlueFlagReturned,
-                    GameTypes.TeamColor(team), 1.6f);
+                ReturnFlag(team, FlagPosition[team]);
             }
         }
     }
 
-    private void DropFlag(Pawn pawn)
+    private void DropFlag(Pawn pawn, DamageType deathType)
     {
         if (!pawn.HasFlag) return;
         Team team = pawn.CarriedFlag;
+        if (team == Team.None)
+        {
+            foreach (var entry in FlagCarrier)
+                if (entry.Value == pawn.Id) { team = entry.Key; break; }
+        }
+        if (team == Team.None || !FlagHome.ContainsKey(team))
+        {
+            pawn.HasFlag = false;
+            pawn.CarriedFlag = Team.None;
+            return;
+        }
+
         FlagCarrier[team] = -1;
         float floor = Level.Collision.FloorHeight(pawn.Position + new Vector3(0, 1f, 0));
+        bool outsidePlay = deathType is DamageType.Void or DamageType.Lava
+            || float.IsNaN(floor) || pawn.Position.Y <= Level.KillPlaneY + 0.5f;
+        if (outsidePlay)
+        {
+            pawn.HasFlag = false;
+            pawn.CarriedFlag = Team.None;
+            ReturnFlag(team, FlagHome[team]);
+            return;
+        }
+
         FlagPosition[team] = new Vector3(pawn.Position.X, float.IsNaN(floor) ? pawn.Position.Y : floor,
             pawn.Position.Z);
         FlagDroppedTimer[team] = 0f;
@@ -1377,6 +1397,17 @@ public sealed class GameWorld
         pawn.CarriedFlag = Team.None;
         Broadcast(Loc.HudFlagDropped, GameTypes.TeamColor(team), 1.4f);
         OnSound?.Invoke(SoundId.FlagDrop, pawn.Position, 0.9f);
+    }
+
+    private void ReturnFlag(Team team, Vector3 soundPosition)
+    {
+        if (!FlagHome.TryGetValue(team, out Vector3 home)) return;
+        FlagCarrier[team] = -1;
+        FlagPosition[team] = home;
+        FlagDroppedTimer[team] = 0f;
+        Broadcast(team == Team.Red ? Loc.AnnRedFlagReturned : Loc.AnnBlueFlagReturned,
+            GameTypes.TeamColor(team), 1.8f);
+        OnSound?.Invoke(SoundId.FlagReturn, soundPosition, 1f);
     }
 
     // ---------------------------------------------------------------- rendering

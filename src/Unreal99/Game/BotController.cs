@@ -24,6 +24,10 @@ public sealed class BotController : Controller
     private BotState _state = BotState.Roam;
     private int _goalNode = -1;
     private bool _objectiveGoal;
+    private bool _hasGoalPosition;
+    private bool _pathFound;
+    private Vector3 _goalPosition;
+    private float _goalRadius = 0.45f;
     private int _pathCursor;
     private float _repathTimer;
     private float _targetTimer;
@@ -94,6 +98,8 @@ public sealed class BotController : Controller
         _state = BotState.Roam;
         _goalNode = -1;
         _objectiveGoal = false;
+        _hasGoalPosition = false;
+        _pathFound = false;
         _path.Clear();
         _targetId = -1;
         _aimYaw = Pawn.Yaw;
@@ -255,6 +261,14 @@ public sealed class BotController : Controller
     {
         float healthFraction = (Pawn.Health + Pawn.Armor * 0.6f) / 160f;
 
+        // A hammer is a last-ditch close-range tool, not a reason to keep charging a distant
+        // opponent. Break contact and deliberately re-arm whenever every ranged weapon is dry.
+        if (world.Mode.Kind != GameModeKind.Instagib && !HasUsableRangedWeapon(Pawn))
+        {
+            _state = BotState.SeekItem;
+            return;
+        }
+
         if (visible && target != null)
         {
             _state = healthFraction < 0.3f && _rng.Chance(0.55f - Skill * 0.25f)
@@ -321,6 +335,9 @@ public sealed class BotController : Controller
 
         var def = Pawn.WeaponDef;
         float range = Vector3.Distance(Pawn.Position, target.Position);
+
+        // Do not stand at rifle range swinging the impact hammer into empty space.
+        if (def.Primary.Mode == FireMode.Melee && range > def.Primary.Range * 0.92f) return;
 
         // Don't blow yourself up.
         if (def.Primary.SplashRadius > 0f && range < def.Primary.SplashRadius * 0.85f
@@ -406,6 +423,8 @@ public sealed class BotController : Controller
             // No target: look where we are heading.
             Vector3 ahead = _path.Count > 0 && _pathCursor < _path.Count
                 ? world.Level.Nav.Nodes[_path[_pathCursor]].Position
+                : _hasGoalPosition
+                    ? _goalPosition
                 : Pawn.Position + Pawn.ForwardFlat * 6f;
             desired = ahead + new Vector3(0, 1.4f, 0);
             _aimPoint = desired;
@@ -441,7 +460,13 @@ public sealed class BotController : Controller
         }
 
         // --- choose a goal ---
-        if (_goalTimer <= 0f || _goalNode < 0 || (_path.Count > 0 && _pathCursor >= _path.Count))
+        bool itemGoalInvalid = _itemGoal != null
+            && (!_itemGoal.Active || _itemGoal.DesireFor(Pawn) <= 0.05f);
+        bool preciseGoalReached = _hasGoalPosition
+            && (_goalPosition - Pawn.Position).FlatXZ().LengthSquared() <= _goalRadius * _goalRadius;
+        bool nodeGoalFinished = !_hasGoalPosition && _path.Count > 0 && _pathCursor >= _path.Count;
+        if (_goalTimer <= 0f || _goalNode < 0 || itemGoalInvalid
+            || nodeGoalFinished || (_hasGoalPosition && _pathFound && preciseGoalReached))
         {
             _goalTimer = _rng.Range(2.2f, 4.5f);
             ChooseGoal(world, target, visible);
@@ -456,6 +481,7 @@ public sealed class BotController : Controller
             bool found = start >= 0 && (_objectiveGoal
                 ? nav.FindPathToward(start, _goalNode, _path)
                 : nav.FindPath(start, _goalNode, _path));
+            _pathFound = found;
             if (found) _pathCursor = 0;
             else { _path.Clear(); _pathCursor = 0; }
             if (Environment.GetEnvironmentVariable("UNREAL99_NAV_DEBUG") == "1" &&
@@ -526,10 +552,32 @@ public sealed class BotController : Controller
                 _jumpTimer = 0.5f;
             }
         }
+        else if (_pathFound && _hasGoalPosition)
+        {
+            // A nav node can be more than a pickup radius away from the actual item or flag.
+            // Finish the route against the precise world position instead of abandoning it at
+            // the last grid point.
+            Vector3 flat = (_goalPosition - Pawn.Position).FlatXZ();
+            float dist = flat.Length();
+            float heightDelta = _goalPosition.Y - Pawn.Position.Y;
+            if (dist > _goalRadius)
+            {
+                steer = MathX.SafeNormalize(flat, Vector3.Zero);
+                if (heightDelta > 0.65f && dist < 2.8f && Pawn.OnGround && _jumpTimer <= 0f)
+                {
+                    input.Jump = true;
+                    _jumpTimer = 0.5f;
+                }
+            }
+            else
+            {
+                _goalTimer = 0f;
+            }
+        }
 
         // --- combat strafing ---
         Vector3 strafe = Vector3.Zero;
-        if (visible && target != null && _state == BotState.Attack)
+        if (visible && target != null && _state == BotState.Attack && !_objectiveGoal)
         {
             if (_strafeTimer <= 0f)
             {
@@ -555,7 +603,7 @@ public sealed class BotController : Controller
                 input.Dodge = new Vector2(_strafeSign, _rng.Symmetric(0.35f));
             }
         }
-        else if (_state == BotState.Retreat && target != null)
+        else if (_state == BotState.Retreat && target != null && !_objectiveGoal)
         {
             Vector3 away = MathX.SafeNormalize((Pawn.Position - target.Position).FlatXZ(), Pawn.ForwardFlat);
             steer = Vector3.Lerp(steer, away, 0.6f);
@@ -584,6 +632,7 @@ public sealed class BotController : Controller
                     _stuckTimer = 0f;
                     _goalNode = -1;
                     _goalTimer = 0f;
+                    _pathFound = false;
                     _path.Clear();
                 }
             }
@@ -619,37 +668,68 @@ public sealed class BotController : Controller
     {
         var nav = world.Level.Nav;
         _objectiveGoal = false;
+        _hasGoalPosition = false;
+        _pathFound = false;
+        _itemGoal = null;
 
-        // CTF objectives always win.
+        // CTF carriers, recoveries and team roles take priority over ordinary combat.
         if (world.Mode.Kind == GameModeKind.CaptureTheFlag && Pawn.Team != Team.None)
         {
             Team enemy = Pawn.Team == Team.Red ? Team.Blue : Team.Red;
             if (Pawn.HasFlag && world.FlagHome.TryGetValue(Pawn.Team, out Vector3 home))
             {
-                _goalNode = nav.FindNearest(home);
-                if (_goalNode >= 0) { _objectiveGoal = true; return; }
+                if (SetPreciseGoal(nav, home, objective: true, radius: 0.45f, refresh: 1.0f)) return;
             }
 
-            // Recover our flag before beginning another attack. This must precede the enemy-flag
-            // branch or an untouched enemy flag would always mask the defensive objective.
-            if (world.FlagCarrier.TryGetValue(Pawn.Team, out int ourCarrier) && ourCarrier >= 0)
+            int ourCarrier = world.FlagCarrier.TryGetValue(Pawn.Team, out int oc) ? oc : -1;
+            bool ourFlagHome = ourCarrier < 0
+                && world.FlagHome.TryGetValue(Pawn.Team, out Vector3 ourHome)
+                && Vector3.Distance(world.FlagPosition[Pawn.Team], ourHome) < 0.4f;
+
+            // A dropped friendly flag is a short, decisive recovery for every nearby role.
+            if (ourCarrier < 0 && !ourFlagHome
+                && world.FlagPosition.TryGetValue(Pawn.Team, out Vector3 droppedFlag)
+                && SetPreciseGoal(nav, droppedFlag, objective: true, radius: 0.45f, refresh: 0.7f))
+                return;
+
+            int enemyCarrier = world.FlagCarrier.TryGetValue(enemy, out int ec) ? ec : -1;
+            bool defend = (Pawn.Id & 1) == 0;
+
+            // When our flag is stolen, alternating bots defend while the others maintain
+            // offensive pressure. A one-role swarm otherwise never reaches the enemy base.
+            if (ourCarrier >= 0 && defend)
             {
                 var thief = world.FindPawn(ourCarrier);
-                if (thief != null)
-                {
-                    _goalNode = nav.FindNearest(thief.Position);
-                    if (_goalNode >= 0) { _objectiveGoal = true; return; }
-                }
+                if (thief != null && SetPreciseGoal(nav, thief.Position, objective: true,
+                    radius: 2.2f, refresh: 0.55f)) return;
             }
 
-            if (!Pawn.HasFlag && world.FlagPosition.TryGetValue(enemy, out Vector3 enemyFlag))
+            // Re-arm before a flag run when only the starter pistol remains, or search farther
+            // when every ranged weapon is dry. This also makes CTF bots use the map's arsenal.
+            bool noRangedAmmo = !HasUsableRangedWeapon(Pawn);
+            if (ourCarrier < 0 && (noRangedAmmo || !HasUsefulWeaponUpgrade(Pawn))
+                && TryChoosePickupGoal(world, noRangedAmmo ? 100f : 28f, combatOnly: true))
+                return;
+
+            if (enemyCarrier < 0 && world.FlagPosition.TryGetValue(enemy, out Vector3 enemyFlag)
+                && SetPreciseGoal(nav, enemyFlag, objective: true, radius: 0.45f, refresh: 1.0f))
+                return;
+
+            // Once a teammate has the enemy flag, escort the moving carrier toward home.
+            if (enemyCarrier >= 0)
             {
-                bool taken = world.FlagCarrier.TryGetValue(enemy, out int carrier) && carrier >= 0;
-                if (!taken)
-                {
-                    _goalNode = nav.FindNearest(enemyFlag);
-                    if (_goalNode >= 0) { _objectiveGoal = true; return; }
-                }
+                Pawn carrier = world.FindPawn(enemyCarrier);
+                if (carrier != null && carrier.Team == Pawn.Team
+                    && SetPreciseGoal(nav, carrier.Position, objective: true, radius: 3.0f,
+                        refresh: 0.55f)) return;
+            }
+
+            // If no offensive objective was available, reinforce the flag recovery.
+            if (ourCarrier >= 0)
+            {
+                Pawn thief = world.FindPawn(ourCarrier);
+                if (thief != null && SetPreciseGoal(nav, thief.Position, objective: true,
+                    radius: 2.2f, refresh: 0.55f)) return;
             }
         }
 
@@ -684,22 +764,9 @@ public sealed class BotController : Controller
 
             case BotState.SeekItem:
                 {
-                    PickupEntity bestItem = null;
-                    float bestScore = 0.18f;
-                    foreach (var item in world.Pickups)
-                    {
-                        if (!item.Active) continue;
-                        float desire = item.DesireFor(Pawn);
-                        if (desire <= 0.05f) continue;
-                        float dist = Vector3.Distance(Pawn.Position, item.Position);
-                        if (dist > 65f) continue;
-                        float score = desire * 40f / MathF.Max(dist, 3f);
-                        if (score > bestScore) { bestScore = score; bestItem = item; }
-                    }
-                    _itemGoal = bestItem;
-                    _goalNode = bestItem != null
-                        ? nav.FindNearest(bestItem.Position)
-                        : nav.RandomNode(_rng, NavFlags.NearPickup);
+                    if (TryChoosePickupGoal(world, HasUsableRangedWeapon(Pawn) ? 65f : 110f,
+                        combatOnly: false)) return;
+                    _goalNode = nav.RandomNode(_rng, NavFlags.NearPickup);
                     break;
                 }
 
@@ -709,6 +776,82 @@ public sealed class BotController : Controller
         }
 
         if (_goalNode < 0) _goalNode = nav.RandomNode(_rng);
+    }
+
+    private bool SetPreciseGoal(NavGraph nav, Vector3 position, bool objective, float radius,
+        float refresh)
+    {
+        int node = nav.FindNearest(position);
+        if (node < 0) return false;
+        _goalNode = node;
+        _goalPosition = position;
+        _goalRadius = radius;
+        _hasGoalPosition = true;
+        _objectiveGoal = objective;
+        _goalTimer = MathF.Min(_goalTimer, refresh);
+        return true;
+    }
+
+    private bool TryChoosePickupGoal(GameWorld world, float maxDistance, bool combatOnly)
+    {
+        PickupEntity bestItem = null;
+        float bestScore = float.MinValue;
+        bool noRangedAmmo = !HasUsableRangedWeapon(Pawn);
+
+        foreach (PickupEntity item in world.Pickups)
+        {
+            if (!item.Active) continue;
+            if (combatOnly && item.Kind is not (PickupKind.WeaponPickup or PickupKind.AmmoPickup))
+                continue;
+
+            float desire = item.DesireFor(Pawn);
+            if (desire <= 0.05f) continue;
+            float distance = Vector3.Distance(Pawn.Position, item.Position);
+            if (distance > maxDistance) continue;
+
+            float score = desire * 55f / MathF.Max(distance, 3f);
+            if (item.Kind == PickupKind.WeaponPickup)
+            {
+                if (!Pawn.HasWeapon[(int)item.Weapon]) score += 10f + Weapons.Get(item.Weapon).BotPreference * 4f;
+                if (noRangedAmmo) score += 28f;
+            }
+            else if (item.Kind == PickupKind.AmmoPickup && noRangedAmmo)
+            {
+                score += 18f;
+            }
+
+            if (score > bestScore) { bestScore = score; bestItem = item; }
+        }
+
+        if (bestItem == null || !SetPreciseGoal(world.Level.Nav, bestItem.Position,
+            objective: false, radius: 0.35f, refresh: 1.4f)) return false;
+
+        _itemGoal = bestItem;
+        _state = BotState.SeekItem;
+        return true;
+    }
+
+    private static bool HasUsableRangedWeapon(Pawn pawn)
+    {
+        for (int i = 0; i < (int)WeaponKind.Count; i++)
+        {
+            if (!pawn.HasWeapon[i]) continue;
+            WeaponKind kind = (WeaponKind)i;
+            WeaponDef def = Weapons.Get(kind);
+            if (def.Primary.Mode != FireMode.Melee && pawn.AmmoFor(kind) > 0) return true;
+        }
+        return false;
+    }
+
+    private static bool HasUsefulWeaponUpgrade(Pawn pawn)
+    {
+        for (int i = 0; i < (int)WeaponKind.Count; i++)
+        {
+            WeaponKind kind = (WeaponKind)i;
+            if (kind is WeaponKind.ImpactHammer or WeaponKind.Enforcer || !pawn.HasWeapon[i]) continue;
+            if (pawn.AmmoFor(kind) > 0) return true;
+        }
+        return false;
     }
 
     /// <summary>

@@ -74,9 +74,19 @@ public sealed class PickupEntity
             case PickupKind.AmmoPickup:
                 {
                     if (Ammo == AmmoKind.None) return 0.1f;
+                    bool ownsMatchingWeapon = false;
+                    for (int i = 0; i < (int)WeaponKind.Count; i++)
+                    {
+                        if (p.HasWeapon[i] && Weapons.All[i].Ammo == Ammo)
+                        {
+                            ownsMatchingWeapon = true;
+                            break;
+                        }
+                    }
+                    if (!ownsMatchingWeapon) return 0.02f;
                     int max = Pawn.MaxAmmoFor(Ammo);
                     float have = p.Ammo[(int)Ammo] / (float)MathF.Max(1, max);
-                    return have < 0.5f ? 0.55f * (1f - have) : 0.05f;
+                    return have <= 0f ? 1.4f : have < 0.5f ? 0.7f * (1f - have) : 0.05f;
                 }
             default:
                 return 0.2f;

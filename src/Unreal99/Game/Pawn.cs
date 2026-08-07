@@ -97,6 +97,7 @@ public sealed class Pawn
     public int Deaths;
     public int Suicides;
     public int Captures;
+    public int FlagCarrierKills;
     public int Streak;
     public int MultiKillCount;
     public float MultiKillTimer;

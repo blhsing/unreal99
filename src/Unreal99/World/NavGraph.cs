@@ -150,10 +150,12 @@ public sealed class NavGraph
                 float horizontal = flat.Length();
                 if (horizontal > linkRadius || horizontal < 1e-3f) continue;
                 float dy = b.Y - a.Y;
-                // Walking upward is limited to a normal step. Downward edges may take a safe,
-                // one-way drop; without these, a 1.4 m flag dais becomes a navigation island
-                // even though players can simply step off it.
-                if (dy > maxStep || dy < -maxSafeDrop) continue;
+                // A pair of grid samples on a walkable ramp can differ by more than StepHeight.
+                // Permit that rise when it remains within the collision world's 45-degree
+                // walkable-surface limit; the floor-continuity probe below rejects vertical
+                // ledges. Downward edges may still take a safe one-way drop.
+                float maxWalkableRise = MathF.Max(maxStep, horizontal * 0.95f);
+                if (dy > maxWalkableRise || dy < -maxSafeDrop) continue;
                 bool dropping = dy < -maxStep;
 
                 // Sample the span at torso height to make sure a pawn can actually pass.
@@ -166,6 +168,22 @@ public sealed class NavGraph
                     // During a drop the pawn's torso crosses above the ledge before descending;
                     // interpolating straight through the ledge would reject every valid edge.
                     if (dropping) p.Y = a.Y;
+                    else
+                    {
+                        // A clear torso is not enough: without continuous floor support the
+                        // graph links across pits, making bots run off edges. This also tells a
+                        // genuine ramp from an impassable vertical lip.
+                        float tolerance = maxStep + 0.18f;
+                        var floorHit = world.Raycast(
+                            p + new Vector3(0f, tolerance, 0f),
+                            p - new Vector3(0f, tolerance, 0f));
+                        if (!floorHit.Hit || floorHit.Normal.Y < world.MaxWalkableY
+                            || MathF.Abs(floorHit.Point.Y - p.Y) > tolerance)
+                        {
+                            clear = false;
+                            break;
+                        }
+                    }
                     Vector3 c = new(p.X, p.Y + pawnHeight * 0.5f + 0.05f, p.Z);
                     if (world.BoxOverlapsSolid(c - half, c + half, scratch)) { clear = false; break; }
                 }

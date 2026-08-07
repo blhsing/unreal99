@@ -2094,6 +2094,8 @@ public sealed class App : IDisposable
         {
             Console.WriteLine($"環境陣亡: 深淵 {_world.VoidDeaths} · 摔落 {_world.FallDeaths} · 熔岩 {_world.LavaDeaths}");
             foreach (string detail in _world.EnvironmentalDeathDetails) Console.WriteLine($"環境陣亡明細: {detail}");
+            if (Environment.GetEnvironmentVariable("UNREAL99_BOT_DEBUG") == "1")
+                WriteBotDiagnostics();
         }
         foreach (int pawnId in _viewPawnIds)
             if (_world?.FindPawn(pawnId) is { } pawn)
@@ -2103,6 +2105,47 @@ public sealed class App : IDisposable
                                   $"行進 {_autoShotTravelDistances.GetValueOrDefault(pawnId):0.0} m · " +
                                   $"最長停滯 {_autoShotLongestStalls.GetValueOrDefault(pawnId):0.00} s");
         _window.Close();
+    }
+
+    private void WriteBotDiagnostics()
+    {
+        foreach (Pawn pawn in _world.Pawns)
+        {
+            var carried = new List<string>();
+            for (int i = 0; i < (int)WeaponKind.Count; i++)
+            {
+                if (!pawn.HasWeapon[i]) continue;
+                WeaponKind weapon = (WeaponKind)i;
+                carried.Add($"{GameTypes.WeaponName(weapon)}:{pawn.AmmoFor(weapon)}");
+            }
+            string flag = pawn.HasFlag ? GameTypes.TeamName(pawn.CarriedFlag) : "無";
+            Console.WriteLine($"電腦診斷: {pawn.Name} · 隊伍 {GameTypes.TeamName(pawn.Team)} · " +
+                $"武器 [{string.Join(", ", carried)}] · 持旗 {flag} · 擊殺 {pawn.Frags} · 奪旗 {pawn.Captures} · " +
+                $"旗手擊殺 {pawn.FlagCarrierKills}");
+            if (pawn.HasFlag && _world.FlagHome.TryGetValue(pawn.Team, out Vector3 ownHome))
+            {
+                int start = _world.Level.Nav.FindNearest(pawn.Position);
+                int goal = _world.Level.Nav.FindNearest(ownHome);
+                var route = new List<int>();
+                bool found = start >= 0 && goal >= 0
+                    && _world.Level.Nav.FindPathToward(start, goal, route);
+                Console.WriteLine($"持旗路線: {pawn.Name} · 位置 {pawn.Position} · 本壘 {ownHome} · " +
+                    $"距離 {Vector3.Distance(pawn.Position, ownHome):0.00} · 可達 {found} · 節點 {route.Count}");
+            }
+        }
+
+        if (_world.Mode.Kind == GameModeKind.CaptureTheFlag)
+            Console.WriteLine($"奪旗比分: 紅 {_world.Mode.TeamScore(Team.Red)} · 藍 {_world.Mode.TeamScore(Team.Blue)}");
+
+        foreach (Team team in new[] { Team.Red, Team.Blue })
+        {
+            if (!_world.FlagHome.TryGetValue(team, out Vector3 home)) continue;
+            int carrierId = _world.FlagCarrier.TryGetValue(team, out int id) ? id : -1;
+            Pawn carrier = _world.FindPawn(carrierId);
+            bool atHome = carrierId < 0 && Vector3.Distance(_world.FlagPosition[team], home) < 0.4f;
+            string state = carrier != null ? $"由 {carrier.Name} 持有" : atHome ? "在基地" : "已掉落";
+            Console.WriteLine($"旗幟診斷: {GameTypes.TeamName(team)}旗幟 · {state}");
+        }
     }
 
     // ---------------------------------------------------------------- teardown

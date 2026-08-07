@@ -57,7 +57,9 @@ public sealed class GameMode
     public bool IsOver => State == MatchState.Finished;
 
     /// <summary>Score used for ranking: frags, team frags, or captures depending on the mode.</summary>
-    public int ScoreOf(Pawn p) => Kind == GameModeKind.CaptureTheFlag ? p.Captures * 10 + p.Frags : p.Frags;
+    public int ScoreOf(Pawn p) => Kind == GameModeKind.CaptureTheFlag
+        ? p.Frags + p.Captures * 7 + p.FlagCarrierKills * 3
+        : p.Frags;
 
     public int LimitValue => Kind switch
     {
@@ -184,7 +186,10 @@ public sealed class GameMode
     public void OnFrag(GameWorld world, Pawn killer, Pawn victim)
     {
         if (State is MatchState.Warmup or MatchState.Finished) return;
-        if (TeamBased && killer.Team != Team.None) TeamScores[(int)killer.Team]++;
+        // CTF team score is captures only; ordinary kills contribute to personal score but must
+        // never advance the capture limit.
+        if (Kind == GameModeKind.TeamDeathmatch && killer.Team != Team.None)
+            TeamScores[(int)killer.Team]++;
         CheckWinCondition(world);
     }
 
@@ -200,6 +205,7 @@ public sealed class GameMode
 
     public void OnCapture(GameWorld world, Pawn scorer)
     {
+        if (State is MatchState.Warmup or MatchState.Finished) return;
         if (scorer.Team != Team.None) TeamScores[(int)scorer.Team]++;
         CheckWinCondition(world);
     }
@@ -233,6 +239,15 @@ public sealed class GameMode
 
         if (TeamBased)
         {
+            // A tied timed match enters sudden-death overtime. The first subsequent team score
+            // breaks the tie and ends the match even when it is below the configured limit.
+            if (State == MatchState.Overtime && TeamScores[0] != TeamScores[1])
+            {
+                WinningTeam = TeamScores[0] > TeamScores[1] ? Team.Red : Team.Blue;
+                Finish(world);
+                return;
+            }
+
             for (int t = 0; t < 2; t++)
             {
                 if (LimitValue > 0 && TeamScores[t] >= LimitValue)

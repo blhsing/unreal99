@@ -18,6 +18,7 @@ public sealed class Hud
     private static readonly uint Shadow = UiRenderer.Rgba(0f, 0f, 0f, 0.75f);
     private static readonly uint PanelBg = UiRenderer.Rgba(0.02f, 0.03f, 0.05f, 0.52f);
     private static readonly uint PanelEdge = UiRenderer.Rgba(0.55f, 0.72f, 0.95f, 0.28f);
+    private static readonly Team[] FlagTeams = [Team.Red, Team.Blue];
 
     public void Draw(UiRenderer ui, GameWorld world, Pawn pawn, PlayerController controller,
         int width, int height, float dt, bool showDebug, string debugText)
@@ -408,27 +409,36 @@ public sealed class Hud
     {
         if (world.Mode.Kind != GameModeKind.CaptureTheFlag) return;
 
-        float x = width * 0.5f - 130f * s;
-        float y = height - 130f * s;
-        foreach (var kv in world.FlagHome)
+        float cardWidth = 180f * s;
+        float gap = 12f * s;
+        float x = width * 0.5f - (cardWidth * 2f + gap) * 0.5f;
+        float y = height - 146f * s;
+        foreach (Team team in FlagTeams)
         {
-            Team team = kv.Key;
+            if (!world.FlagHome.TryGetValue(team, out Vector3 flagHome)) continue;
             Vector3 col = GameTypes.TeamColor(team);
             int carrier = world.FlagCarrier.TryGetValue(team, out int c) ? c : -1;
-            bool home = carrier < 0 && Vector3.Distance(world.FlagPosition[team], kv.Value) < 0.4f;
-            string status = carrier >= 0 ? Loc.HudFlagTaken : home ? "" : Loc.HudFlagDropped;
+            bool home = carrier < 0 && Vector3.Distance(world.FlagPosition[team], flagHome) < 0.4f;
+            Pawn carrierPawn = carrier >= 0 ? world.FindPawn(carrier) : null;
+            string status = carrierPawn != null
+                ? Loc.FlagHeldBy(carrierPawn.Name)
+                : carrier >= 0 ? Loc.HudFlagTaken
+                : home ? Loc.HudFlagAtBase : Loc.HudFlagDropped;
+            Vector3 statusColor = carrier >= 0 ? new Vector3(1f, 0.76f, 0.25f)
+                : home ? new Vector3(0.48f, 1f, 0.58f) : new Vector3(1f, 0.48f, 0.25f);
 
-            ui.ChamferRect(x, y, 122f * s, 26f * s, 6f * s, UiRenderer.Rgba(col * 0.3f, 0.55f));
-            ui.Text(FaceBold, 15f * s, x + 10f * s, y + 4f * s, GameTypes.TeamName(team),
+            ui.ChamferRect(x, y, cardWidth, 42f * s, 6f * s, UiRenderer.Rgba(col * 0.3f, 0.62f));
+            ui.Text(FaceBold, 15f * s, x + 10f * s, y + 3f * s,
+                $"{GameTypes.TeamName(team)}旗幟",
                 UiRenderer.Rgba(col * 1.3f, 0.95f));
-            if (status.Length > 0)
-                ui.Text(FaceRegular, 13f * s, x + 112f * s, y + 5f * s, status,
-                    UiRenderer.Rgba(1f, 0.85f, 0.4f, 0.95f), TextAlign.Right);
-            x += 138f * s;
+            ui.Text(FaceRegular, 13f * s, x + 10f * s, y + 21f * s, status,
+                UiRenderer.Rgba(statusColor, 0.98f));
+            x += cardWidth + gap;
         }
 
         if (pawn.HasFlag)
-            ui.TextShadow(FaceBold, 22f * s, width * 0.5f, height - 168f * s, Loc.HudHasFlag,
+            ui.TextShadow(FaceBold, 22f * s, width * 0.5f, height - 178f * s,
+                Loc.YouHoldFlag(GameTypes.TeamName(pawn.CarriedFlag)),
                 UiRenderer.Rgba(GameTypes.TeamColor(pawn.CarriedFlag) * 1.3f, 1f), TextAlign.Center, 2f * s);
     }
 
