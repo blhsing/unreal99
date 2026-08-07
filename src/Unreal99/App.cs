@@ -70,6 +70,9 @@ public sealed class App : IDisposable
     private bool _demoMode;
     private bool _windowed;
     private bool _flyby;
+    private bool _noHud;
+    private bool _flyManual;
+    private float _flyRadius, _flyHeight, _flyAngleDeg, _flyLookY;
     private MenuScreen _bootMenuScreen = MenuScreen.Main;
     private readonly List<string> _pendingScreenshots = new();
 
@@ -158,6 +161,22 @@ public sealed class App : IDisposable
                 case "--flyby":
                     // Orbiting overview camera for player one; useful for inspecting arenas.
                     _flyby = true;
+                    break;
+                case "--nohud":
+                    // Hides the HUD and the first-person weapon, for documentation captures.
+                    _noHud = true;
+                    break;
+                case "--flycam" when i + 4 < args.Length:
+                    // Explicit fly-by framing: radius, camera height, orbit angle, look-at height.
+                    // One automatic orbit cannot frame seventeen very differently shaped arenas,
+                    // so documentation shots are aimed by hand.
+                    _flyby = true;
+                    _flyManual = true;
+                    float.TryParse(args[i + 1], out _flyRadius);
+                    float.TryParse(args[i + 2], out _flyHeight);
+                    float.TryParse(args[i + 3], out _flyAngleDeg);
+                    float.TryParse(args[i + 4], out _flyLookY);
+                    i += 4;
                     break;
                 case "--inputtest":
                     _inputTest = true;
@@ -1121,7 +1140,7 @@ public sealed class App : IDisposable
             var pawn = _players[i].Pawn;
             var rect = viewports[Math.Min(i, viewports.Length - 1)];
             _cameras[i] = BuildCamera(pawn, _players[i], rect, dt);
-            _world.SubmitViewModel(_scene, i, pawn, _cameras[i]);
+            if (!_noHud) _world.SubmitViewModel(_scene, i, pawn, _cameras[i]);
         }
 
         // --- shadows once for the whole frame, focused on the first player ---
@@ -1149,7 +1168,7 @@ public sealed class App : IDisposable
         }
 
         // --- HUD per view ---
-        for (int i = 0; i < viewCount; i++)
+        for (int i = 0; i < viewCount && !_noHud; i++)
         {
             var rect = viewports[Math.Min(i, viewports.Length - 1)];
             _gl.Viewport(rect.X, rect.Y, (uint)rect.Width, (uint)rect.Height);
@@ -1209,16 +1228,30 @@ public sealed class App : IDisposable
                     hi = Vector3.Max(hi, s.Position);
                 }
                 centre = sum / _level.Spawns.Count;
-                height = centre.Y + 7f;
                 spread = MathF.Max(MathF.Min(hi.X - lo.X, hi.Z - lo.Z), 14f);
+                // Rise with the size of the arena so a big one is seen from above rather than
+                // from inside the crowd, but stop short of the ceiling.
+                height = MathF.Min(centre.Y + MathF.Max(9f, spread * 0.30f), _level.Max.Y - 2f);
             }
-            float radius = MathX.Clamp(spread * 0.55f, 9f, 55f);
+            // Pull back far enough for a three-quarter view, then clamp against the arena itself
+            // so the orbit never swings out through a side wall.
+            float bound = MathF.Min(_level.Max.X - _level.Min.X, _level.Max.Z - _level.Min.Z) * 0.42f;
+            float radius = MathF.Min(MathX.Clamp(spread * 0.75f, 12f, 60f), MathF.Max(bound, 10f));
             float angle = _time * 0.18f;
-            cam.Position = centre + new Vector3(
-                MathF.Cos(angle) * radius,
-                height - centre.Y,
-                MathF.Sin(angle) * radius);
-            Vector3 look = MathX.SafeNormalize(centre - cam.Position, MathX.Forward);
+            Vector3 target = centre;
+            if (_flyManual)
+            {
+                centre = new Vector3(_level.Center.X, 0f, _level.Center.Z);
+                target = new Vector3(_level.Center.X, _flyLookY, _level.Center.Z);
+                radius = _flyRadius;
+                height = _flyHeight;
+                angle = _flyAngleDeg * MathX.Deg2Rad;
+            }
+            cam.Position = new Vector3(
+                centre.X + MathF.Cos(angle) * radius,
+                height,
+                centre.Z + MathF.Sin(angle) * radius);
+            Vector3 look = MathX.SafeNormalize(target - cam.Position, MathX.Forward);
             MathX.YawPitchFromDir(look, out cam.Yaw, out cam.Pitch);
             cam.Roll = 0f;
             cam.FovY = VerticalFov(88f, aspect);
@@ -1357,6 +1390,8 @@ public sealed class App : IDisposable
 
     private bool _inputTest;
     private int _inputTestFrame;
+    /// <summary>Wheel accumulated per slot across the whole test, so a scroll at any moment counts.</summary>
+    private readonly float[] _inputTestWheel = new float[4];
 
     /// <summary>
     /// Drives <c>--inputtest</c>: injects synthetic mouse events for a couple of seconds, then
@@ -1372,7 +1407,12 @@ public sealed class App : IDisposable
             if (_inputTestFrame % 20 == 0) InputDiagnostics.InjectMouseClick();
         }
 
-        if (_inputTestFrame != 150) return;
+        // Sampling the wheel on one frame would only catch a scroll made at that exact instant,
+        // so accumulate it for the whole run and report the total.
+        for (int i = 0; i < _inputTestWheel.Length && i < _playerDevices.Length; i++)
+            _inputTestWheel[i] += _input.WheelDelta(_playerDevices[i]);
+
+        if (_inputTestFrame != 450) return;
 
         Console.WriteLine("──── 輸入自我測試 ────");
         Console.WriteLine(InputDiagnostics.Report(_input.Raw));
@@ -1385,7 +1425,12 @@ public sealed class App : IDisposable
             var look = _input.LookDelta(device);
             Console.WriteLine($"           本幀視角位移=({look.X:0.0}, {look.Y:0.0}) " +
                               $"開火={_input.ActionDown(device, GameAction.Fire)}");
+            string wheelSource = !device.MouseLook ? "停用（此欄位無專屬滑鼠）"
+                : _input.RawAvailable && device.MouseHandle != 0 ? "專屬滑鼠"
+                : "共用滾輪";
+            Console.WriteLine($"           滾輪累計={_inputTestWheel[i]:0.0} 來源={wheelSource}");
         }
+        Console.WriteLine("  測試期間請分別轉動兩個滑鼠的滾輪；兩列的累計值應各自變動。");
         Console.WriteLine("──────────────────────");
         _window.Close();
     }

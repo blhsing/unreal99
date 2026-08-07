@@ -277,7 +277,10 @@ public static partial class Maps
             }
 
             const float Parapet = 2.6f;   // above the 2.2m standing jump, so it actually stops people
-            const float GapHalf = 2.4f;
+            // Barely wider than the pad that sits in it (2.2m), leaving 0.4m either side against a
+            // 0.84m-wide pawn. A 4.8m opening let people stroll straight past the launcher and off
+            // the roof; at this width the only way through the gap is to be thrown through it.
+            const float GapHalf = 1.5f;
             const float Edge = Half + 1.2f;      // the roof cap overhangs the shaft by this much
             foreach (var face in new[] { (nx: 0, nz: -1), (nx: 0, nz: 1), (nx: -1, nz: 0), (nx: 1, nz: 0) })
             {
@@ -312,10 +315,20 @@ public static partial class Maps
             float ledgeOut = Edge + 4.5f;
             b.Solid(new Vector3(c.X - ledgeOut, ledgeY - 0.9f, c.Z - ledgeOut),
                     new Vector3(c.X + ledgeOut, ledgeY, c.Z + ledgeOut), MatId.SkyMetal, true, 0.8f);
-            b.Decor(new Vector3(c.X - ledgeOut, ledgeY, c.Z - ledgeOut),
-                    new Vector3(c.X + ledgeOut, ledgeY + 0.35f, c.Z - ledgeOut + 0.4f), MatId.Trim, 1.2f);
-            b.Decor(new Vector3(c.X - ledgeOut, ledgeY, c.Z + ledgeOut - 0.4f),
-                    new Vector3(c.X + ledgeOut, ledgeY + 0.35f, c.Z + ledgeOut), MatId.Trim, 1.2f);
+            // A real wall, all the way round. The first version put a 0.35m Decor strip on two of
+            // the four sides — non-colliding, so the ledge caught people off the roof and then let
+            // them walk straight out of it again.
+            const float LedgeWall = 2.6f;
+            foreach (var (wx, wz) in new[] { (wx: 0, wz: -1), (wx: 0, wz: 1), (wx: -1, wz: 0), (wx: 1, wz: 0) })
+            {
+                bool wallAlongX = wz != 0;
+                float wallAt = (wallAlongX ? c.Z : c.X) + (wallAlongX ? wz : wx) * (ledgeOut - 0.5f);
+                Vector3 wMin = wallAlongX ? new Vector3(c.X - ledgeOut, ledgeY, wallAt - 0.5f)
+                                          : new Vector3(wallAt - 0.5f, ledgeY, c.Z - ledgeOut);
+                Vector3 wMax = wallAlongX ? new Vector3(c.X + ledgeOut, ledgeY + LedgeWall, wallAt + 0.5f)
+                                          : new Vector3(wallAt + 0.5f, ledgeY + LedgeWall, c.Z + ledgeOut);
+                b.Solid(wMin, wMax, MatId.Trim, true, 1.2f);
+            }
             b.AddJumpPad(new Vector3(c.X, ledgeY + 0.1f, c.Z + Edge + 2.2f),
                          new Vector3(c.X + 7f, roof + 2.5f, c.Z - 7f), new Vector3(0.4f, 0.85f, 1f));
             b.Item(new Vector3(c.X - Edge - 2.2f, ledgeY + 0.8f, c.Z), PickupKind.HealthPack);
