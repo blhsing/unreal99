@@ -91,18 +91,23 @@ public static class Loc
     public const string ModeInstagibDesc = "只有震盪步槍，一擊必殺。";
 
     // ---------------------------------------------------------------- arenas
-    public const string MapDeck = "DM-深淵甲板";
-    public const string MapTower = "DM-鏽蝕高塔";
-    public const string MapTemple = "DM-熔岩神殿";
-    public const string MapArena = "DM-軌道競技場";
-    public const string MapTwinForts = "CTF-雙子要塞";
-    public const string MapDeckDesc = "廢棄的工業平台，中央熔岩池與環形走道。";
-    public const string MapTowerDesc = "垂直結構的高塔，跳台與升降平台交織。";
-    public const string MapTempleDesc = "古老石造神殿，熔岩溝渠貫穿其中。";
-    public const string MapArenaDesc = "軌道站的封閉競技場，開闊而致命。";
-    public const string MapTwinFortsDesc = "兩座對稱要塞，中央為開闊爭奪區。";
+    // Every arena is an homage to a layout that defined the 1999 original.
+    public const string MapDeck16 = "DM-十六號甲板";
+    public const string MapGrinder = "DM-絞碎機";
+    public const string MapLiandri = "DM-利安德里核心";
+    public const string MapPeak = "DM-孤峰";
+    public const string MapMorbias = "DM-莫比亞斯";
+    public const string MapCoret = "CTF-科瑞特設施";
+    public const string MapNovember = "CTF-十一月號";
 
-    // Arenas built as homages to the layouts that defined the 1999 original.
+    public const string MapDeck16Desc = "工業甲板的經典之作，熔岩渠道貫穿中央，震盪步槍就架在渠上長橋。";
+    public const string MapGrinderDesc = "陰暗的絞碎機廠房，環形走道包圍中央深坑，掉下去就是絞肉。";
+    public const string MapLiandriDesc = "利安德里高塔的核心豎井，四層錯開的迴廊向上盤旋，頂端擺著救世主。";
+    public const string MapPeakDesc = "雲海之上的山巔遺跡，石橋連接三座岩峰，失足即是萬丈深淵。";
+    public const string MapMorbiasDesc = "一個圓、一根柱子、沒有地方可躲。史上最純粹的近身混戰。";
+    public const string MapCoretDesc = "緊湊的室內設施，上下兩條路線從基地直通中央大廳。";
+    public const string MapNovemberDesc = "潛艦碼頭，中央水道停著一艘潛艦，艦身就是最高的爭奪點。";
+
     public const string MapFacingWorlds = "CTF-對峙世界";
     public const string MapMorpheus = "DM-摩菲斯之塔";
     public const string MapHyperBlast = "DM-超載星艦";

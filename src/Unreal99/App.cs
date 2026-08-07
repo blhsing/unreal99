@@ -726,7 +726,7 @@ public sealed class App : IDisposable
                 _pickupModels = new PickupModels(_gl);
                 break;
             case 3:
-                _menuLevel = Maps.Build(_gl, MapId.AbyssDeck);
+                _menuLevel = Maps.Build(_gl, MapId.Deck16);
                 break;
             default:
                 _world = new GameWorld(_renderer, _character, _weaponModels, _projectileModels, _pickupModels);
@@ -1191,15 +1191,29 @@ public sealed class App : IDisposable
         // Doubles as a spectator view and as the way arena layouts get eyeballed during development.
         if (_flyby && controller.PlayerIndex == 0)
         {
+            // Orbit through the part of the arena people actually stand in. Deriving that from
+            // the collision bounds fails on maps with deep foundations or tall skyboxes — the
+            // camera ends up inside the rock or up in the ceiling. The spawn points are a much
+            // better description of "where the map is", so frame off those.
             Vector3 centre = _level.Center;
-            // Orbit inside the arena's bounds rather than above them, so roofed maps are
-            // actually visible instead of showing their ceiling.
-            // Size off the narrower horizontal dimension, otherwise a long map's orbit swings
-            // straight through the side walls.
-            Vector3 extent = _level.Max - _level.Min;
-            float radius = MathX.Clamp(MathF.Min(extent.X, extent.Z) * 0.32f, 9f, 55f);
-            float angle = _time * 0.18f;
             float height = _level.Min.Y + (_level.Max.Y - _level.Min.Y) * 0.62f;
+            float spread = MathF.Min(_level.Max.X - _level.Min.X, _level.Max.Z - _level.Min.Z);
+            if (_level.Spawns.Count > 0)
+            {
+                Vector3 sum = Vector3.Zero;
+                Vector3 lo = new(float.MaxValue), hi = new(float.MinValue);
+                foreach (var s in _level.Spawns)
+                {
+                    sum += s.Position;
+                    lo = Vector3.Min(lo, s.Position);
+                    hi = Vector3.Max(hi, s.Position);
+                }
+                centre = sum / _level.Spawns.Count;
+                height = centre.Y + 7f;
+                spread = MathF.Max(MathF.Min(hi.X - lo.X, hi.Z - lo.Z), 14f);
+            }
+            float radius = MathX.Clamp(spread * 0.55f, 9f, 55f);
+            float angle = _time * 0.18f;
             cam.Position = centre + new Vector3(
                 MathF.Cos(angle) * radius,
                 height - centre.Y,
