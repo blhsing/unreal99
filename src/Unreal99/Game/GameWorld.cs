@@ -842,6 +842,9 @@ public sealed class GameWorld
         bool headshot = false)
     {
         if (!target.Alive || amount <= 0f) return;
+        if (attacker != null && attacker != target && Mode.Kind != GameModeKind.Instagib
+            && ControllerFor(attacker) is BotController bot)
+            amount *= bot.DamageScale;
         if (Mode.TeamBased && attacker != null && attacker != target && attacker.Team == target.Team)
         {
             amount *= Mode.FriendlyFire;

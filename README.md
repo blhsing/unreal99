@@ -4,8 +4,8 @@
 **全部介面文字皆為繁體中文**，支援**最多四人同機分割畫面**，並可讓**兩位玩家各自使用一個實體滑鼠與一組獨立按鍵配置**。
 繪圖採用自製的 OpenGL 3.3 前向 PBR 管線。
 
-整個專案只有程式碼：沒有任何美術、音效、模型或關卡檔案。所有材質、網格、角色、動畫、競技場與音效
-都在啟動時以程序化方式即時產生。
+除 ImageGen 設計的品牌標誌外，遊戲內容皆由程式產生：沒有外部模型、關卡或音效檔案。所有材質、
+網格、角色、動畫、競技場與音效都在啟動時以程序化方式即時產生。
 
 ---
 
@@ -20,28 +20,35 @@ dotnet run --project src/Unreal99/Unreal99.csproj -c Release
 需求：.NET 10 SDK、支援 OpenGL 3.3 的顯示卡，以及系統已安裝中日韓字型
 （優先使用微軟正黑體 `msjh.ttc`，另有 `mingliu.ttc`、`msyh.ttc`、`simsun.ttc` 作為備援）。
 
-### 安裝到開始選單
+### 圖形化安裝程式
 
-在**一般的命令提示字元或 PowerShell 視窗**中執行專案根目錄的：
+建立可散發的安裝套件：
 
-```
-install.cmd
-```
-
-或手動執行：
-
-```bash
-dotnet publish src/Unreal99/Unreal99.csproj -c Release -r win-x64 --self-contained false -o dist
-dist\Unreal99.exe --install-shortcut
+```powershell
+.\build-installer.ps1
 ```
 
-這會以程序化方式產生多尺寸的 `.ico` 圖示，並在目前使用者的「開始選單」中建立捷徑
-（不需要系統管理員權限）。移除請使用 `--uninstall-shortcut`。
+然後開啟 `artifacts\installer\Unreal99Installer.exe`。安裝程式可選擇其他安裝位置、建立目前使用者的
+開始選單捷徑、更新現有安裝，並可安全移除由它加入的檔案；全程不需要系統管理員權限。
 
-> **注意**：請勿在 MSIX 封裝應用程式（例如從 Microsoft Store 安裝的終端機或編輯器）
-> 的內嵌終端機中執行安裝。封裝應用程式對使用者設定檔的寫入會被重新導向到
-> `%LOCALAPPDATA%\Packages\<套件名稱>\LocalCache\Roaming\...`，捷徑會被寫進該私有覆蓋層，
-> 因此不會出現在真正的開始選單裡。從一般的終端機視窗執行即可正常運作。
+### 命令列安裝
+
+```powershell
+# 預設安裝並建立開始選單捷徑
+artifacts\installer\Unreal99Installer.exe install
+
+# 指定安裝位置，且不建立捷徑
+artifacts\installer\Unreal99Installer.exe install --install-dir "D:\Games\Unreal99" --no-start-menu
+
+# 移除指定位置的安裝
+artifacts\installer\Unreal99Installer.exe uninstall --install-dir "D:\Games\Unreal99"
+
+# 顯示所有選項
+artifacts\installer\Unreal99Installer.exe --help
+```
+
+命令列與圖形介面使用相同的複製、驗證、安裝紀錄與捷徑邏輯。`--source <路徑>` 可讓自訂打包流程
+指定包含 `Unreal99.exe` 的 payload 目錄。
 
 ### 命令列參數
 
@@ -58,7 +65,7 @@ dist\Unreal99.exe --install-shortcut
 | `--frags N` / `--time N` | 擊殺上限／時間上限（分鐘） |
 | `--quality N` | 0 低、1 中、2 高、3 史詩 |
 | `--debug` | 顯示效能資訊 |
-| `--menuscreen 名稱` | 直接開啟 `Main`、`Setup`、`Video`、`Controls`、`Devices`、`Bindings` |
+| `--menuscreen 名稱` | 直接開啟 `Main`、`Setup`、`MapGallery`、`Video`、`Controls`、`Devices`、`Bindings` |
 | `--autoshot N 路徑` | 執行 N 個畫格後輸出 PNG 截圖並結束 |
 | `--inputtest` | 多裝置輸入自我測試 |
 | `--menutest X Y` / `--menuclick` | 將系統游標移到指定座標並可注入點擊，用於自動驗證選單滑鼠操作 |
@@ -117,6 +124,9 @@ Windows 通常會列舉十幾個「幽靈」HID 裝置，因此配對採用**實
 | 捲動長清單 | 滑鼠滾輪，或以方向鍵移動選擇 |
 | 返回 | Esc 或手把 B |
 
+競技場以視覺化圖庫呈現；滑鼠移到或以方向鍵反白卡片時，下方會立即顯示該地圖的介紹與模式相容性。
+裝置指派與按鍵綁定提示也有可點擊的「取消」按鈕，滑鼠右鍵亦可取消。
+
 游標由遊戲自行繪製（系統游標在全螢幕下並不可靠），且只在滑鼠實際移動後才會出現，
 因此純鍵盤操作時不會有游標擋在畫面上。
 
@@ -126,6 +136,7 @@ Windows 通常會列舉十幾個「幽靈」HID 裝置，因此配對採用**實
 
 ```
 src/Unreal99/
+  Assets/       ImageGen 品牌標誌與衍生應用程式圖示
   Core/         數學（GL 慣例矩陣）、亂數
   Platform/     輸入系統、Raw Input、按鍵配置、PNG／ICO 輸出、開始選單捷徑
   Rendering/    OpenGL 封裝、著色器、算圖器、粒子、字型、2D 介面
@@ -134,6 +145,9 @@ src/Unreal99/
   Audio/        程序化合成 + OpenAL 3D 播放
   UI/           繁體中文字串表、HUD、選單
   App.cs        視窗、分割畫面、前端狀態機
+src/Unreal99.Installer/
+  InstallerForm.cs  圖形化安裝介面
+  InstallService.cs 共用的 GUI／CLI 安裝與移除引擎
 ```
 
 ### 繪圖
@@ -190,7 +204,8 @@ src/Unreal99/
 會彈跳的破片、會反彈並斬首的撕裂者飛刃、可蓄力並黏附表面的生化黏球，以及救世主核彈。
 
 電腦對手會在由碰撞世界自動產生的路徑點圖上規劃路線，再進行本地轉向。難度會影響反應時間、
-瞄準抖動、投射物提前量、閃避頻率與感知範圍。牠們會依交戰距離選擇武器、避免被自己的爆炸波及、
+瞄準抖動、投射物提前量、移動速度、射擊節奏、傷害、閃避頻率與感知範圍。0～4 級採用較平緩的
+學習曲線，最簡單級別有明顯的反應、移動與傷害限制；第 5 級保留原有強度。牠們會依交戰距離選擇武器、避免被自己的爆炸波及、
 追擊失去視野的目標最後出現的位置、受傷時退往掩體，並在奪旗模式中執行目標。
 
 模式：死亡競賽、團隊死亡競賽、奪旗大戰、最後生還者、瞬殺模式，並附有 UT 風格的連殺與多重擊殺

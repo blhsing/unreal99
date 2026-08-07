@@ -1,5 +1,6 @@
 <Solution>
   <Folder Name="/src/">
     <Project Path="src/Unreal99/Unreal99.csproj" />
+    <Project Path="src/Unreal99.Installer/Unreal99.Installer.csproj" />
   </Folder>
 </Solution>

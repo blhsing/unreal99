@@ -3,12 +3,14 @@ bin/
 obj/
 dist/
 publish/
+artifacts/
 *.user
 *.suo
 
 # Generated at runtime
 screenshots/
 *.ico
+!src/Unreal99/Assets/Unreal99.ico
 
 # IDE
 .vs/

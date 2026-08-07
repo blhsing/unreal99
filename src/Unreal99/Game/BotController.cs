@@ -34,6 +34,8 @@ public sealed class BotController : Controller
     private float _dodgeTimer;
     private float _reactionTimer;
     private float _fireHoldTimer;
+    private float _fireBurstTimer;
+    private float _firePauseTimer;
     private float _jumpTimer;
     private Vector3 _lastPosition;
     private Vector3 _aimPoint;
@@ -54,13 +56,31 @@ public sealed class BotController : Controller
     }
 
     // Skill-derived tuning.
-    private float ReactionTime => MathX.Lerp(0.62f, 0.09f, Skill);
-    private float AimError => MathX.Lerp(0.115f, 0.007f, Skill * Skill);
+    private float ReactionTime
+    {
+        get
+        {
+            float original = MathX.Lerp(0.62f, 0.09f, Skill);
+            return Skill >= 0.85f ? original : original + 0.53f * (1f - Skill / 0.85f);
+        }
+    }
+    private float AimError
+    {
+        get
+        {
+            float original = MathX.Lerp(0.115f, 0.007f, Skill * Skill);
+            return Skill >= 0.85f ? original : original + 0.045f * (1f - Skill / 0.85f);
+        }
+    }
     private float AimSpeed => MathX.Lerp(5.5f, 22f, Skill);
     private float SightRange => MathX.Lerp(38f, 110f, Skill);
     private float LeadAccuracy => MathX.Lerp(0.15f, 1.0f, Skill);
     private float DodgeChance => MathX.Lerp(0.10f, 0.85f, Skill);
     private float StrafeAmount => MathX.Lerp(0.35f, 1.0f, Skill);
+    /// <summary>Lower tiers cannot match the player's full running speed.</summary>
+    public float MovementScale => Skill >= 0.85f ? 1f : MathX.Lerp(0.52f, 0.92f, Skill / 0.85f);
+    /// <summary>Outgoing damage handicap. Godlike bots retain the original 100% damage.</summary>
+    public float DamageScale => Skill >= 0.85f ? 1f : MathX.Lerp(0.52f, 0.90f, Skill / 0.85f);
 
     public override void OnSpawned(GameWorld world)
     {
@@ -73,6 +93,9 @@ public sealed class BotController : Controller
         _lastPosition = Pawn.Position;
         _repathTimer = 0f;
         _itemGoal = null;
+        _reactionTimer = Skill < 0.85f ? ReactionTime * _rng.Range(0.85f, 1.15f) : 0f;
+        _fireBurstTimer = 0f;
+        _firePauseTimer = 0f;
     }
 
     public override void OnDamaged(GameWorld world, Pawn attacker, float amount, Vector3 direction)
@@ -158,6 +181,13 @@ public sealed class BotController : Controller
         _dodgeTimer -= dt;
         _reactionTimer -= dt;
         _fireHoldTimer -= dt;
+        if (_fireBurstTimer > 0f)
+        {
+            _fireBurstTimer -= dt;
+            if (_fireBurstTimer <= 0f && Skill < 0.85f)
+                _firePauseTimer = _rng.Range(0.35f, 1.35f) * (1f - Skill / 0.95f);
+        }
+        else _firePauseTimer -= dt;
         _jumpTimer -= dt;
         _threatTimer = MathF.Max(0f, _threatTimer - dt);
     }
@@ -200,7 +230,13 @@ public sealed class BotController : Controller
             if (score > bestScore) { bestScore = score; best = candidate; }
         }
 
-        if (best != null) { _targetId = best.Id; return; }
+        if (best != null)
+        {
+            if (_targetId != best.Id && Skill < 0.85f)
+                _reactionTimer = ReactionTime * _rng.Range(0.85f, 1.20f);
+            _targetId = best.Id;
+            return;
+        }
 
         // Nothing visible: keep hunting the last known position for a while.
         if (world.Time - _lastSeenTargetTime > 5f) _targetId = -1;
@@ -265,6 +301,15 @@ public sealed class BotController : Controller
 
     private void DecideFire(GameWorld world, Pawn target, ref PawnInput input)
     {
+        // Novice through master bots fire in increasingly long bursts with a visible pause
+        // between them. Godlike retains the original relentless trigger behavior.
+        if (Skill < 0.85f)
+        {
+            if (_firePauseTimer > 0f) return;
+            if (_fireBurstTimer <= 0f)
+                _fireBurstTimer = _rng.Range(0.18f, 0.55f) + Skill * 0.55f;
+        }
+
         var def = Pawn.WeaponDef;
         float range = Vector3.Distance(Pawn.Position, target.Position);
 
@@ -483,7 +528,7 @@ public sealed class BotController : Controller
         Vector3 dir = MathX.SafeNormalize(steer, Pawn.ForwardFlat);
         float forwardAmount = Vector3.Dot(dir, Pawn.ForwardFlat);
         float rightAmount = Vector3.Dot(dir, Pawn.RightFlat);
-        return new Vector2(rightAmount, forwardAmount);
+        return new Vector2(rightAmount, forwardAmount) * MovementScale;
     }
 
     private void ChooseGoal(GameWorld world, Pawn target, bool visible)

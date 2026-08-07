@@ -1,12 +1,13 @@
 using System.Buffers.Binary;
 using System.Numerics;
+using StbImageSharp;
 using Unreal99.Core;
 
 namespace Unreal99.Platform;
 
 /// <summary>
-/// Draws the application icon procedurally and writes it as a multi-resolution .ico.
-/// Same principle as everything else in the project: no binary art assets in the repository.
+/// Builds a multi-resolution Windows icon from the branded game emblem, with the original
+/// procedural badge retained as a safe fallback if the packaged artwork is unavailable.
 /// </summary>
 public static class AppIcon
 {
@@ -15,10 +16,11 @@ public static class AppIcon
     /// <summary>Writes a Windows .ico containing every size in <see cref="Sizes"/>.</summary>
     public static void WriteIco(string path)
     {
+        ImageResult logo = TryLoadLogo();
         var images = new List<byte[]>(Sizes.Length);
         foreach (int size in Sizes)
         {
-            byte[] rgba = Render(size);
+            byte[] rgba = logo != null ? RenderLogo(logo, size) : Render(size);
             using var ms = new MemoryStream();
             Png.WriteToStream(ms, size, size, rgba, 4, flipVertically: false);
             images.Add(ms.ToArray());
@@ -49,6 +51,62 @@ public static class AppIcon
         }
 
         foreach (byte[] image in images) file.Write(image);
+    }
+
+    private static ImageResult TryLoadLogo()
+    {
+        string[] candidates =
+        [
+            Path.Combine(AppContext.BaseDirectory, "Assets", "Unreal99Logo.png"),
+            Path.Combine(AppContext.BaseDirectory, "Unreal99Logo.png"),
+            Path.Combine(Environment.CurrentDirectory, "src", "Unreal99", "Assets", "Unreal99Logo.png"),
+        ];
+        foreach (string candidate in candidates)
+        {
+            if (!File.Exists(candidate)) continue;
+            try
+            {
+                using var stream = File.OpenRead(candidate);
+                return ImageResult.FromStream(stream, ColorComponents.RedGreenBlueAlpha);
+            }
+            catch (Exception) { }
+        }
+        return null;
+    }
+
+    private static byte[] RenderLogo(ImageResult source, int size)
+    {
+        byte[] output = new byte[size * size * 4];
+        float scale = MathF.Min(source.Width, source.Height) / (size * 0.94f);
+        float content = size * 0.94f;
+        float inset = (size - content) * 0.5f;
+
+        for (int y = 0; y < size; y++)
+        for (int x = 0; x < size; x++)
+        {
+            float sx = (x - inset + 0.5f) * scale - 0.5f + (source.Width - source.Height) * 0.5f;
+            float sy = (y - inset + 0.5f) * scale - 0.5f;
+            if (sx < 0f || sy < 0f || sx >= source.Width - 1 || sy >= source.Height - 1) continue;
+
+            int x0 = (int)MathF.Floor(sx), y0 = (int)MathF.Floor(sy);
+            float tx = sx - x0, ty = sy - y0;
+            Vector4 c00 = Pixel(x0, y0), c10 = Pixel(x0 + 1, y0);
+            Vector4 c01 = Pixel(x0, y0 + 1), c11 = Pixel(x0 + 1, y0 + 1);
+            Vector4 c = Vector4.Lerp(Vector4.Lerp(c00, c10, tx), Vector4.Lerp(c01, c11, tx), ty);
+            int d = (y * size + x) * 4;
+            output[d] = ToByte(c.X);
+            output[d + 1] = ToByte(c.Y);
+            output[d + 2] = ToByte(c.Z);
+            output[d + 3] = ToByte(c.W);
+        }
+        return output;
+
+        Vector4 Pixel(int px, int py)
+        {
+            int i = (py * source.Width + px) * 4;
+            return new Vector4(source.Data[i] / 255f, source.Data[i + 1] / 255f,
+                source.Data[i + 2] / 255f, source.Data[i + 3] / 255f);
+        }
     }
 
     /// <summary>

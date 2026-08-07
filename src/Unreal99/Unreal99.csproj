@@ -15,6 +15,7 @@
     <TieredPGO>true</TieredPGO>
     <InvariantGlobalization>false</InvariantGlobalization>
     <NoWarn>CS8981;CA1416</NoWarn>
+    <ApplicationIcon>Assets\Unreal99.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
@@ -25,6 +26,12 @@
     <PackageReference Include="Silk.NET.OpenGL" Version="2.22.0" />
     <PackageReference Include="Silk.NET.Maths" Version="2.22.0" />
     <PackageReference Include="StbTrueTypeSharp" Version="1.26.12" />
+    <PackageReference Include="StbImageSharp" Version="2.30.15" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Assets\Unreal99Logo.png" CopyToOutputDirectory="PreserveNewest"
+             CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
 
 </Project>

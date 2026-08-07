@@ -37,6 +37,7 @@ public static class Loc
     public const string SetupTitle = "對戰設定";
     public const string OptGameMode = "遊戲模式";
     public const string OptMap = "競技場";
+    public const string OptChooseMap = "選擇競技場";
     public const string OptPlayers = "本機玩家人數";
     public const string OptBots = "電腦對手數量";
     public const string OptBotSkill = "電腦難度";
@@ -46,6 +47,12 @@ public static class Loc
     public const string OptStartMatch = "開始戰鬥";
     public const string OptMinutes = "分鐘";
     public const string OptNoLimit = "無限制";
+    public const string MapGalleryTitle = "競技場圖庫";
+    public const string MapCtfUnavailable = "此競技場不支援奪旗大戰";
+    public const string MapGalleryHint = "選擇一座競技場以檢視並套用";
+    public const string MapIntroduction = "競技場介紹";
+    public const string MapSelected = "已選擇";
+    public const string MapGalleryControls = "滑鼠點選　　方向鍵瀏覽　　Enter 套用　　Esc 返回";
 
     // ---------------------------------------------------------------- video settings
     public const string OptVideo = "畫面設定";
@@ -228,7 +235,7 @@ public static class Loc
     public const string DevicesAssignKeyboard = "指派鍵盤";
     public const string DevicesMovePrompt = "請移動要指派給此玩家的滑鼠";
     public const string DevicesPressPrompt = "請在要指派給此玩家的鍵盤上按任意鍵";
-    public const string DevicesCancelPrompt = "按 Esc 取消";
+    public const string DevicesCancelPrompt = "按 Esc、滑鼠右鍵或點擊取消";
     public const string DevicesShared = "共用";
     public const string DevicesSharedMouse = "共用滑鼠";
     public const string DevicesSharedKeyboard = "共用鍵盤";

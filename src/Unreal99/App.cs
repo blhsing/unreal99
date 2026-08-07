@@ -3,6 +3,7 @@ using Silk.NET.Input;
 using Silk.NET.Maths;
 using Silk.NET.OpenGL;
 using Silk.NET.Windowing;
+using StbImageSharp;
 using Unreal99.Core;
 using Unreal99.Game;
 using Unreal99.Platform;
@@ -27,6 +28,7 @@ public sealed class App : IDisposable
     private InputSystem _input;
     private FontSystem _fonts;
     private UiRenderer _ui;
+    private Texture2D _logoTexture;
     private Renderer _renderer;
     private AudioSystem _audio;
     private readonly Hud _hud = new();
@@ -244,9 +246,11 @@ public sealed class App : IDisposable
         _fonts = new FontSystem(_gl);
         LoadFonts();
         _ui = new UiRenderer(_gl, _fonts);
+        _logoTexture = LoadLogoTexture();
 
         _menu.FaceRegular = _hud.FaceRegular;
         _menu.FaceBold = _hud.FaceBold;
+        _menu.LogoTexture = _logoTexture;
         _menu.Render = _renderSettings;
         _menu.Controls = _controls;
         _menu.OnStartMatch = BeginMatch;
@@ -283,6 +287,7 @@ public sealed class App : IDisposable
         };
         _menu.ProfileFor = i => _playerDevices[MathX.Clamp(i, 0, 3)].Bindings;
         _menu.BeginRebind = BeginRebind;
+        _menu.CancelCapture = CancelCapture;
         _menu.ResetBindings = i =>
         {
             _playerDevices[MathX.Clamp(i, 0, 3)].Bindings = BindingProfile.CreateDefault(i);
@@ -318,6 +323,23 @@ public sealed class App : IDisposable
                 if (face >= 0) return face;
             }
             return -1;
+        }
+    }
+
+    private Texture2D LoadLogoTexture()
+    {
+        try
+        {
+            string path = Path.Combine(AppContext.BaseDirectory, "Assets", "Unreal99Logo.png");
+            using var stream = File.OpenRead(path);
+            ImageResult image = ImageResult.FromStream(stream, ColorComponents.RedGreenBlueAlpha);
+            return Texture2D.FromRgba(_gl, image.Width, image.Height, image.Data,
+                mipmaps: true, srgb: true, anisotropy: 4);
+        }
+        catch (Exception ex)
+        {
+            Console.WriteLine($"標誌載入失敗，使用文字標題: {ex.Message}");
+            return null;
         }
     }
 
@@ -731,6 +753,21 @@ public sealed class App : IDisposable
 
     private void UpdateMenu(float dt)
     {
+        // Feed the pointer before capture processing. This lets the modal cancel button consume
+        // its click before that same click can be interpreted as a newly assigned control.
+        if (_capture != CaptureMode.None)
+        {
+            FeedMenuMouse();
+            if (_capture == CaptureMode.None)
+            {
+                RenderMenuBackdrop(dt);
+                _ui.Begin(Width, Height);
+                _menu.Draw(_ui, Width, Height);
+                DrawStatusLine();
+                _ui.End();
+                return;
+            }
+        }
         if (UpdateCapture(dt))
         {
             RenderMenuBackdrop(dt);
@@ -907,14 +944,22 @@ public sealed class App : IDisposable
         // --- bots ---
         var rng = new Rng((uint)(_time * 1000f) + 7u);
         int botCount = MathX.Clamp(_menu.BotCount, 0, 15);
-        float skill = MathX.Clamp(_menu.BotSkill / (float)(Loc.SkillNames.Length - 1), 0f, 1f);
+        // Tiers 0-4 deliberately leave more room to learn. Tier 5 keeps the original 1.0
+        // baseline and its existing per-bot variation.
+        ReadOnlySpan<float> skillCurve = [0f, 0.08f, 0.22f, 0.42f, 0.68f, 1f];
+        int skillSetting = MathX.Clamp(_menu.BotSkill, 0, skillCurve.Length - 1);
+        float skill = skillCurve[skillSetting];
         for (int i = 0; i < botCount; i++)
         {
             string name = Loc.BotNames[i % Loc.BotNames.Length];
             if (i >= Loc.BotNames.Length) name += $" {i / Loc.BotNames.Length + 1}";
             Team team = mode.TeamBased ? (Team)((i + localPlayers) % 2) : Team.None;
             // Vary skill slightly so a roster feels like individuals rather than clones.
-            float botSkill = MathX.Clamp(skill + rng.Symmetric(0.12f), 0f, 1f);
+            float variation = skillSetting == skillCurve.Length - 1 ? 0.12f
+                : skillSetting == 0 ? 0.035f : 0.06f;
+            float botSkill = skillSetting == 0
+                ? rng.Range(0f, variation)
+                : MathX.Clamp(skill + rng.Symmetric(variation), 0f, 1f);
             var controller = new BotController(rng.NextUInt(), name, botSkill);
             _world.AddPawn(controller, name, team, true, -1, GameTypes.BotColor(i * 37 + 11));
         }
@@ -1393,6 +1438,7 @@ public sealed class App : IDisposable
         if (_level != _menuLevel) _level?.Dispose();
         _menuLevel?.Dispose();
         _renderer?.Dispose();
+        _logoTexture?.Dispose();
         _ui?.Dispose();
         _fonts?.Dispose();
         _input?.Dispose();

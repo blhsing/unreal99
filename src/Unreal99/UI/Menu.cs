@@ -5,7 +5,7 @@ using Unreal99.Rendering;
 
 namespace Unreal99.UI;
 
-public enum MenuScreen { Main, Setup, Video, Controls, Devices, Bindings, Paused, Results }
+public enum MenuScreen { Main, Setup, MapGallery, Video, Controls, Devices, Bindings, Paused, Results }
 
 public enum MenuItemKind { Action, Choice, Header, Info }
 
@@ -30,6 +30,7 @@ public sealed class Menu
 {
     public int FaceRegular;
     public int FaceBold;
+    public Texture2D LogoTexture;
     public MenuScreen Screen = MenuScreen.Main;
     public int SelectedIndex;
     public bool Active = true;
@@ -48,6 +49,7 @@ public sealed class Menu
     private float _maxScroll;
     private bool _pointerActive;
     private Vector2 _pointer;
+    private ItemRect? _captureCancelRect;
 
     private readonly record struct ItemRect(int Index, float X, float Y, float Width, float Height,
         float LeftArrowX, float RightArrowX, float ArrowWidth);
@@ -102,6 +104,7 @@ public sealed class Menu
     public Action<int, Platform.GameAction> BeginRebind;
     public Action<int> ResetBindings;
     public Action<int> MirrorBindings;
+    public Action CancelCapture;
     /// <summary>Which player's bindings the bindings screen is editing.</summary>
     public int BindingPlayer;
 
@@ -128,10 +131,20 @@ public sealed class Menu
 
         if (_navCooldown <= 0f)
         {
-            if (up) { Move(-1); _navCooldown = 0.16f; }
-            else if (down) { Move(1); _navCooldown = 0.16f; }
-            else if (left) { Adjust(-1); _navCooldown = 0.16f; }
-            else if (right) { Adjust(1); _navCooldown = 0.16f; }
+            if (Screen == MenuScreen.MapGallery)
+            {
+                if (up) { MoveBy(-3); _navCooldown = 0.16f; }
+                else if (down) { MoveBy(3); _navCooldown = 0.16f; }
+                else if (left) { MoveBy(-1); _navCooldown = 0.16f; }
+                else if (right) { MoveBy(1); _navCooldown = 0.16f; }
+            }
+            else
+            {
+                if (up) { Move(-1); _navCooldown = 0.16f; }
+                else if (down) { Move(1); _navCooldown = 0.16f; }
+                else if (left) { Adjust(-1); _navCooldown = 0.16f; }
+                else if (right) { Adjust(1); _navCooldown = 0.16f; }
+            }
         }
 
         if (accept)
@@ -160,7 +173,8 @@ public sealed class Menu
     /// </summary>
     public void HandleMouse(Vector2 position, bool moved, bool leftClick, bool rightClick, float wheel)
     {
-        if (moved)
+        bool pointerUsed = moved || leftClick || rightClick || MathF.Abs(wheel) > 0.01f;
+        if (pointerUsed)
         {
             _pointerActive = true;
             _pointer = position;
@@ -170,9 +184,31 @@ public sealed class Menu
             _pointer = position;
         }
 
+        // Device assignment and key binding prompts are modal.  Keep clicks from falling
+        // through to the menu underneath and offer a genuine mouse-only way out.
+        if (!string.IsNullOrEmpty(CapturePrompt?.Invoke()))
+        {
+            if (rightClick || (leftClick && _captureCancelRect is { } cancel
+                && Contains(cancel, position)))
+            {
+                CancelCapture?.Invoke();
+                PlaySound?.Invoke(SoundId.MenuBack);
+            }
+            return;
+        }
+
         if (MathF.Abs(wheel) > 0.01f && _maxScroll > 0f)
         {
+            float oldScroll = _scroll;
             _scroll = MathX.Clamp(_scroll - wheel * 48f, 0f, _maxScroll);
+            float offset = oldScroll - _scroll;
+            // Hit rectangles were produced during the preceding draw. Move them with the
+            // list immediately so a wheel-and-click in the same frame targets the visible row.
+            for (int i = 0; i < _itemRects.Count; i++)
+            {
+                ItemRect r = _itemRects[i];
+                _itemRects[i] = r with { Y = r.Y + offset };
+            }
             _pointerActive = true;
         }
 
@@ -181,7 +217,7 @@ public sealed class Menu
         int hovered = HitTest(position, out ItemRect rect);
         // Only steal the selection when the mouse actually moves, so hovering over one row does
         // not fight the keyboard when the player is navigating with the arrows.
-        if (moved && hovered >= 0 && hovered != SelectedIndex)
+        if ((moved || MathF.Abs(wheel) > 0.01f) && hovered >= 0 && hovered != SelectedIndex)
         {
             SelectedIndex = hovered;
             PlaySound?.Invoke(SoundId.MenuMove);
@@ -235,11 +271,18 @@ public sealed class Menu
         return -1;
     }
 
+    private static bool Contains(in ItemRect rect, Vector2 position)
+        => position.X >= rect.X && position.X <= rect.X + rect.Width
+        && position.Y >= rect.Y && position.Y <= rect.Y + rect.Height;
+
     public void Back()
     {
         PlaySound?.Invoke(SoundId.MenuBack);
         switch (Screen)
         {
+            case MenuScreen.MapGallery:
+                Open(MenuScreen.Setup);
+                break;
             case MenuScreen.Setup:
             case MenuScreen.Video:
             case MenuScreen.Controls:
@@ -265,6 +308,23 @@ public sealed class Menu
         if (_items.Count == 0) return;
         MoveToSelectable(direction);
         PlaySound?.Invoke(SoundId.MenuMove);
+    }
+
+    private void MoveBy(int delta)
+    {
+        if (_items.Count == 0) return;
+        int direction = Math.Sign(delta);
+        int candidate = ((SelectedIndex + delta) % _items.Count + _items.Count) % _items.Count;
+        for (int i = 0; i < _items.Count; i++)
+        {
+            if (_items[candidate].Selectable && _items[candidate].Enabled())
+            {
+                SelectedIndex = candidate;
+                PlaySound?.Invoke(SoundId.MenuMove);
+                return;
+            }
+            candidate = ((candidate + direction) % _items.Count + _items.Count) % _items.Count;
+        }
     }
 
     private void MoveToSelectable(int direction)
@@ -297,6 +357,7 @@ public sealed class Menu
         {
             case MenuScreen.Main: BuildMain(); break;
             case MenuScreen.Setup: BuildSetup(); break;
+            case MenuScreen.MapGallery: BuildMapGallery(); break;
             case MenuScreen.Video: BuildVideo(); break;
             case MenuScreen.Controls: BuildControls(); break;
             case MenuScreen.Devices: BuildDevices(); break;
@@ -307,8 +368,15 @@ public sealed class Menu
         if (SelectedIndex >= _items.Count) SelectedIndex = Math.Max(0, _items.Count - 1);
     }
 
-    private void Add(string label, Action activate, string hint = "")
-        => _items.Add(new MenuItem { Label = label, Kind = MenuItemKind.Action, OnActivate = activate, Hint = hint });
+    private void Add(string label, Action activate, string hint = "", Func<bool> enabled = null)
+        => _items.Add(new MenuItem
+        {
+            Label = label,
+            Kind = MenuItemKind.Action,
+            OnActivate = activate,
+            Hint = hint,
+            Enabled = enabled ?? (() => true),
+        });
 
     private void AddChoice(string label, Func<string> value, Action<int> adjust, string hint = "")
         => _items.Add(new MenuItem
@@ -346,12 +414,7 @@ public sealed class Menu
             if (ModeKind == GameModeKind.CaptureTheFlag) Map = World.MapId.TwinForts;
         }, Loc.ModeDescription(ModeKind));
 
-        AddChoice(Loc.OptMap, () => World.Maps.Name(Map), d =>
-        {
-            int n = (int)World.MapId.Count;
-            do { Map = (World.MapId)(((int)Map + d % n + n) % n); }
-            while (ModeKind == GameModeKind.CaptureTheFlag && !World.Maps.SupportsCtf(Map));
-        }, World.Maps.Description(Map));
+        Add($"{Loc.OptChooseMap}　{World.Maps.Name(Map)}", OpenMapGallery, World.Maps.Description(Map));
 
         AddChoice(Loc.OptPlayers, () => Loc.PlayerCount(LocalPlayers),
             d => LocalPlayers = MathX.Clamp(LocalPlayers + d, 1, 4),
@@ -383,6 +446,27 @@ public sealed class Menu
 
         Add(Loc.OptStartMatch, () => OnStartMatch?.Invoke(), "進入戰場。");
         Add(Loc.MenuBack, () => Open(MenuScreen.Main));
+    }
+
+    private void OpenMapGallery()
+    {
+        Screen = MenuScreen.MapGallery;
+        Active = true;
+        Rebuild();
+        SelectedIndex = MathX.Clamp((int)Map, 0, _items.Count - 1);
+        if (!_items[SelectedIndex].Enabled()) MoveToSelectable(1);
+    }
+
+    private void BuildMapGallery()
+    {
+        for (int i = 0; i < (int)World.MapId.Count; i++)
+        {
+            World.MapId id = (World.MapId)i;
+            bool compatible = ModeKind != GameModeKind.CaptureTheFlag || World.Maps.SupportsCtf(id);
+            Add(World.Maps.Name(id), () => { Map = id; Open(MenuScreen.Setup); },
+                compatible ? World.Maps.Description(id) : Loc.MapCtfUnavailable,
+                () => compatible);
+        }
     }
 
     private void BuildVideo()
@@ -565,6 +649,7 @@ public sealed class Menu
         }
 
         if (Screen == MenuScreen.Results && ResultsWorld != null) DrawResults(ui, width, height, s);
+        else if (Screen == MenuScreen.MapGallery) DrawMapGallery(ui, width, height, s);
         else DrawStandard(ui, width, height, s);
 
         DrawPointer(ui, width, height);
@@ -580,13 +665,24 @@ public sealed class Menu
         if (Screen is MenuScreen.Main)
         {
             float pulse = 0.85f + 0.15f * MathF.Sin(_time * 1.6f);
-            ui.TextOutline(FaceBold, 68f * s, width * 0.5f, titleY, Loc.GameTitle,
+            if (LogoTexture != null)
+            {
+                float logoSize = 150f * s;
+                ui.Texture(LogoTexture, width * 0.5f - logoSize * 0.5f, titleY - 44f * s,
+                    logoSize, logoSize, UiRenderer.Rgba(1f, 1f, 1f, 0.98f),
+                    new Vector2(0f, 1f), new Vector2(1f, 0f));
+            }
+            float nameY = LogoTexture != null ? titleY + 112f * s : titleY;
+            float nameSize = LogoTexture != null ? 48f * s : 68f * s;
+            ui.TextOutline(FaceBold, nameSize, width * 0.5f, nameY, Loc.GameTitle,
                 UiRenderer.Rgba(1f, 0.72f * pulse, 0.20f * pulse),
                 UiRenderer.Rgba(0.35f, 0.05f, 0f, 0.9f), 4f * s, TextAlign.Center);
-            ui.Text(FaceRegular, 19f * s, width * 0.5f, titleY + 82f * s, Loc.GameSubtitle,
+            float subtitleY = LogoTexture != null ? nameY + 58f * s : titleY + 82f * s;
+            ui.Text(FaceRegular, 19f * s, width * 0.5f, subtitleY, Loc.GameSubtitle,
                 UiRenderer.Rgba(0.65f, 0.78f, 0.95f, 0.85f), TextAlign.Center);
-            ui.Line(new Vector2(width * 0.5f - 180f * s, titleY + 112f * s),
-                    new Vector2(width * 0.5f + 180f * s, titleY + 112f * s), 1.6f * s,
+            float lineY = LogoTexture != null ? subtitleY + 31f * s : titleY + 112f * s;
+            ui.Line(new Vector2(width * 0.5f - 180f * s, lineY),
+                    new Vector2(width * 0.5f + 180f * s, lineY), 1.6f * s,
                     UiRenderer.Rgba(1f, 0.6f, 0.2f, 0.45f));
         }
         else
@@ -725,10 +821,147 @@ public sealed class Menu
         }
 
         ui.Text(FaceRegular, 15f * s, width * 0.5f, height - 40f * s,
-            "▲▼ 選擇　　← → 調整　　Enter 確定　　Esc 返回",
+            "滑鼠點選 / 滾輪　　▲▼ 選擇　　← → 調整　　Enter 確定　　Esc 返回",
             UiRenderer.Rgba(0.55f, 0.62f, 0.75f, 0.8f), TextAlign.Center);
 
         DrawCaptureOverlay(ui, width, height, s);
+    }
+
+    private void DrawMapGallery(UiRenderer ui, int width, int height, float s)
+    {
+        ui.TextOutline(FaceBold, 46f * s, width * 0.5f, height * 0.065f, Loc.MapGalleryTitle,
+            UiRenderer.Rgba(0.96f, 0.98f, 1f), UiRenderer.Rgba(0f, 0f, 0f, 0.9f),
+            3f * s, TextAlign.Center);
+        ui.Text(FaceRegular, 17f * s, width * 0.5f, height * 0.065f + 62f * s,
+            Loc.MapGalleryHint, UiRenderer.Rgba(0.66f, 0.76f, 0.91f), TextAlign.Center);
+
+        const int columns = 3;
+        int rows = (_items.Count + columns - 1) / columns;
+        float panelW = MathF.Min(width * 0.90f, 1080f * s);
+        float gap = 18f * s;
+        float cardW = (panelW - gap * (columns - 1)) / columns;
+        float gridTop = height * 0.21f;
+        float gridBottom = height - 150f * s;
+        float cardH = (gridBottom - gridTop - gap * (rows - 1)) / rows;
+        float startX = (width - panelW) * 0.5f;
+
+        _itemRects.Clear();
+        _maxScroll = 0f;
+        for (int i = 0; i < _items.Count; i++)
+        {
+            int col = i % columns;
+            int row = i / columns;
+            float x = startX + col * (cardW + gap);
+            float y = gridTop + row * (cardH + gap);
+            bool selected = i == SelectedIndex;
+            bool enabled = _items[i].Enabled();
+
+            _itemRects.Add(new ItemRect(i, x, y, cardW, cardH, 0f, 0f, 0f));
+            ui.ChamferRect(x, y, cardW, cardH, 12f * s,
+                selected ? UiRenderer.Rgba(0.12f, 0.25f, 0.48f, 0.94f)
+                         : UiRenderer.Rgba(0.035f, 0.05f, 0.09f, 0.90f));
+            if (selected)
+                ui.RectOutline(x + 2f * s, y + 2f * s, cardW - 4f * s, cardH - 4f * s,
+                    2.5f * s, UiRenderer.Rgba(1f, 0.66f, 0.20f, 0.95f));
+
+            float previewX = x + 10f * s;
+            float previewY = y + 10f * s;
+            float previewW = cardW - 20f * s;
+            float previewH = MathF.Max(46f * s, cardH - 58f * s);
+            DrawMapPreview(ui, (World.MapId)i, previewX, previewY, previewW, previewH, enabled);
+
+            uint nameColor = enabled
+                ? selected ? UiRenderer.Rgba(1f, 0.91f, 0.72f) : UiRenderer.Rgba(0.84f, 0.90f, 0.98f)
+                : UiRenderer.Rgba(0.45f, 0.48f, 0.55f, 0.8f);
+            ui.TextShadow(selected ? FaceBold : FaceRegular, 20f * s, x + cardW * 0.5f,
+                y + cardH - 37f * s, _items[i].Label, nameColor, TextAlign.Center, 1.5f * s);
+            if ((World.MapId)i == Map)
+            {
+                ui.ChamferRect(x + 12f * s, y + 12f * s, 74f * s, 24f * s, 6f * s,
+                    UiRenderer.Rgba(1f, 0.52f, 0.12f, 0.92f));
+                ui.Text(FaceBold, 13f * s, x + 49f * s, y + 16f * s, Loc.MapSelected,
+                    UiRenderer.Rgba(0.08f, 0.04f, 0.01f), TextAlign.Center);
+            }
+            if (!enabled)
+                ui.Text(FaceBold, 14f * s, x + cardW * 0.5f, y + cardH * 0.45f,
+                    Loc.MapCtfUnavailable, UiRenderer.Rgba(1f, 0.48f, 0.38f), TextAlign.Center);
+        }
+
+        string description = Current?.Hint ?? "";
+        string arenaName = SelectedIndex >= 0 && SelectedIndex < _items.Count
+            ? _items[SelectedIndex].Label : "";
+        float introX = startX;
+        float introY = height - 137f * s;
+        ui.ChamferRect(introX, introY, panelW, 76f * s, 10f * s,
+            UiRenderer.Rgba(0.035f, 0.055f, 0.095f, 0.94f));
+        ui.Rect(introX, introY, 5f * s, 76f * s, UiRenderer.Rgba(0.22f, 0.72f, 1f, 0.9f));
+        ui.Text(FaceBold, 16f * s, introX + 22f * s, introY + 10f * s,
+            $"{Loc.MapIntroduction}　{arenaName}", UiRenderer.Rgba(1f, 0.70f, 0.28f));
+        ui.Text(FaceRegular, 17f * s, introX + 22f * s, introY + 39f * s, description,
+            UiRenderer.Rgba(0.76f, 0.84f, 0.95f));
+        ui.Text(FaceRegular, 15f * s, width * 0.5f, height - 48f * s,
+            Loc.MapGalleryControls, UiRenderer.Rgba(0.56f, 0.64f, 0.77f), TextAlign.Center);
+    }
+
+    private static void DrawMapPreview(UiRenderer ui, World.MapId map, float x, float y,
+        float w, float h, bool enabled)
+    {
+        uint top = map switch
+        {
+            World.MapId.AbyssDeck => UiRenderer.Rgba(0.08f, 0.13f, 0.25f),
+            World.MapId.RustTower => UiRenderer.Rgba(0.24f, 0.10f, 0.055f),
+            World.MapId.LavaTemple => UiRenderer.Rgba(0.22f, 0.045f, 0.025f),
+            World.MapId.OrbitalArena => UiRenderer.Rgba(0.025f, 0.07f, 0.16f),
+            _ => UiRenderer.Rgba(0.13f, 0.06f, 0.14f),
+        };
+        uint bottom = map switch
+        {
+            World.MapId.AbyssDeck => UiRenderer.Rgba(0.22f, 0.07f, 0.025f),
+            World.MapId.RustTower => UiRenderer.Rgba(0.06f, 0.045f, 0.04f),
+            World.MapId.LavaTemple => UiRenderer.Rgba(0.45f, 0.09f, 0.015f),
+            World.MapId.OrbitalArena => UiRenderer.Rgba(0.07f, 0.16f, 0.27f),
+            _ => UiRenderer.Rgba(0.05f, 0.09f, 0.16f),
+        };
+        if (!enabled) { top = UiRenderer.WithAlpha(top, 0.42f); bottom = UiRenderer.WithAlpha(bottom, 0.42f); }
+        ui.GradientRect(x, y, w, h, top, bottom);
+
+        float cx = x + w * 0.5f;
+        float cy = y + h * 0.55f;
+        uint metal = UiRenderer.Rgba(0.40f, 0.48f, 0.58f, enabled ? 0.9f : 0.35f);
+        uint orange = UiRenderer.Rgba(1f, 0.34f, 0.05f, enabled ? 0.95f : 0.3f);
+        uint cyan = UiRenderer.Rgba(0.2f, 0.78f, 1f, enabled ? 0.9f : 0.3f);
+        switch (map)
+        {
+            case World.MapId.AbyssDeck:
+                ui.Rect(x + w * 0.12f, cy - h * 0.08f, w * 0.76f, h * 0.16f, metal);
+                ui.Rect(cx - w * 0.12f, y + h * 0.18f, w * 0.24f, h * 0.70f, orange);
+                ui.Rect(cx - w * 0.07f, y + h * 0.12f, w * 0.14f, h * 0.76f, UiRenderer.Rgba(0.03f, 0.03f, 0.04f));
+                break;
+            case World.MapId.RustTower:
+                ui.Triangle(new Vector2(cx, y + h * 0.10f), new Vector2(cx - w * 0.24f, y + h * 0.86f),
+                    new Vector2(cx + w * 0.24f, y + h * 0.86f), metal);
+                ui.Rect(cx - w * 0.065f, y + h * 0.18f, w * 0.13f, h * 0.62f, orange);
+                break;
+            case World.MapId.LavaTemple:
+                ui.Rect(x + w * 0.10f, y + h * 0.70f, w * 0.80f, h * 0.17f, orange);
+                for (int i = 0; i < 4; i++)
+                    ui.Rect(x + w * (0.17f + i * 0.19f), y + h * 0.22f, w * 0.10f, h * 0.51f, metal);
+                ui.Triangle(new Vector2(cx, y + h * 0.08f), new Vector2(x + w * 0.10f, y + h * 0.28f),
+                    new Vector2(x + w * 0.90f, y + h * 0.28f), cyan);
+                break;
+            case World.MapId.OrbitalArena:
+                ui.Circle(new Vector2(cx, cy), MathF.Min(w, h) * 0.28f, UiRenderer.Rgba(0.13f, 0.28f, 0.42f));
+                ui.Ring(new Vector2(cx, cy), MathF.Min(w, h) * 0.39f, 4f, cyan, 40, -0.35f, 3.8f);
+                ui.Circle(new Vector2(cx + w * 0.06f, cy - h * 0.05f), MathF.Min(w, h) * 0.07f, orange);
+                break;
+            case World.MapId.TwinForts:
+                ui.Rect(x + w * 0.09f, y + h * 0.38f, w * 0.32f, h * 0.42f,
+                    UiRenderer.Rgba(0.74f, 0.12f, 0.10f, enabled ? 0.9f : 0.3f));
+                ui.Rect(x + w * 0.59f, y + h * 0.38f, w * 0.32f, h * 0.42f,
+                    UiRenderer.Rgba(0.10f, 0.32f, 0.80f, enabled ? 0.9f : 0.3f));
+                ui.Line(new Vector2(x + w * 0.41f, cy), new Vector2(x + w * 0.59f, cy), 5f, metal);
+                break;
+        }
     }
 
     /// <summary>
@@ -738,7 +971,11 @@ public sealed class Menu
     private void DrawCaptureOverlay(UiRenderer ui, int width, int height, float s)
     {
         string prompt = CapturePrompt?.Invoke();
-        if (string.IsNullOrEmpty(prompt)) return;
+        if (string.IsNullOrEmpty(prompt))
+        {
+            _captureCancelRect = null;
+            return;
+        }
 
         ui.Rect(0, 0, width, height, UiRenderer.Rgba(0f, 0f, 0f, 0.72f));
         float boxW = MathF.Min(width * 0.7f, 620f * s);
@@ -752,8 +989,19 @@ public sealed class Menu
 
         ui.TextOutline(FaceBold, 28f * s, width * 0.5f, by + 38f * s, prompt,
             UiRenderer.Rgba(1f, 0.92f, 0.7f), UiRenderer.Rgba(0f, 0f, 0f, 0.9f), 2.5f * s, TextAlign.Center);
-        ui.Text(FaceRegular, 18f * s, width * 0.5f, by + 96f * s, Loc.DevicesCancelPrompt,
-            UiRenderer.Rgba(0.7f, 0.78f, 0.9f, 0.85f), TextAlign.Center);
+        float buttonW = 150f * s;
+        float buttonH = 38f * s;
+        float buttonX = width * 0.5f - buttonW * 0.5f;
+        float buttonY = by + 104f * s;
+        _captureCancelRect = new ItemRect(-1, buttonX, buttonY, buttonW, buttonH, 0f, 0f, 0f);
+        bool hovered = _pointerActive && Contains(_captureCancelRect.Value, _pointer);
+        ui.ChamferRect(buttonX, buttonY, buttonW, buttonH, 8f * s,
+            hovered ? UiRenderer.Rgba(0.28f, 0.48f, 0.82f, 0.82f)
+                    : UiRenderer.Rgba(0.16f, 0.22f, 0.34f, 0.90f));
+        ui.RectOutline(buttonX, buttonY, buttonW, buttonH, 1.5f * s,
+            UiRenderer.Rgba(0.65f, 0.78f, 1f, hovered ? 0.9f : 0.45f));
+        ui.Text(FaceBold, 19f * s, width * 0.5f, buttonY + 7f * s, Loc.MenuCancel,
+            UiRenderer.Rgba(0.94f, 0.97f, 1f), TextAlign.Center);
     }
 
     private void DrawResults(UiRenderer ui, int width, int height, float s)
