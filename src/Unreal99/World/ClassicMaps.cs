@@ -202,7 +202,12 @@ public static partial class Maps
     private static Level BuildMorpheus(GL gl)
     {
         var b = new LevelBuilder(Loc.MapMorpheus, Loc.MapMorpheusDesc);
-        b.Level.GravityScale = 0.42f;
+        // Floaty, but not so floaty that the arena cannot hold anyone. At 0.42 a standing jump
+        // cleared 3.3m and a dodge carried 18m before landing, so every rail was decorative and
+        // every roof leaked players into the void faster than they could fight. 0.60 keeps the
+        // long, hanging leaps this map is remembered for and brings a jump down to 2.2m, which
+        // a parapet can actually contain.
+        b.Level.GravityScale = 0.60f;
         var env = b.Level.Environment;
         env.SunDirection = Vector3.Normalize(new Vector3(-0.5f, -0.35f, 0.6f));
         env.SunColor = new Vector3(1.3f, 1.4f, 2.0f);
@@ -257,31 +262,64 @@ public static partial class Maps
                 b.Solid(v - new Vector3(2.2f, 0f, 2.2f), v + new Vector3(2.2f, 2.6f, 2.2f),
                     MatId.RustMetal, true, 1.1f);
             }
-            // Solid parapets around the roof, broken by a gap on each face that lines up with
-            // another tower. Without them the drop is a coin flip every time anyone strafes;
-            // with them, going over the edge is a decision.
-            const float Parapet = 1.1f;
-            const float GapHalf = 5.5f;
-            foreach (var (nx, nz) in new[] { (0, -1), (0, 1), (-1, 0), (1, 0) })
+            // Which faces carry a launcher to another tower. Only those get an opening — an
+            // earlier pass put an 11m gap in all four faces, leaving a third of every roof edge
+            // as open drop, and with eight bots on three small roofs in low gravity the match
+            // was decided by who fell off least. The gap is now barely wider than the pad.
+            var padFaces = new List<(int nx, int nz)>();
+            for (int other = 0; other < towers.Length; other++)
             {
-                bool alongX = nz != 0;
-                float fixedCoord = (alongX ? c.Z : c.X) + (alongX ? nz : nx) * Half;
-                float lo = (alongX ? c.X : c.Z) - Half;
-                float hi = (alongX ? c.X : c.Z) + Half;
+                if (other == t) continue;
+                Vector3 d = towers[other] - c;
+                padFaces.Add(MathF.Abs(d.X) >= MathF.Abs(d.Z)
+                    ? ((int)MathF.Sign(d.X), 0)
+                    : (0, (int)MathF.Sign(d.Z)));
+            }
+
+            const float Parapet = 2.6f;   // above the 2.2m standing jump, so it actually stops people
+            const float GapHalf = 2.4f;
+            const float Edge = Half + 1.2f;      // the roof cap overhangs the shaft by this much
+            foreach (var face in new[] { (nx: 0, nz: -1), (nx: 0, nz: 1), (nx: -1, nz: 0), (nx: 1, nz: 0) })
+            {
+                bool alongX = face.nz != 0;
+                float fixedCoord = (alongX ? c.Z : c.X) + (alongX ? face.nz : face.nx) * (Edge - 0.6f);
+                float lo = (alongX ? c.X : c.Z) - Edge;
+                float hi = (alongX ? c.X : c.Z) + Edge;
                 float gapCentre = alongX ? c.X : c.Z;
 
                 void Segment(float a, float d)
                 {
                     if (d - a < 0.3f) return;
-                    Vector3 min = alongX ? new Vector3(a, roof, fixedCoord - 0.5f)
-                                         : new Vector3(fixedCoord - 0.5f, roof, a);
-                    Vector3 max = alongX ? new Vector3(d, roof + Parapet, fixedCoord + 0.5f)
-                                         : new Vector3(fixedCoord + 0.5f, roof + Parapet, d);
+                    Vector3 min = alongX ? new Vector3(a, roof, fixedCoord - 0.6f)
+                                         : new Vector3(fixedCoord - 0.6f, roof, a);
+                    Vector3 max = alongX ? new Vector3(d, roof + Parapet, fixedCoord + 0.6f)
+                                         : new Vector3(fixedCoord + 0.6f, roof + Parapet, d);
                     b.Solid(min, max, MatId.Trim, true, 1.2f);
                 }
+
+                if (!padFaces.Contains(face)) { Segment(lo, hi); continue; }
                 Segment(lo, gapCentre - GapHalf);
                 Segment(gapCentre + GapHalf, hi);
             }
+
+            // --- setback ledge, seven metres below the roof ---
+            // This gravity makes a standing jump 3.3m, so no parapet low enough to see the city
+            // over can actually keep anyone in — bots clear a 1.1m rail without meaning to, and
+            // a full match was decided by who fell off least. Rather than wall the roof in, the
+            // tower steps out beneath it. Going over the edge now costs position instead of the
+            // round, and the ledge is a flanking route in its own right.
+            float ledgeY = roof - 7f;
+            float ledgeOut = Edge + 4.5f;
+            b.Solid(new Vector3(c.X - ledgeOut, ledgeY - 0.9f, c.Z - ledgeOut),
+                    new Vector3(c.X + ledgeOut, ledgeY, c.Z + ledgeOut), MatId.SkyMetal, true, 0.8f);
+            b.Decor(new Vector3(c.X - ledgeOut, ledgeY, c.Z - ledgeOut),
+                    new Vector3(c.X + ledgeOut, ledgeY + 0.35f, c.Z - ledgeOut + 0.4f), MatId.Trim, 1.2f);
+            b.Decor(new Vector3(c.X - ledgeOut, ledgeY, c.Z + ledgeOut - 0.4f),
+                    new Vector3(c.X + ledgeOut, ledgeY + 0.35f, c.Z + ledgeOut), MatId.Trim, 1.2f);
+            b.AddJumpPad(new Vector3(c.X, ledgeY + 0.1f, c.Z + Edge + 2.2f),
+                         new Vector3(c.X + 7f, roof + 2.5f, c.Z - 7f), new Vector3(0.4f, 0.85f, 1f));
+            b.Item(new Vector3(c.X - Edge - 2.2f, ledgeY + 0.8f, c.Z), PickupKind.HealthPack);
+            b.Ammo(new Vector3(c.X, ledgeY + 0.7f, c.Z - Edge - 2.2f), AmmoKind.SniperRounds);
 
             b.CeilingLamp(new Vector3(c.X, roof + 9f, c.Z), new Vector3(0.65f, 0.78f, 1f), 34f, 9f, 1.4f);
             b.AddLight(new Vector3(c.X, roof + 5.2f, c.Z), new Vector3(1f, 0.25f, 0.2f), 10f, 3f, 2.2f, 0.5f);
@@ -304,6 +342,35 @@ public static partial class Maps
                 float a = i / 4f * MathX.TwoPi + 0.6f;
                 b.Spawn(new Vector3(c.X + MathF.Cos(a) * 8f, roof + 0.2f, c.Z + MathF.Sin(a) * 8f),
                     -a * MathX.Rad2Deg + 180f);
+            }
+        }
+
+        // --- pads linking the three roofs ---
+        // Without these the towers are three disconnected islands. Nothing in the nav graph can
+        // express a 40m leap — only pads, lifts and teleporters create links — so bots could never
+        // path between roofs, and the parapet gaps, which are deliberately aimed at the
+        // neighbouring towers, became the precise spot they walked off into the void. Three of
+        // eight bots were dead inside ten seconds. Each pad sits in the gap that faces its target,
+        // so the launch is clear of the parapet and the gap now reads as a launcher.
+        for (int from = 0; from < towers.Length; from++)
+        {
+            float roofFrom = RoofY - from * 3.5f;
+            for (int to = 0; to < towers.Length; to++)
+            {
+                if (to == from) continue;
+                float roofTo = RoofY - to * 3.5f;
+                Vector3 delta = towers[to] - towers[from];
+                // Launch from whichever face points most directly at the target, so the two pads
+                // on a roof never land on the same gap.
+                bool alongX = MathF.Abs(delta.X) >= MathF.Abs(delta.Z);
+                Vector3 pad = towers[from] + (alongX
+                    ? new Vector3(MathF.Sign(delta.X) * (Half - 1.5f), 0f, 0f)
+                    : new Vector3(0f, 0f, MathF.Sign(delta.Z) * (Half - 1.5f)));
+                // Land short of the target's centre block, on the side facing the source.
+                Vector3 approach = MathX.SafeNormalize(-delta.FlatXZ(), MathX.Forward);
+                Vector3 dest = towers[to] + approach * 10f;
+                b.AddJumpPad(new Vector3(pad.X, roofFrom + 0.1f, pad.Z),
+                    new Vector3(dest.X, roofTo + 2.5f, dest.Z), new Vector3(0.4f, 0.85f, 1f));
             }
         }
 
