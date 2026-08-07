@@ -67,6 +67,7 @@ public sealed class App : IDisposable
     private int _autoShotFrames = -1;
     private string _autoShotPath;
     private bool _autoStartMatch;
+    private int _loadSlotAtBoot = -1;
     private bool _demoMode;
     private bool _windowed;
     private bool _flyby;
@@ -181,6 +182,11 @@ public sealed class App : IDisposable
                 case "--inputtest":
                     _inputTest = true;
                     _windowed = true;
+                    break;
+                case "--loadslot" when i + 1 < args.Length:
+                    // Resume a saved match straight from the command line.
+                    if (int.TryParse(args[i + 1], out int ls)) _loadSlotAtBoot = ls;
+                    i++;
                     break;
                 case "--savetest":
                     // Round-trips settings and a saved match without needing anyone to drive menus.
@@ -579,6 +585,10 @@ public sealed class App : IDisposable
         for (int i = 0; i < _cameras.Length; i++) _cameras[i] = Camera.Default;
         _menu.ResultsWorld = null;
         _menu.ResultsViewer = null;
+
+        // Hold the world before handing control back. A save is usually taken mid-fight, so
+        // resuming instantly means being shot at before the screen has even been read.
+        _world.BeginResumeCountdown(3f);
 
         // Verify here, before the world has ticked once. Checking a few frames later would be
         // measuring how far the bots walked, not whether the restore was faithful.
@@ -1025,7 +1035,9 @@ public sealed class App : IDisposable
             default:
                 _world = new GameWorld(_renderer, _character, _weaponModels, _projectileModels, _pickupModels);
                 _world.OnSound = PlaySound;
-                if (_autoStartMatch) BeginMatch();
+                if (_loadSlotAtBoot >= 0 && SaveStore.Read(_loadSlotAtBoot) != null)
+                    LoadFromSlot(_loadSlotAtBoot);
+                else if (_autoStartMatch) BeginMatch();
                 else
                 {
                     _state = AppState.Menu;

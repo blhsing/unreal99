@@ -113,6 +113,7 @@ public static class Loc
     public const string SaveElapsed = "已進行";
     public const string SaveLeader = "領先";
     public const string SaveNoThumbnail = "無預覽畫面";
+    public const string SaveResuming = "即將繼續戰鬥";
 
     public static string SaveSlotName(int i) => $"{SaveSlotLabel} {i + 1}";
     /// <summary>Elapsed match time as m:ss.</summary>
@@ -243,6 +244,7 @@ public static class Loc
     public const string AnnTwoFrags = "剩兩殺";
     public const string AnnOneFrag = "剩一殺";
     public const string AnnMatchStart = "開始";
+    public const string AnnMatchResume = "繼續";
     public const string AnnCountdown3 = "三";
     public const string AnnCountdown2 = "二";
     public const string AnnCountdown1 = "一";

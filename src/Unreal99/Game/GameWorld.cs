@@ -84,6 +84,23 @@ public sealed class GameWorld
     public float Time;
     public int NextPawnId = 1;
 
+    /// <summary>
+    /// Seconds left on a "get ready" hold. While this is running the world is drawn but not
+    /// simulated: nobody moves, shoots, respawns or bleeds, and the match clock does not run.
+    /// Used after loading a save so the player can see where they are before anything can
+    /// shoot them — dropping straight back into a firefight mid-air is not a fair resume.
+    /// </summary>
+    public float ResumeCountdown;
+    public bool Frozen => ResumeCountdown > 0f;
+    private int _lastResumeSecond = -1;
+
+    /// <summary>Starts the hold. Use this rather than assigning the field, so the first second gets called out.</summary>
+    public void BeginResumeCountdown(float seconds)
+    {
+        ResumeCountdown = MathF.Max(0f, seconds);
+        _lastResumeSecond = -1;
+    }
+
     private readonly Renderer _renderer;
     private readonly CharacterModel _character;
     private readonly WeaponModels _weaponModels;
@@ -240,6 +257,12 @@ public sealed class GameWorld
 
     public void Update(float dt)
     {
+        if (Frozen)
+        {
+            UpdateResumeCountdown(dt);
+            return;
+        }
+
         Time += dt;
         Level.Update(dt, Time);
         Mode.Update(this, dt);
@@ -284,6 +307,41 @@ public sealed class GameWorld
 
         Particles.Update(dt);
         Effects.Update(dt);
+    }
+
+    /// <summary>
+    /// Runs while the world is held. Only the announcement counter advances — deliberately not
+    /// the particles or the level movers, so the scene the player is looking at is exactly the
+    /// one that was saved rather than a lift that has wandered off while they read the screen.
+    /// </summary>
+    private void UpdateResumeCountdown(float dt)
+    {
+        float before = ResumeCountdown;
+        ResumeCountdown = MathF.Max(0f, ResumeCountdown - dt);
+
+        // Compared against the last second actually announced, not against the previous frame's
+        // value: on the opening frame those are the same number, which would swallow the first call.
+        int second = (int)MathF.Ceiling(ResumeCountdown);
+        if (second != _lastResumeSecond && second is >= 1 and <= 3)
+        {
+            _lastResumeSecond = second;
+            string text = second switch
+            {
+                3 => Loc.AnnCountdown3,
+                2 => Loc.AnnCountdown2,
+                _ => Loc.AnnCountdown1,
+            };
+            Broadcast(text, new Vector3(1f, 0.85f, 0.3f), 0.9f);
+            OnSound?.Invoke(SoundId.MenuMove, Vector3.Zero, 0.8f);
+        }
+
+        if (ResumeCountdown <= 0f && before > 0f)
+        {
+            Broadcast(Loc.AnnMatchResume, new Vector3(0.4f, 1f, 0.5f), 1.4f);
+            OnSound?.Invoke(SoundId.AnnounceMajor, Vector3.Zero, 1.2f);
+        }
+
+        foreach (var f in Feedbacks.Values) f.Update(dt);
     }
 
     private void HandleMoveEvents(Pawn pawn, in MoveEvents e, float dt)

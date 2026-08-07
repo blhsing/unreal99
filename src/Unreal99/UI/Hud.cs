@@ -37,6 +37,7 @@ public sealed class Hud
         DrawAnnouncements(ui, feedback, width, height, s);
         DrawObjective(ui, world, pawn, width, height, s);
 
+        if (world.Frozen) DrawResumeCountdown(ui, world, width, height, s);
         if (!pawn.Alive) DrawDeathOverlay(ui, world, pawn, width, height, s);
         if (pawn.ZoomFov > 0f && pawn.Alive) DrawZoomOverlay(ui, width, height, s, accent);
         if (controller is { WantsScoreboard: true } || mode.IsOver) DrawScoreboard(ui, world, pawn, width, height, s);
@@ -348,6 +349,29 @@ public sealed class Hud
                 UiRenderer.Rgba(entry.Color * 1.2f, alpha), TextAlign.Right);
             y += rowH;
         }
+    }
+
+    /// <summary>
+    /// The hold after loading a save. Drawn straight from the world's timer rather than through
+    /// the announcement feed, so a number is on screen for every frame of the countdown instead
+    /// of only for the moment each second is called out.
+    /// </summary>
+    private void DrawResumeCountdown(UiRenderer ui, GameWorld world, int width, int height, float s)
+    {
+        float cx = width * 0.5f;
+        ui.Rect(0f, 0f, width, height, UiRenderer.Rgba(0.01f, 0.02f, 0.05f, 0.34f));
+
+        int second = Math.Max(1, (int)MathF.Ceiling(world.ResumeCountdown));
+        // Each digit swells as its second begins, so the beat is readable without a clock.
+        float within = world.ResumeCountdown - MathF.Floor(world.ResumeCountdown);
+        float pop = MathX.Saturate((1f - within) * 3.2f);
+        float size = MathX.Lerp(96f, 66f, MathX.SmoothStep(0f, 1f, pop)) * s;
+
+        ui.Text(FaceBold, 24f * s, cx, height * 0.30f, Loc.SaveResuming,
+            UiRenderer.Rgba(0.72f, 0.84f, 1f, 0.95f), TextAlign.Center);
+        ui.TextOutline(FaceBold, size, cx, height * 0.36f, second.ToString(),
+            UiRenderer.Rgba(1f, 0.80f, 0.28f), UiRenderer.Rgba(0f, 0f, 0f, 0.9f),
+            4f * s, TextAlign.Center);
     }
 
     private void DrawAnnouncements(UiRenderer ui, Feedback feedback, int width, int height, float s)
