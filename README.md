@@ -73,6 +73,7 @@ artifacts\installer\Unreal99Installer.exe --help
 | `--flyby` | 讓玩家一的鏡頭在場中環繞巡航，用於檢視競技場全貌 |
 | `--nohud` | 隱藏介面與第一人稱槍枝，用於擷取文件用畫面 |
 | `--weaponshot N` | 強制裝備第 N 把武器，只隱藏 HUD 而保留第一人稱武器，用於擷取武器指南 |
+| `--weaponprofile N` | 以遊戲內直立拾取物的實際姿態拍攝第 N 把武器側面，用於擷取武器指南 |
 | `--loadslot N` | 直接從第 N 個存檔位接續對戰 |
 | `--savetest` | 存檔與設定的往返自我測試（寫入、讀回、還原到實際世界並比對） |
 | `--flycam 半徑 高度 角度 注視高度` | 手動指定巡航鏡頭的取景，用於為個別競技場擷取滿意的角度 |
@@ -95,33 +96,33 @@ artifacts\installer\Unreal99Installer.exe --help
 
 <table>
 <tr>
-<td width="33%"><img src="docs/arenas/00-morbias.jpg" width="100%"><br><b>0 · DM-莫比亞斯</b><br><sub><i>Morbias ][</i></sub></td>
-<td width="33%"><img src="docs/arenas/01-stalwart.jpg" width="100%"><br><b>1 · DM-磚牆競技場</b><br><sub><i>Stalwart</i></sub></td>
-<td width="33%"><img src="docs/arenas/02-curse.jpg" width="100%"><br><b>2 · DM-詛咒之庭</b><br><sub><i>Curse ][</i></sub></td>
+<td width="33%"><img src="docs/arenas/00-morbias.jpg" width="100%"><br><b>0 · DM-莫比亞斯</b><br><i>Morbias ][</i></td>
+<td width="33%"><img src="docs/arenas/01-stalwart.jpg" width="100%"><br><b>1 · DM-磚牆競技場</b><br><i>Stalwart</i></td>
+<td width="33%"><img src="docs/arenas/02-curse.jpg" width="100%"><br><b>2 · DM-詛咒之庭</b><br><i>Curse ][</i></td>
 </tr>
 <tr>
-<td><img src="docs/arenas/03-grinder.jpg" width="100%"><br><b>3 · DM-絞碎機</b><br><sub><i>Grinder</i></sub></td>
-<td><img src="docs/arenas/04-codex.jpg" width="100%"><br><b>4 · DM-古籍密室</b><br><sub><i>Codex</i></sub></td>
-<td><img src="docs/arenas/05-gothic.jpg" width="100%"><br><b>5 · DM-哥德庭園</b><br><sub><i>Gothic</i></sub></td>
+<td><img src="docs/arenas/03-grinder.jpg" width="100%"><br><b>3 · DM-絞碎機</b><br><i>Grinder</i></td>
+<td><img src="docs/arenas/04-codex.jpg" width="100%"><br><b>4 · DM-古籍密室</b><br><i>Codex</i></td>
+<td><img src="docs/arenas/05-gothic.jpg" width="100%"><br><b>5 · DM-哥德庭園</b><br><i>Gothic</i></td>
 </tr>
 <tr>
-<td><img src="docs/arenas/06-deck16.jpg" width="100%"><br><b>6 · DM-十六號甲板</b><br><sub><i>Deck16 ][</i></sub></td>
-<td><img src="docs/arenas/07-turbine.jpg" width="100%"><br><b>7 · DM-渦輪機房</b><br><sub><i>Turbine</i></sub></td>
-<td><img src="docs/arenas/08-phobos.jpg" width="100%"><br><b>8 · DM-火衛基地</b><br><sub><i>Phobos</i></sub></td>
+<td><img src="docs/arenas/06-deck16.jpg" width="100%"><br><b>6 · DM-十六號甲板</b><br><i>Deck16 ][</i></td>
+<td><img src="docs/arenas/07-turbine.jpg" width="100%"><br><b>7 · DM-渦輪機房</b><br><i>Turbine</i></td>
+<td><img src="docs/arenas/08-phobos.jpg" width="100%"><br><b>8 · DM-火衛基地</b><br><i>Phobos</i></td>
 </tr>
 <tr>
-<td><img src="docs/arenas/09-peak.jpg" width="100%"><br><b>9 · DM-孤峰</b><br><sub><i>Peak</i></sub></td>
-<td><img src="docs/arenas/10-liandri.jpg" width="100%"><br><b>10 · DM-利安德里核心</b><br><sub><i>Liandri Central Core</i></sub></td>
-<td><img src="docs/arenas/11-morpheus.jpg" width="100%"><br><b>11 · DM-摩菲斯之塔</b><br><sub><i>Morpheus</i></sub></td>
+<td><img src="docs/arenas/09-peak.jpg" width="100%"><br><b>9 · DM-孤峰</b><br><i>Peak</i></td>
+<td><img src="docs/arenas/10-liandri.jpg" width="100%"><br><b>10 · DM-利安德里核心</b><br><i>Liandri Central Core</i></td>
+<td><img src="docs/arenas/11-morpheus.jpg" width="100%"><br><b>11 · DM-摩菲斯之塔</b><br><i>Morpheus</i></td>
 </tr>
 <tr>
-<td><img src="docs/arenas/12-hyperblast.jpg" width="100%"><br><b>12 · DM-超載星艦</b><br><sub><i>HyperBlast</i></sub></td>
-<td><img src="docs/arenas/13-coret.jpg" width="100%"><br><b>13 · CTF-科瑞特設施</b><br><sub><i>Coret Facility</i></sub></td>
-<td><img src="docs/arenas/14-november.jpg" width="100%"><br><b>14 · CTF-十一月號</b><br><sub><i>November</i></sub></td>
+<td><img src="docs/arenas/12-hyperblast.jpg" width="100%"><br><b>12 · DM-超載星艦</b><br><i>HyperBlast</i></td>
+<td><img src="docs/arenas/13-coret.jpg" width="100%"><br><b>13 · CTF-科瑞特設施</b><br><i>Coret Facility</i></td>
+<td><img src="docs/arenas/14-november.jpg" width="100%"><br><b>14 · CTF-十一月號</b><br><i>November</i></td>
 </tr>
 <tr>
-<td><img src="docs/arenas/15-facingworlds.jpg" width="100%"><br><b>15 · CTF-對峙世界</b><br><sub><i>Facing Worlds</i></sub></td>
-<td><img src="docs/arenas/16-lavagiant.jpg" width="100%"><br><b>16 · CTF-熔岩巨人</b><br><sub><i>Lava Giant</i></sub></td>
+<td><img src="docs/arenas/15-facingworlds.jpg" width="100%"><br><b>15 · CTF-對峙世界</b><br><i>Facing Worlds</i></td>
+<td><img src="docs/arenas/16-lavagiant.jpg" width="100%"><br><b>16 · CTF-熔岩巨人</b><br><i>Lava Giant</i></td>
 <td></td>
 </tr>
 </table>
@@ -162,38 +163,39 @@ artifacts\installer\Unreal99Installer.exe --help
 
 ## 武器指南
 
-以下圖片不是概念圖或重繪插畫，而是遊戲以 `--weaponshot` 從 OpenGL 畫面緩衝直接擷取的
-**實際第一人稱武器模型**。主要射擊使用滑鼠左鍵，次要射擊使用滑鼠右鍵。
+以下圖片不是概念圖或重繪插畫，而是遊戲以 `--weaponshot` 與 `--weaponprofile` 從 OpenGL
+畫面緩衝直接擷取的**實際武器模型**。每把武器都同時展示第一人稱持握視角，以及與遊戲內拾取物
+完全相同的直立側面外觀。主要射擊使用滑鼠左鍵，次要射擊使用滑鼠右鍵。
 
 <table>
 <tr>
-<td width="50%"><img src="docs/weapons/impact-hammer.jpg" width="100%"><br><b>1 · 衝擊錘</b><br><sub>主要：按住蓄力後近身重擊。<br>次要：快速揮擊。<br>無需彈藥；適合貼身反擊與最後手段。</sub></td>
-<td width="50%"><img src="docs/weapons/enforcer.jpg" width="100%"><br><b>2 · 執法者手槍</b><br><sub>主要：穩定的單發即時命中。<br>次要：射速更快，但散佈更大。<br>中近距離可靠的出生武器。</sub></td>
+<td width="50%"><b>第一人稱視角</b><br><img src="docs/weapons/impact-hammer.jpg" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/impact-hammer-profile.jpg" width="100%"><br><b>1 · 衝擊錘</b><br>主要：按住蓄力後近身重擊。<br>次要：快速揮擊。<br>無需彈藥；適合貼身反擊與最後手段。</td>
+<td width="50%"><b>第一人稱視角</b><br><img src="docs/weapons/enforcer.jpg" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/enforcer-profile.jpg" width="100%"><br><b>2 · 執法者手槍</b><br>主要：穩定的單發即時命中。<br>次要：射速更快，但散佈更大。<br>中近距離可靠的出生武器。</td>
 </tr>
 <tr>
-<td><img src="docs/weapons/bio-rifle.jpg" width="100%"><br><b>3 · 生化步槍</b><br><sub>主要：連射會濺射的生化凝膠。<br>次要：按住蓄積大型高傷害凝膠。<br>用於封鎖門口、轉角與狹窄通道。</sub></td>
-<td><img src="docs/weapons/shock-rifle.jpg" width="100%"><br><b>4 · 震盪步槍</b><br><sub>主要：精準的遠距能量光束。<br>次要：發射較慢的震盪球。<br>用主要光束擊中自己的震盪球可引發震盪連鎖。</sub></td>
+<td><b>第一人稱視角</b><br><img src="docs/weapons/bio-rifle.jpg" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/bio-rifle-profile.jpg" width="100%"><br><b>3 · 生化步槍</b><br>主要：連射會濺射的生化凝膠。<br>次要：按住蓄積大型高傷害凝膠。<br>用於封鎖門口、轉角與狹窄通道。</td>
+<td><b>第一人稱視角</b><br><img src="docs/weapons/shock-rifle.jpg" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/shock-rifle-profile.jpg" width="100%"><br><b>4 · 震盪步槍</b><br>主要：精準的遠距能量光束。<br>次要：發射較慢的震盪球。<br>用主要光束擊中自己的震盪球可引發震盪連鎖。</td>
 </tr>
 <tr>
-<td><img src="docs/weapons/pulse-gun.jpg" width="100%"><br><b>5 · 脈衝步槍</b><br><sub>主要：高速連射電漿彈。<br>次要：近距離持續能量束。<br>追蹤走位中的敵人時尤其有效。</sub></td>
-<td><img src="docs/weapons/ripper.jpg" width="100%"><br><b>6 · 撕裂者</b><br><sub>主要：發射可在牆面反彈的刀刃。<br>次要：發射具有爆炸範圍的刀刃。<br>可利用轉角與反彈路線打擊掩體後方。</sub></td>
+<td><b>第一人稱視角</b><br><img src="docs/weapons/pulse-gun.jpg" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/pulse-gun-profile.jpg" width="100%"><br><b>5 · 脈衝步槍</b><br>主要：高速連射電漿彈。<br>次要：近距離持續能量束。<br>追蹤走位中的敵人時尤其有效。</td>
+<td><b>第一人稱視角</b><br><img src="docs/weapons/ripper.jpg" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/ripper-profile.jpg" width="100%"><br><b>6 · 撕裂者</b><br>主要：發射可在牆面反彈的刀刃。<br>次要：發射具有爆炸範圍的刀刃。<br>可利用轉角與反彈路線打擊掩體後方。</td>
 </tr>
 <tr>
-<td><img src="docs/weapons/minigun.jpg" width="100%"><br><b>7 · 速射機槍</b><br><sub>主要：較精準的高速連射。<br>次要：極高射速、較大散佈。<br>持續壓制中近距離目標。</sub></td>
-<td><img src="docs/weapons/flak-cannon.jpg" width="100%"><br><b>8 · 破片加農砲</b><br><sub>主要：一次散射九枚高速破片。<br>次要：拋射會爆炸的破片砲彈。<br>近距離正面命中具有極強爆發力。</sub></td>
+<td><b>第一人稱視角</b><br><img src="docs/weapons/minigun.jpg" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/minigun-profile.jpg" width="100%"><br><b>7 · 速射機槍</b><br>主要：較精準的高速連射。<br>次要：極高射速、較大散佈。<br>持續壓制中近距離目標。</td>
+<td><b>第一人稱視角</b><br><img src="docs/weapons/flak-cannon.jpg" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/flak-cannon-profile.jpg" width="100%"><br><b>8 · 破片加農砲</b><br>主要：一次散射九枚高速破片。<br>次要：拋射會爆炸的破片砲彈。<br>近距離正面命中具有極強爆發力。</td>
 </tr>
 <tr>
-<td><img src="docs/weapons/rocket-launcher.jpg" width="100%"><br><b>9 · 火箭發射器</b><br><sub>主要：直線飛行的高傷害火箭。<br>次要：受重力影響、可越過障礙的榴彈。<br>瞄準敵人腳下，以爆炸範圍封鎖退路。</sub></td>
-<td><img src="docs/weapons/sniper-rifle.jpg" width="100%"><br><b>狙擊步槍</b><br><sub>主要：高傷害、零散佈的遠距射擊。<br>次要：啟用放大瞄準。<br>制高點與跨場通道上的首選。</sub></td>
+<td><b>第一人稱視角</b><br><img src="docs/weapons/rocket-launcher.jpg" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/rocket-launcher-profile.jpg" width="100%"><br><b>9 · 火箭發射器</b><br>主要：直線飛行的高傷害火箭。<br>次要：受重力影響、可越過障礙的榴彈。<br>瞄準敵人腳下，以爆炸範圍封鎖退路。</td>
+<td><b>第一人稱視角</b><br><img src="docs/weapons/sniper-rifle.jpg" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/sniper-rifle-profile.jpg" width="100%"><br><b>狙擊步槍</b><br>主要：高傷害、零散佈的遠距射擊。<br>次要：啟用放大瞄準。<br>制高點與跨場通道上的首選。</td>
 </tr>
 <tr>
-<td><img src="docs/weapons/redeemer.jpg" width="100%"><br><b>0 · 救世主核彈</b><br><sub>主要：發射大範圍核彈頭。<br>次要：速度較慢，但爆炸半徑與傷害更高。<br>極稀有；發射前先確認自己有安全距離。</sub></td>
-<td><br><b>切換提示</b><br><sub>數字鍵 1～9 選擇衝擊錘至火箭發射器，0 選擇救世主；Q／E 或滑鼠滾輪循環切換。狙擊步槍可用循環切換或自行綁定快捷鍵。</sub></td>
+<td><b>第一人稱視角</b><br><img src="docs/weapons/redeemer.jpg" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/redeemer-profile.jpg" width="100%"><br><b>0 · 救世主核彈</b><br>主要：發射大範圍核彈頭。<br>次要：速度較慢，但爆炸半徑與傷害更高。<br>極稀有；發射前先確認自己有安全距離。</td>
+<td><br><b>切換提示</b><br>數字鍵 1～9 選擇衝擊錘至火箭發射器，0 選擇救世主；Q／E 或滑鼠滾輪循環切換。狙擊步槍可用循環切換或自行綁定快捷鍵。</td>
 </tr>
 </table>
 
-圖庫可由 [`docs/capture-weapons.ps1`](docs/capture-weapons.ps1) 重新擷取，確保文件展示的永遠是
-目前引擎實際繪製的模型。
+圖庫可由 [`docs/capture-weapons.ps1`](docs/capture-weapons.ps1) 重新擷取；腳本會為每把武器同時
+產生第一人稱與直立側面圖片，確保文件展示的永遠是目前引擎實際繪製的模型。
 
 ---
 

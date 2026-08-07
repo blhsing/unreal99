@@ -1620,9 +1620,8 @@ public sealed class GameWorld
 
             if (pu.Kind == PickupKind.WeaponPickup)
             {
-                // Weapon pickups show the actual weapon, tilted and slowly rotating on a ring.
+                // Keep the weapon upright so its silhouette stays readable as it slowly rotates.
                 Matrix4x4 wxf = Matrix4x4.CreateScale(scale * 1.25f)
-                              * Matrix4x4.CreateRotationX(0.35f)
                               * Matrix4x4.CreateRotationY(spin)
                               * Matrix4x4.CreateTranslation(pu.Position + new Vector3(0, bob + 0.55f, 0));
                 var wm = _weaponModels.MeshFor(pu.Weapon);
@@ -1675,6 +1674,56 @@ public sealed class GameWorld
             UvScale = mat.UvScale,
             OwnerView = -1,
         };
+
+    /// <summary>
+    /// Stages an actual weapon mesh upright and broadside for documentation profile captures.
+    /// The orientation, scale, sections and materials are identical to the live pickup.
+    /// </summary>
+    public void SubmitWeaponProfile(RenderScene scene, WeaponKind weapon, Vector3 position)
+    {
+        // A quiet in-engine studio backdrop keeps the procedural mesh readable while still
+        // exercising the same renderer, material library and lighting path as gameplay.
+        scene.SunDirection = Vector3.Normalize(new Vector3(-0.45f, -0.75f, -0.35f));
+        scene.SunColor = new Vector3(3.8f, 3.55f, 3.25f);
+        scene.AmbientSky = new Vector3(0.22f, 0.27f, 0.38f);
+        scene.AmbientGround = new Vector3(0.07f, 0.08f, 0.11f);
+        scene.SkyTop = new Vector3(0.018f, 0.028f, 0.065f);
+        scene.SkyHorizon = new Vector3(0.11f, 0.15f, 0.24f);
+        scene.SkyGround = new Vector3(0.025f, 0.03f, 0.045f);
+        scene.StarStrength = 0f;
+        scene.CloudStrength = 0f;
+        scene.EnvIntensity = 0.7f;
+        scene.FogDensity = 0f;
+        scene.AddLight(position + new Vector3(2.2f, 1.8f, 1.4f), 7f,
+            new Vector3(0.72f, 0.86f, 1f), 4.2f, 2f);
+        scene.AddLight(position + new Vector3(-1.2f, 0.7f, -1.8f), 6f,
+            new Vector3(1f, 0.36f, 0.14f), 2.4f, 1.5f);
+
+        Matrix4x4 transform = Matrix4x4.CreateScale(1.25f)
+                            * Matrix4x4.CreateTranslation(position);
+        Mesh mesh = _weaponModels.MeshFor(weapon);
+        foreach (MeshSection section in _weaponModels.SectionsFor(weapon))
+        {
+            Material material = Materials.Get(section.Material);
+            scene.Opaque.Add(new DrawCall
+            {
+                Mesh = mesh,
+                IndexOffset = section.IndexOffset,
+                IndexCount = section.IndexCount,
+                Material = material,
+                Transform = transform,
+                BoneBase = -1,
+                Tint = material.BaseColor,
+                Emissive = material.Emissive,
+                Alpha = 1f,
+                Center = position,
+                Radius = 2.2f,
+                CastShadow = true,
+                UvScale = material.UvScale,
+                OwnerView = -1,
+            });
+        }
+    }
 
     private void SubmitFlags(RenderScene scene)
     {

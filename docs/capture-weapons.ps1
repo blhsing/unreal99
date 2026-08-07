@@ -21,6 +21,33 @@ if (-not (Test-Path -LiteralPath $gamePath -PathType Leaf)) {
 }
 New-Item -ItemType Directory -Force -Path $outputPath | Out-Null
 
+# Prefer the managed entry point when it accompanies the executable. It can capture alongside an
+# installed Unreal99.exe process without Windows treating both app hosts as the same GUI program.
+$captureCommand = $gamePath
+$capturePrefix = @()
+$managedGame = [IO.Path]::ChangeExtension($gamePath, ".dll")
+if (Test-Path -LiteralPath $managedGame -PathType Leaf) {
+    $captureCommand = (Get-Command dotnet -ErrorAction Stop).Source
+    $capturePrefix = @($managedGame)
+}
+
+function Invoke-GameCapture {
+    param([object[]]$Arguments)
+
+    $startInfo = [Diagnostics.ProcessStartInfo]::new()
+    $startInfo.FileName = $captureCommand
+    $startInfo.UseShellExecute = $false
+    $startInfo.CreateNoWindow = $true
+    foreach ($argument in ($capturePrefix + $Arguments)) {
+        $startInfo.ArgumentList.Add([string]$argument)
+    }
+    $process = [Diagnostics.Process]::Start($startInfo)
+    $process.WaitForExit()
+    if ($process.ExitCode -ne 0) {
+        throw "Game capture exited with code $($process.ExitCode)"
+    }
+}
+
 $slugs = @(
     "impact-hammer", "enforcer", "bio-rifle", "shock-rifle", "pulse-gun", "ripper",
     "minigun", "flak-cannon", "rocket-launcher", "sniper-rifle", "redeemer"
@@ -31,16 +58,14 @@ $jpegParameters = New-Object Drawing.Imaging.EncoderParameters 1
 $jpegParameters.Param[0] = New-Object Drawing.Imaging.EncoderParameter(
     [Drawing.Imaging.Encoder]::Quality, 88L)
 
-for ($weapon = 0; $weapon -lt $slugs.Count; $weapon++) {
-    $temporary = Join-Path $outputPath ($slugs[$weapon] + ".capture.png")
-    $destination = Join-Path $outputPath ($slugs[$weapon] + ".jpg")
-    $arguments = @(
-        "--windowed", "--startmatch", "--players", "1", "--bots", "0", "--map", "16",
-        "--weaponshot", $weapon, "--autoshot", "150", $temporary
+function Save-CroppedCapture {
+    param(
+        [string]$Temporary,
+        [string]$Destination,
+        [Drawing.Rectangle]$SourceRectangle
     )
-    Start-Process -FilePath $gamePath -ArgumentList $arguments -WindowStyle Hidden -Wait
 
-    $source = [Drawing.Bitmap]::FromFile($temporary)
+    $source = [Drawing.Bitmap]::FromFile($Temporary)
     try {
         $cropped = New-Object Drawing.Bitmap 800, 450
         try {
@@ -50,17 +75,38 @@ for ($weapon = 0; $weapon -lt $slugs.Count; $weapon++) {
                 $graphics.DrawImage(
                     $source,
                     [Drawing.Rectangle]::new(0, 0, 800, 450),
-                    [Drawing.Rectangle]::new(800, 450, 800, 450),
+                    $SourceRectangle,
                     [Drawing.GraphicsUnit]::Pixel)
             }
             finally { $graphics.Dispose() }
-            $cropped.Save($destination, $jpeg, $jpegParameters)
+            $cropped.Save($Destination, $jpeg, $jpegParameters)
         }
         finally { $cropped.Dispose() }
     }
     finally {
         $source.Dispose()
-        Remove-Item -LiteralPath $temporary
+        Remove-Item -LiteralPath $Temporary
     }
-    Write-Host "Captured $($slugs[$weapon])"
+}
+
+for ($weapon = 0; $weapon -lt $slugs.Count; $weapon++) {
+    $slug = $slugs[$weapon]
+    $temporary = Join-Path $outputPath ($slug + ".capture.png")
+    $destination = Join-Path $outputPath ($slug + ".jpg")
+    $arguments = @(
+        "--windowed", "--startmatch", "--players", "1", "--bots", "0", "--map", "16",
+        "--weaponshot", $weapon, "--autoshot", "150", $temporary
+    )
+    Invoke-GameCapture $arguments
+    Save-CroppedCapture $temporary $destination ([Drawing.Rectangle]::new(800, 450, 800, 450))
+
+    $profileTemporary = Join-Path $outputPath ($slug + "-profile.capture.png")
+    $profileDestination = Join-Path $outputPath ($slug + "-profile.jpg")
+    $profileArguments = @(
+        "--weaponprofile", $weapon, "--autoshot", "12", $profileTemporary
+    )
+    Invoke-GameCapture $profileArguments
+    Save-CroppedCapture $profileTemporary $profileDestination ([Drawing.Rectangle]::new(500, 280, 1000, 562))
+
+    Write-Host "Captured $slug first-person and upright profile views"
 }

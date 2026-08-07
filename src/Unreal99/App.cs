@@ -78,6 +78,7 @@ public sealed class App : IDisposable
     private bool _flyby;
     private bool _noHud;
     private int _weaponGuideCapture = -1;
+    private int _weaponProfileCapture = -1;
     private bool _flyManual;
     private float _flyRadius, _flyHeight, _flyAngleDeg, _flyLookY;
     private MenuScreen _bootMenuScreen = MenuScreen.Main;
@@ -181,6 +182,25 @@ public sealed class App : IDisposable
                         0, (int)WeaponKind.Count - 1);
                     _autoStartMatch = true;
                     _windowed = true;
+                    i++;
+                    break;
+                case "--weaponprofile" when i + 1 < args.Length:
+                case "--weaponfloor" when i + 1 < args.Length:
+                    // Documentation capture: use the live upright pickup orientation and frame
+                    // the weapon broadside without a player body, view model or HUD in the way.
+                    // --weaponfloor remains as a compatibility alias for older capture scripts.
+                    _weaponProfileCapture = MathX.Clamp(
+                        int.TryParse(args[i + 1], out int profileWeapon) ? profileWeapon : 0,
+                        0, (int)WeaponKind.Count - 1);
+                    _menu.Map = MapId.Stalwart;
+                    _menu.LocalPlayers = 1;
+                    _menu.BotCount = 0;
+                    _cliOverrides.Add("map");
+                    _cliOverrides.Add("players");
+                    _cliOverrides.Add("bots");
+                    _autoStartMatch = true;
+                    _windowed = true;
+                    _noHud = true;
                     i++;
                     break;
                 case "--flycam" when i + 4 < args.Length:
@@ -1523,7 +1543,19 @@ public sealed class App : IDisposable
         var viewports = ComputeViewports(viewCount, Width, Height);
 
         _scene.Clear();
-        _world.Submit(_scene, viewCount, _viewPawnIds);
+        if (_weaponProfileCapture >= 0 && _players.Count > 0)
+        {
+            // Match updates can still emit ambient arena particles; exclude them from the clean
+            // profile plate so only the live weapon mesh and its studio lighting are visible.
+            _renderer.Particles.Clear();
+            _renderer.Effects.Clear();
+            _world.SubmitWeaponProfile(_scene, (WeaponKind)_weaponProfileCapture,
+                _players[0].Pawn.Position + new Vector3(0f, 0.55f, 0f));
+        }
+        else
+        {
+            _world.Submit(_scene, viewCount, _viewPawnIds);
+        }
 
         // --- build cameras ---
         for (int i = 0; i < viewCount; i++)
@@ -1596,6 +1628,18 @@ public sealed class App : IDisposable
         cam.FovY = VerticalFov(targetFov, aspect);
         cam.Near = 0.055f;
         cam.Far = 600f;
+
+        if (_weaponProfileCapture >= 0 && controller.PlayerIndex == 0)
+        {
+            Vector3 weapon = pawn.Position + new Vector3(0f, 0.55f, 0f);
+            cam.Position = weapon + new Vector3(3.2f, 0.12f, 0f);
+            Vector3 look = MathX.SafeNormalize(weapon - cam.Position, -MathX.Right);
+            MathX.YawPitchFromDir(look, out cam.Yaw, out cam.Pitch);
+            cam.Roll = 0f;
+            cam.FovY = VerticalFov(42f, aspect);
+            cam.Update(aspect);
+            return cam;
+        }
 
         // Fly-by: an orbiting overview of the whole arena while the match runs underneath.
         // Doubles as a spectator view and as the way arena layouts get eyeballed during development.
