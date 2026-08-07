@@ -617,7 +617,9 @@ public sealed class GameWorld
                 continue;
             }
 
-            if (p.AffectedByGravity) p.Velocity.Y -= Physics.Gravity * dt;
+            // Ballistic projectiles obey the arena's gravity, so grenades really do float on
+            // the low-gravity rooftop maps.
+            if (p.AffectedByGravity) p.Velocity.Y -= Physics.Gravity * Level.GravityScale * dt;
 
             Vector3 next = p.Position + p.Velocity * dt;
 
@@ -933,7 +935,8 @@ public sealed class GameWorld
             string text = type switch
             {
                 DamageType.Lava => Loc.LavaDeathFeed(victim.Name),
-                DamageType.Void or DamageType.Fall => Loc.FallDeathFeed(victim.Name),
+                DamageType.Void => Loc.FallDeathFeed(victim.Name),
+                DamageType.Fall => Loc.FallDamageFeed(victim.Name),
                 _ => Loc.SuicideFeed(victim.Name),
             };
             AddKillFeed(text, new Vector3(0.75f, 0.75f, 0.8f));

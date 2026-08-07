@@ -139,6 +139,13 @@ public sealed class Level : IDisposable
     /// <summary>Anything below this is out of bounds and dies.</summary>
     public float KillPlaneY = -60f;
 
+    /// <summary>
+    /// Multiplies gravity for this arena. Rooftop maps run light so a running jump can clear a
+    /// gap that would be impossible at 1.0 — the floaty feel is the whole point of those layouts.
+    /// Jump pads solve their ballistic arc against this too.
+    /// </summary>
+    public float GravityScale = 1f;
+
     public void Update(float dt, float time)
     {
         foreach (var m in Movers)
@@ -605,7 +612,7 @@ public sealed class LevelBuilder
     {
         // Ballistic solve: pick a flight time from the height difference and derive the launch velocity.
         Vector3 delta = destination - position;
-        const float gravity = Physics.Gravity;
+        float gravity = Physics.Gravity * _level.GravityScale;
         float peak = MathF.Max(delta.Y + 3.2f, 3.2f);
         float vy = MathF.Sqrt(2f * gravity * peak);
         float tUp = vy / gravity;

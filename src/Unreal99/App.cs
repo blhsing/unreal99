@@ -69,6 +69,7 @@ public sealed class App : IDisposable
     private bool _autoStartMatch;
     private bool _demoMode;
     private bool _windowed;
+    private bool _flyby;
     private MenuScreen _bootMenuScreen = MenuScreen.Main;
     private readonly List<string> _pendingScreenshots = new();
 
@@ -153,6 +154,10 @@ public sealed class App : IDisposable
                     break;
                 case "--windowed":
                     _windowed = true;
+                    break;
+                case "--flyby":
+                    // Orbiting overview camera for player one; useful for inspecting arenas.
+                    _flyby = true;
                     break;
                 case "--inputtest":
                     _inputTest = true;
@@ -1181,6 +1186,31 @@ public sealed class App : IDisposable
         cam.FovY = VerticalFov(targetFov, aspect);
         cam.Near = 0.055f;
         cam.Far = 600f;
+
+        // Fly-by: an orbiting overview of the whole arena while the match runs underneath.
+        // Doubles as a spectator view and as the way arena layouts get eyeballed during development.
+        if (_flyby && controller.PlayerIndex == 0)
+        {
+            Vector3 centre = _level.Center;
+            // Orbit inside the arena's bounds rather than above them, so roofed maps are
+            // actually visible instead of showing their ceiling.
+            // Size off the narrower horizontal dimension, otherwise a long map's orbit swings
+            // straight through the side walls.
+            Vector3 extent = _level.Max - _level.Min;
+            float radius = MathX.Clamp(MathF.Min(extent.X, extent.Z) * 0.32f, 9f, 55f);
+            float angle = _time * 0.18f;
+            float height = _level.Min.Y + (_level.Max.Y - _level.Min.Y) * 0.62f;
+            cam.Position = centre + new Vector3(
+                MathF.Cos(angle) * radius,
+                height - centre.Y,
+                MathF.Sin(angle) * radius);
+            Vector3 look = MathX.SafeNormalize(centre - cam.Position, MathX.Forward);
+            MathX.YawPitchFromDir(look, out cam.Yaw, out cam.Pitch);
+            cam.Roll = 0f;
+            cam.FovY = VerticalFov(88f, aspect);
+            cam.Update(aspect);
+            return cam;
+        }
 
         if (pawn.Alive)
         {

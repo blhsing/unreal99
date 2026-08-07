@@ -377,7 +377,8 @@ public sealed class BotController : Controller
                     // Compensate for projectile drop on ballistic weapons.
                     if (def.Primary.Projectile is ProjectileKind.Grenade or ProjectileKind.FlakShell
                         or ProjectileKind.BioGlob)
-                        aimAt += MathX.Up * (0.5f * Physics.Gravity * travel * travel * LeadAccuracy);
+                        aimAt += MathX.Up * (0.5f * Physics.Gravity * world.Level.GravityScale
+                            * travel * travel * LeadAccuracy);
                 }
             }
 

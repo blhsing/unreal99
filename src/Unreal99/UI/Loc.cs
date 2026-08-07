@@ -102,6 +102,29 @@ public static class Loc
     public const string MapArenaDesc = "軌道站的封閉競技場，開闊而致命。";
     public const string MapTwinFortsDesc = "兩座對稱要塞，中央為開闊爭奪區。";
 
+    // Arenas built as homages to the layouts that defined the 1999 original.
+    public const string MapFacingWorlds = "CTF-對峙世界";
+    public const string MapMorpheus = "DM-摩菲斯之塔";
+    public const string MapHyperBlast = "DM-超載星艦";
+    public const string MapGothic = "DM-哥德庭園";
+    public const string MapTurbine = "DM-渦輪機房";
+    public const string MapLavaGiant = "CTF-熔岩巨人";
+    public const string MapCurse = "DM-詛咒之庭";
+    public const string MapCodex = "DM-古籍密室";
+    public const string MapPhobos = "DM-火衛基地";
+    public const string MapStalwart = "DM-磚牆競技場";
+
+    public const string MapFacingWorldsDesc = "漂浮於軌道的雙塔對峙，中央長橋一覽無遺，狙擊手的殿堂。";
+    public const string MapMorpheusDesc = "三座摩天大樓的頂端，低重力讓你在深淵之上飛躍。";
+    public const string MapHyperBlastDesc = "軸對稱的星艦甲板，三層結構，兩側直通超空間。";
+    public const string MapGothicDesc = "月光下的哥德式宮殿，雙層中庭連接每一個廳室。";
+    public const string MapTurbineDesc = "巨型渦輪廠房，貨箱、壁架與地下水道交錯成迷宮。";
+    public const string MapLavaGiantDesc = "熔岩之海中的孤島，中央山脊將兩座堡壘一分為二。";
+    public const string MapCurseDesc = "上層中庭與長橋，下層長廊貫穿全場，牆後藏有密室。";
+    public const string MapCodexDesc = "古老典籍密室的環形迴廊，中央深坑，高處是狙擊位。";
+    public const string MapPhobosDesc = "火衛表面的模組化太空站，玻璃穹頂之外是無盡星海。";
+    public const string MapStalwartDesc = "紅磚砌成的緊湊競技場，最適合一對一的近身激戰。";
+
     // ---------------------------------------------------------------- weapons
     public const string WeaponImpactHammer = "衝擊錘";
     public const string WeaponEnforcer = "執法者手槍";
@@ -291,6 +314,8 @@ public static class Loc
 
     public static string SuicideFeed(string who) => $"{who} 自我了斷";
     public static string FallDeathFeed(string who) => $"{who} 墜入深淵";
+    /// <summary>Distinct from the void message, so a map leaking players is easy to spot.</summary>
+    public static string FallDamageFeed(string who) => $"{who} 摔落致死";
     public static string LavaDeathFeed(string who) => $"{who} 葬身熔岩";
     public static string TelefragFeed(string killer, string victim) => $"{killer} 傳送擊殺了 {victim}";
 

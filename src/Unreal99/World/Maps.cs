@@ -7,13 +7,36 @@ using Unreal99.UI;
 
 namespace Unreal99.World;
 
-public enum MapId { AbyssDeck = 0, RustTower, LavaTemple, OrbitalArena, TwinForts, Count }
+public enum MapId
+{
+    AbyssDeck = 0,
+    RustTower,
+    LavaTemple,
+    OrbitalArena,
+    TwinForts,
+    // Arenas in the spirit of the 1999 classics, rebuilt from scratch with the level builder.
+    FacingWorlds,
+    Morpheus,
+    HyperBlast,
+    Gothic,
+    Turbine,
+    LavaGiant,
+    Curse,
+    Codex,
+    Phobos,
+    Stalwart,
+    Count
+}
 
 /// <summary>
 /// The arenas. Every one is generated from code — no editor files, no imported assets —
 /// using <see cref="LevelBuilder"/> to emit render geometry and collision brushes together.
+///
+/// The second group are original arenas built as homages to the layouts that made the 1999
+/// game famous: two towers over a void, rooftop duels in low gravity, a symmetric starship,
+/// a moonlit courtyard, a turbine hall, and a lava island split by a central ridge.
 /// </summary>
-public static class Maps
+public static partial class Maps
 {
     public static string Name(MapId id) => id switch
     {
@@ -22,6 +45,16 @@ public static class Maps
         MapId.LavaTemple => Loc.MapTemple,
         MapId.OrbitalArena => Loc.MapArena,
         MapId.TwinForts => Loc.MapTwinForts,
+        MapId.FacingWorlds => Loc.MapFacingWorlds,
+        MapId.Morpheus => Loc.MapMorpheus,
+        MapId.HyperBlast => Loc.MapHyperBlast,
+        MapId.Gothic => Loc.MapGothic,
+        MapId.Turbine => Loc.MapTurbine,
+        MapId.LavaGiant => Loc.MapLavaGiant,
+        MapId.Curse => Loc.MapCurse,
+        MapId.Codex => Loc.MapCodex,
+        MapId.Phobos => Loc.MapPhobos,
+        MapId.Stalwart => Loc.MapStalwart,
         _ => Loc.MapDeck,
     };
 
@@ -32,10 +65,21 @@ public static class Maps
         MapId.LavaTemple => Loc.MapTempleDesc,
         MapId.OrbitalArena => Loc.MapArenaDesc,
         MapId.TwinForts => Loc.MapTwinFortsDesc,
+        MapId.FacingWorlds => Loc.MapFacingWorldsDesc,
+        MapId.Morpheus => Loc.MapMorpheusDesc,
+        MapId.HyperBlast => Loc.MapHyperBlastDesc,
+        MapId.Gothic => Loc.MapGothicDesc,
+        MapId.Turbine => Loc.MapTurbineDesc,
+        MapId.LavaGiant => Loc.MapLavaGiantDesc,
+        MapId.Curse => Loc.MapCurseDesc,
+        MapId.Codex => Loc.MapCodexDesc,
+        MapId.Phobos => Loc.MapPhobosDesc,
+        MapId.Stalwart => Loc.MapStalwartDesc,
         _ => Loc.MapDeckDesc,
     };
 
-    public static bool SupportsCtf(MapId id) => id == MapId.TwinForts;
+    public static bool SupportsCtf(MapId id)
+        => id is MapId.TwinForts or MapId.FacingWorlds or MapId.LavaGiant;
 
     public static Level Build(GL gl, MapId id) => id switch
     {
@@ -44,6 +88,16 @@ public static class Maps
         MapId.LavaTemple => BuildLavaTemple(gl),
         MapId.OrbitalArena => BuildOrbitalArena(gl),
         MapId.TwinForts => BuildTwinForts(gl),
+        MapId.FacingWorlds => BuildFacingWorlds(gl),
+        MapId.Morpheus => BuildMorpheus(gl),
+        MapId.HyperBlast => BuildHyperBlast(gl),
+        MapId.Gothic => BuildGothic(gl),
+        MapId.Turbine => BuildTurbine(gl),
+        MapId.LavaGiant => BuildLavaGiant(gl),
+        MapId.Curse => BuildCurse(gl),
+        MapId.Codex => BuildCodex(gl),
+        MapId.Phobos => BuildPhobos(gl),
+        MapId.Stalwart => BuildStalwart(gl),
         _ => BuildAbyssDeck(gl),
     };
 

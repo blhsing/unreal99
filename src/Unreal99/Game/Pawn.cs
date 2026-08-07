@@ -347,7 +347,7 @@ public sealed class Pawn
                 Velocity = Physics.Accelerate(Velocity, wishDir, airWish,
                     Physics.AirAcceleration * Physics.AirControl, dt);
             }
-            Velocity.Y -= Physics.Gravity * dt;
+            Velocity.Y -= Physics.Gravity * level.GravityScale * dt;
             if (Velocity.Y < -Physics.TerminalVelocity) Velocity.Y = -Physics.TerminalVelocity;
         }
 

@@ -58,6 +58,12 @@ public sealed class Menu
     public bool PointerVisible => _pointerActive;
     public Vector2 PointerPosition => _pointer;
 
+    /// <summary>
+    /// Grid width for the arena gallery. Widens as the roster grows so the cards stay a
+    /// reasonable height instead of being squeezed into ever-thinner rows.
+    /// </summary>
+    private int GalleryColumns => _items.Count <= 6 ? 3 : _items.Count <= 12 ? 4 : 5;
+
     // ---------------------------------------------------------------- settings model
 
     public GameModeKind ModeKind = GameModeKind.Deathmatch;
@@ -133,8 +139,9 @@ public sealed class Menu
         {
             if (Screen == MenuScreen.MapGallery)
             {
-                if (up) { MoveBy(-3); _navCooldown = 0.16f; }
-                else if (down) { MoveBy(3); _navCooldown = 0.16f; }
+                int columns = GalleryColumns;
+                if (up) { MoveBy(-columns); _navCooldown = 0.16f; }
+                else if (down) { MoveBy(columns); _navCooldown = 0.16f; }
                 else if (left) { MoveBy(-1); _navCooldown = 0.16f; }
                 else if (right) { MoveBy(1); _navCooldown = 0.16f; }
             }
@@ -835,7 +842,7 @@ public sealed class Menu
         ui.Text(FaceRegular, 17f * s, width * 0.5f, height * 0.065f + 62f * s,
             Loc.MapGalleryHint, UiRenderer.Rgba(0.66f, 0.76f, 0.91f), TextAlign.Center);
 
-        const int columns = 3;
+        int columns = GalleryColumns;
         int rows = (_items.Count + columns - 1) / columns;
         float panelW = MathF.Min(width * 0.90f, 1080f * s);
         float gap = 18f * s;
@@ -912,6 +919,16 @@ public sealed class Menu
             World.MapId.RustTower => UiRenderer.Rgba(0.24f, 0.10f, 0.055f),
             World.MapId.LavaTemple => UiRenderer.Rgba(0.22f, 0.045f, 0.025f),
             World.MapId.OrbitalArena => UiRenderer.Rgba(0.025f, 0.07f, 0.16f),
+            World.MapId.FacingWorlds => UiRenderer.Rgba(0.010f, 0.014f, 0.045f),
+            World.MapId.Morpheus => UiRenderer.Rgba(0.035f, 0.045f, 0.12f),
+            World.MapId.HyperBlast => UiRenderer.Rgba(0.012f, 0.018f, 0.050f),
+            World.MapId.Gothic => UiRenderer.Rgba(0.13f, 0.07f, 0.24f),
+            World.MapId.Turbine => UiRenderer.Rgba(0.10f, 0.10f, 0.13f),
+            World.MapId.LavaGiant => UiRenderer.Rgba(0.34f, 0.13f, 0.045f),
+            World.MapId.Curse => UiRenderer.Rgba(0.10f, 0.09f, 0.15f),
+            World.MapId.Codex => UiRenderer.Rgba(0.12f, 0.10f, 0.09f),
+            World.MapId.Phobos => UiRenderer.Rgba(0.014f, 0.020f, 0.055f),
+            World.MapId.Stalwart => UiRenderer.Rgba(0.18f, 0.11f, 0.08f),
             _ => UiRenderer.Rgba(0.13f, 0.06f, 0.14f),
         };
         uint bottom = map switch
@@ -920,6 +937,16 @@ public sealed class Menu
             World.MapId.RustTower => UiRenderer.Rgba(0.06f, 0.045f, 0.04f),
             World.MapId.LavaTemple => UiRenderer.Rgba(0.45f, 0.09f, 0.015f),
             World.MapId.OrbitalArena => UiRenderer.Rgba(0.07f, 0.16f, 0.27f),
+            World.MapId.FacingWorlds => UiRenderer.Rgba(0.05f, 0.07f, 0.16f),
+            World.MapId.Morpheus => UiRenderer.Rgba(0.10f, 0.07f, 0.18f),
+            World.MapId.HyperBlast => UiRenderer.Rgba(0.06f, 0.09f, 0.20f),
+            World.MapId.Gothic => UiRenderer.Rgba(0.06f, 0.04f, 0.10f),
+            World.MapId.Turbine => UiRenderer.Rgba(0.05f, 0.06f, 0.08f),
+            World.MapId.LavaGiant => UiRenderer.Rgba(0.62f, 0.20f, 0.03f),
+            World.MapId.Curse => UiRenderer.Rgba(0.05f, 0.045f, 0.07f),
+            World.MapId.Codex => UiRenderer.Rgba(0.05f, 0.045f, 0.04f),
+            World.MapId.Phobos => UiRenderer.Rgba(0.08f, 0.09f, 0.13f),
+            World.MapId.Stalwart => UiRenderer.Rgba(0.07f, 0.05f, 0.04f),
             _ => UiRenderer.Rgba(0.05f, 0.09f, 0.16f),
         };
         if (!enabled) { top = UiRenderer.WithAlpha(top, 0.42f); bottom = UiRenderer.WithAlpha(bottom, 0.42f); }
@@ -960,6 +987,89 @@ public sealed class Menu
                 ui.Rect(x + w * 0.59f, y + h * 0.38f, w * 0.32f, h * 0.42f,
                     UiRenderer.Rgba(0.10f, 0.32f, 0.80f, enabled ? 0.9f : 0.3f));
                 ui.Line(new Vector2(x + w * 0.41f, cy), new Vector2(x + w * 0.59f, cy), 5f, metal);
+                break;
+
+            case World.MapId.FacingWorlds:
+                // Two towers staring across a split bridge.
+                ui.Rect(x + w * 0.10f, y + h * 0.14f, w * 0.16f, h * 0.72f,
+                    UiRenderer.Rgba(0.72f, 0.14f, 0.11f, enabled ? 0.92f : 0.3f));
+                ui.Rect(x + w * 0.74f, y + h * 0.14f, w * 0.16f, h * 0.72f,
+                    UiRenderer.Rgba(0.12f, 0.32f, 0.82f, enabled ? 0.92f : 0.3f));
+                ui.Rect(x + w * 0.26f, cy - h * 0.10f, w * 0.48f, h * 0.05f, metal);
+                ui.Rect(x + w * 0.26f, cy + h * 0.05f, w * 0.48f, h * 0.05f, metal);
+                break;
+
+            case World.MapId.Morpheus:
+                // Three staggered rooftops against the night.
+                ui.Rect(x + w * 0.10f, y + h * 0.34f, w * 0.21f, h * 0.60f, metal);
+                ui.Rect(x + w * 0.40f, y + h * 0.20f, w * 0.21f, h * 0.74f, metal);
+                ui.Rect(x + w * 0.70f, y + h * 0.42f, w * 0.21f, h * 0.52f, metal);
+                ui.Circle(new Vector2(x + w * 0.505f, y + h * 0.14f), MathF.Min(w, h) * 0.055f, orange);
+                break;
+
+            case World.MapId.HyperBlast:
+                // A ship hull seen from above, spine down the middle.
+                ui.Triangle(new Vector2(cx, y + h * 0.10f), new Vector2(x + w * 0.24f, y + h * 0.86f),
+                    new Vector2(x + w * 0.76f, y + h * 0.86f), metal);
+                ui.Rect(cx - w * 0.045f, y + h * 0.24f, w * 0.09f, h * 0.58f, cyan);
+                break;
+
+            case World.MapId.Gothic:
+                // Arcade arches around a lit courtyard.
+                for (int i = 0; i < 4; i++)
+                    ui.Rect(x + w * (0.13f + i * 0.21f), y + h * 0.32f, w * 0.07f, h * 0.52f, metal);
+                ui.Ring(new Vector2(cx, y + h * 0.30f), MathF.Min(w, h) * 0.26f, 4f,
+                    UiRenderer.Rgba(0.66f, 0.42f, 1f, enabled ? 0.9f : 0.3f), 26, MathF.PI, MathF.PI);
+                ui.Rect(x + w * 0.12f, y + h * 0.84f, w * 0.76f, h * 0.05f, orange);
+                break;
+
+            case World.MapId.Turbine:
+                // The drum in the middle of the hall.
+                ui.Circle(new Vector2(cx, cy), MathF.Min(w, h) * 0.26f,
+                    UiRenderer.Rgba(0.34f, 0.20f, 0.13f, enabled ? 0.95f : 0.3f));
+                ui.Ring(new Vector2(cx, cy), MathF.Min(w, h) * 0.33f, 4f, cyan, 28);
+                ui.Rect(x + w * 0.08f, y + h * 0.76f, w * 0.16f, h * 0.14f, metal);
+                ui.Rect(x + w * 0.76f, y + h * 0.76f, w * 0.16f, h * 0.14f, metal);
+                break;
+
+            case World.MapId.LavaGiant:
+                // An island bisected by a ridge, lava all around.
+                ui.Rect(x, y + h * 0.62f, w, h * 0.38f, orange);
+                ui.Rect(x + w * 0.06f, y + h * 0.42f, w * 0.88f, h * 0.30f,
+                    UiRenderer.Rgba(0.26f, 0.20f, 0.16f, enabled ? 0.95f : 0.3f));
+                ui.Triangle(new Vector2(cx, y + h * 0.16f), new Vector2(x + w * 0.34f, y + h * 0.60f),
+                    new Vector2(x + w * 0.66f, y + h * 0.60f), metal);
+                break;
+
+            case World.MapId.Curse:
+                // A bridge over a lower hall.
+                ui.Rect(x + w * 0.08f, y + h * 0.66f, w * 0.84f, h * 0.10f, metal);
+                ui.Rect(x + w * 0.08f, y + h * 0.40f, w * 0.30f, h * 0.08f, metal);
+                ui.Rect(x + w * 0.62f, y + h * 0.40f, w * 0.30f, h * 0.08f, metal);
+                ui.Rect(x + w * 0.44f, y + h * 0.36f, w * 0.12f, h * 0.16f, orange);
+                break;
+
+            case World.MapId.Codex:
+                // A ring of rooms around a dark shaft.
+                ui.Ring(new Vector2(cx, cy), MathF.Min(w, h) * 0.36f, 6f, metal, 30);
+                ui.Circle(new Vector2(cx, cy), MathF.Min(w, h) * 0.16f,
+                    UiRenderer.Rgba(0.02f, 0.03f, 0.05f, enabled ? 0.95f : 0.3f));
+                ui.Circle(new Vector2(cx, cy), MathF.Min(w, h) * 0.06f, cyan);
+                break;
+
+            case World.MapId.Phobos:
+                // Two habitat blocks and the connector between them.
+                ui.Rect(x + w * 0.08f, y + h * 0.28f, w * 0.28f, h * 0.46f, metal);
+                ui.Rect(x + w * 0.64f, y + h * 0.28f, w * 0.28f, h * 0.46f, metal);
+                ui.Rect(x + w * 0.36f, cy - h * 0.07f, w * 0.28f, h * 0.14f, cyan);
+                break;
+
+            case World.MapId.Stalwart:
+                // A compact brick box with a central block.
+                ui.Rect(x + w * 0.14f, y + h * 0.24f, w * 0.72f, h * 0.60f,
+                    UiRenderer.Rgba(0.40f, 0.20f, 0.14f, enabled ? 0.92f : 0.3f));
+                ui.Rect(x + w * 0.38f, y + h * 0.44f, w * 0.24f, h * 0.24f, metal);
+                ui.Rect(x + w * 0.14f, y + h * 0.24f, w * 0.72f, h * 0.05f, orange);
                 break;
         }
     }
