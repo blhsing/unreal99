@@ -46,6 +46,8 @@ public sealed class Pawn
     public float Health = 100f;
     public float Armor;
     public float MaxHealth = 100f;
+    /// <summary>Ignores damage, lethal hazards and combat knockback while enabled.</summary>
+    public bool Invulnerable;
     public float DeathTime;
     public Vector3 DeathImpulseDir;
     public bool Gibbed;
@@ -231,6 +233,7 @@ public sealed class Pawn
         ViewRoll = 0f;
         Alive = true;
         Gibbed = false;
+        Invulnerable = false;
         Health = MaxHealth;
         Armor = 0f;
         HasShieldBelt = false;

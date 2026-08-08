@@ -59,6 +59,7 @@ artifacts\installer\Unreal99Installer.exe --help
 | `--startmatch` | 略過選單直接進入戰鬥 |
 | `--demo` | 展示模式：本機玩家改由電腦操控，但仍保留各自的畫面與 HUD |
 | `--players N` | 同機玩家人數，1～4 |
+| `--split horizontal|vertical` | 雙人分割方向：上下或左右 |
 | `--bots N` | 電腦對手數量，0～15 |
 | `--skill N` | 電腦難度，0（新手）～5（神級） |
 | `--demoskill N` | 示範模式代打難度，0（新手）～5（神級），與對手難度分開 |
@@ -75,6 +76,7 @@ artifacts\installer\Unreal99Installer.exe --help
 | `--flyby` | 讓玩家一的鏡頭在場中環繞巡航，用於檢視競技場全貌 |
 | `--nohud` | 隱藏介面與第一人稱槍枝，用於擷取文件用畫面 |
 | `--weaponshot N` | 強制裝備第 N 把武器，只隱藏 HUD 而保留第一人稱武器，用於擷取武器指南 |
+| `--weaponfootage N primary|secondary|both 路徑` | 在哥德庭園的實戰場景輸出第 N 把武器的 30 格動態畫面 |
 | `--weaponprofile N` | 以遊戲內直立拾取物的實際姿態拍攝第 N 把武器側面，用於擷取武器指南 |
 | `--loadslot N` | 直接從第 N 個存檔位接續對戰 |
 | `--savetest` | 存檔與設定的往返自我測試（寫入、讀回、還原到實際世界並比對） |
@@ -165,39 +167,42 @@ artifacts\installer\Unreal99Installer.exe --help
 
 ## 武器指南
 
-以下圖片不是概念圖或重繪插畫，而是遊戲以 `--weaponshot` 與 `--weaponprofile` 從 OpenGL
-畫面緩衝直接擷取的**實際武器模型**。每把武器都同時展示第一人稱持握視角，以及與遊戲內拾取物
-完全相同的直立側面外觀。主要射擊使用滑鼠左鍵，次要射擊使用滑鼠右鍵。
+以下動畫不是概念圖或重繪插畫，而是遊戲以 `--weaponfootage` 從 OpenGL 畫面緩衝逐格擷取的
+**哥德庭園實戰**。擷取流程會在開闊、可直視的場地放入一名會移動、瞄準及還擊的真實電腦敵人，
+避免立柱或轉角遮住交戰；文件攝影玩家則保持無敵，防止擷取途中死亡或被爆炸推離鏡位。每把武器
+都分別展示主要與次要用法，包括真實的後座、槍口火光、充能、光束、投射物與爆炸；另保留與
+遊戲內拾取物完全相同的直立側面圖。主要射擊使用滑鼠左鍵，次要射擊使用滑鼠右鍵。
 
 <table>
 <tr>
-<td width="50%"><b>1 · 衝擊錘</b><br>主要：按住蓄力後近身重擊。<br>次要：快速揮擊。<br>無需彈藥；適合貼身反擊與最後手段。<br><br><b>第一人稱視角</b><br><img src="docs/weapons/impact-hammer.jpg" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/impact-hammer-profile.jpg" width="100%"></td>
-<td width="50%"><b>2 · 執法者手槍</b><br>主要：穩定的單發即時命中。<br>次要：射速更快，但散佈更大。<br>中近距離可靠的出生武器。<br><br><b>第一人稱視角</b><br><img src="docs/weapons/enforcer.jpg" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/enforcer-profile.jpg" width="100%"></td>
+<td width="50%"><b>1 · 衝擊錘</b><br>主要：按住蓄力後近身重擊。<br>次要：快速揮擊。<br>無需彈藥；適合貼身反擊與最後手段。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/impact-hammer-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/impact-hammer-secondary.webp" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/impact-hammer-profile.jpg" width="100%"></td>
+<td width="50%"><b>2 · 執法者手槍</b><br>主要：穩定的單發即時命中。<br>次要：射速更快，但散佈更大。<br>中近距離可靠的出生武器。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/enforcer-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/enforcer-secondary.webp" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/enforcer-profile.jpg" width="100%"></td>
 </tr>
 <tr>
-<td><b>3 · 生化步槍</b><br>主要：連射會濺射的生化凝膠。<br>次要：按住蓄積大型高傷害凝膠。<br>用於封鎖門口、轉角與狹窄通道。<br><br><b>第一人稱視角</b><br><img src="docs/weapons/bio-rifle.jpg" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/bio-rifle-profile.jpg" width="100%"></td>
-<td><b>4 · 震盪步槍</b><br>主要：精準的遠距能量光束。<br>次要：發射較慢的震盪球。<br>用主要光束擊中自己的震盪球可引發震盪連鎖。<br><br><b>第一人稱視角</b><br><img src="docs/weapons/shock-rifle.jpg" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/shock-rifle-profile.jpg" width="100%"></td>
+<td><b>3 · 生化步槍</b><br>主要：連射會濺射的生化凝膠。<br>次要：按住蓄積大型高傷害凝膠。<br>用於封鎖門口、轉角與狹窄通道。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/bio-rifle-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/bio-rifle-secondary.webp" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/bio-rifle-profile.jpg" width="100%"></td>
+<td><b>4 · 震盪步槍</b><br>主要：精準的遠距能量光束。<br>次要：發射較慢的震盪球。<br>用主要光束擊中自己的震盪球可引發震盪連鎖。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/shock-rifle-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/shock-rifle-secondary.webp" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/shock-rifle-profile.jpg" width="100%"></td>
 </tr>
 <tr>
-<td><b>5 · 脈衝步槍</b><br>主要：高速連射電漿彈。<br>次要：近距離持續能量束。<br>追蹤走位中的敵人時尤其有效。<br><br><b>第一人稱視角</b><br><img src="docs/weapons/pulse-gun.jpg" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/pulse-gun-profile.jpg" width="100%"></td>
-<td><b>6 · 撕裂者</b><br>主要：發射可在牆面反彈的刀刃。<br>次要：發射具有爆炸範圍的刀刃。<br>可利用轉角與反彈路線打擊掩體後方。<br><br><b>第一人稱視角</b><br><img src="docs/weapons/ripper.jpg" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/ripper-profile.jpg" width="100%"></td>
+<td><b>5 · 脈衝步槍</b><br>主要：高速連射電漿彈。<br>次要：近距離持續能量束。<br>追蹤走位中的敵人時尤其有效。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/pulse-gun-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/pulse-gun-secondary.webp" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/pulse-gun-profile.jpg" width="100%"></td>
+<td><b>6 · 撕裂者</b><br>主要：發射可在牆面反彈的刀刃。<br>次要：發射具有爆炸範圍的刀刃。<br>可利用轉角與反彈路線打擊掩體後方。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/ripper-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/ripper-secondary.webp" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/ripper-profile.jpg" width="100%"></td>
 </tr>
 <tr>
-<td><b>7 · 速射機槍</b><br>主要：較精準的高速連射。<br>次要：極高射速、較大散佈。<br>持續壓制中近距離目標。<br><br><b>第一人稱視角</b><br><img src="docs/weapons/minigun.jpg" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/minigun-profile.jpg" width="100%"></td>
-<td><b>8 · 破片加農砲</b><br>主要：一次散射九枚高速破片。<br>次要：拋射會爆炸的破片砲彈。<br>近距離正面命中具有極強爆發力。<br><br><b>第一人稱視角</b><br><img src="docs/weapons/flak-cannon.jpg" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/flak-cannon-profile.jpg" width="100%"></td>
+<td><b>7 · 速射機槍</b><br>主要：較精準的高速連射。<br>次要：極高射速、較大散佈。<br>持續壓制中近距離目標。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/minigun-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/minigun-secondary.webp" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/minigun-profile.jpg" width="100%"></td>
+<td><b>8 · 破片加農砲</b><br>主要：一次散射九枚高速破片。<br>次要：拋射會爆炸的破片砲彈。<br>近距離正面命中具有極強爆發力。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/flak-cannon-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/flak-cannon-secondary.webp" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/flak-cannon-profile.jpg" width="100%"></td>
 </tr>
 <tr>
-<td><b>9 · 火箭發射器</b><br>主要：直線飛行的高傷害火箭。<br>次要：受重力影響、可越過障礙的榴彈。<br>瞄準敵人腳下，以爆炸範圍封鎖退路。<br><br><b>第一人稱視角</b><br><img src="docs/weapons/rocket-launcher.jpg" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/rocket-launcher-profile.jpg" width="100%"></td>
-<td><b>狙擊步槍</b><br>主要：高傷害、零散佈的遠距射擊。<br>次要：啟用放大瞄準。<br>制高點與跨場通道上的首選。<br><br><b>第一人稱視角</b><br><img src="docs/weapons/sniper-rifle.jpg" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/sniper-rifle-profile.jpg" width="100%"></td>
+<td><b>9 · 火箭發射器</b><br>主要：直線飛行的高傷害火箭。<br>次要：受重力影響、可越過障礙的榴彈。<br>瞄準敵人腳下，以爆炸範圍封鎖退路。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/rocket-launcher-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/rocket-launcher-secondary.webp" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/rocket-launcher-profile.jpg" width="100%"></td>
+<td><b>狙擊步槍</b><br>主要：高傷害、零散佈的遠距射擊。<br>次要：啟用放大瞄準。<br>制高點與跨場通道上的首選。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/sniper-rifle-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/sniper-rifle-secondary.webp" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/sniper-rifle-profile.jpg" width="100%"></td>
 </tr>
 <tr>
-<td><b>0 · 救世主核彈</b><br>主要：發射大範圍核彈頭。<br>次要：速度較慢，但爆炸半徑與傷害更高。<br>極稀有；發射前先確認自己有安全距離。<br><br><b>第一人稱視角</b><br><img src="docs/weapons/redeemer.jpg" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/redeemer-profile.jpg" width="100%"></td>
+<td><b>0 · 救世主核彈</b><br>主要：發射大範圍核彈頭。<br>次要：速度較慢，但爆炸半徑與傷害更高。<br>極稀有；發射前先確認自己有安全距離。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/redeemer-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/redeemer-secondary.webp" width="100%"><br><b>直立側面圖</b><br><img src="docs/weapons/redeemer-profile.jpg" width="100%"></td>
 <td><br><b>切換提示</b><br>數字鍵 1～9 選擇衝擊錘至火箭發射器，0 選擇救世主；Q／E 或滑鼠滾輪循環切換。狙擊步槍可用循環切換或自行綁定快捷鍵。</td>
 </tr>
 </table>
 
-圖庫可由 [`docs/capture-weapons.ps1`](docs/capture-weapons.ps1) 重新擷取；腳本會為每把武器同時
-產生第一人稱與直立側面圖片，確保文件展示的永遠是目前引擎實際繪製的模型。
+圖庫可由 [`docs/capture-weapons.ps1`](docs/capture-weapons.ps1) 重新擷取；腳本會為每把武器產生
+主要／次要射擊的 30 格循環 WebP 與直立側面圖，並在輸出後驗證動畫格數與尺寸。流程使用實際
+關卡、武器模擬和電腦控制器，確保文件展示的永遠是目前引擎實際執行的戰鬥效果。
 
 ---
 
@@ -207,7 +212,8 @@ artifacts\installer\Unreal99Installer.exe --help
 因此兩位玩家會共用同一個準心。本專案改用 **Windows Raw Input**：
 
 * 掛接遊戲視窗的視窗程序，攔截 `WM_INPUT`，讓每個 HID 裝置的位移、按鍵與滾輪各自獨立。
-* 每位玩家綁定自己的滑鼠代號；玩家二有自己的滑鼠時，兩人的視角完全互不干擾。
+* 每位玩家綁定自己的滑鼠代號；玩家二有自己的滑鼠時，視角、按鍵與滾輪都只送往玩家二，
+  因此可直接用第二個滑鼠的滾輪切換武器，兩人的操作完全互不干擾。
 * 若指派了各自的實體鍵盤，按鍵也會依裝置分流，兩人可以同時使用相同且順手的配置。
 * 任何環節不可用時（非 Windows、驅動異常）都會自動退回共用滑鼠模式，遊戲仍可正常執行。
 
@@ -223,7 +229,7 @@ Windows 通常會列舉十幾個「幽靈」HID 裝置，因此配對採用**實
 | 視角 | 專屬滑鼠 | 第二個滑鼠 |
 | 開火／次要開火 | 滑鼠左鍵／右鍵 | 滑鼠左鍵／右鍵 |
 | 跳躍／蹲下 | `Space` / 左 `Ctrl` | 右 `Shift` / 右 `Ctrl` |
-| 切換武器 | `E` `Q` / 滾輪 | 上一頁／下一頁 |
+| 切換武器 | `E` `Q` / 滾輪 | 上一頁／下一頁 / 第二個滑鼠滾輪 |
 | 武器快捷 | 數字鍵 `1`～`0` | 可自行指定 |
 | 計分板 | `Tab` | `Delete` |
 
@@ -235,9 +241,15 @@ Windows 通常會列舉十幾個「幽靈」HID 裝置，因此配對採用**實
 
 所有動作都可在「輸入裝置與按鍵 → 編輯按鍵配置」中重新指定。
 
+雙人對戰的「對戰設定」另有「雙人分割方向」選項，可選擇水平的上下畫面或垂直的左右畫面；
+選擇會和其他對戰設定一起保存。三至四人模式固定使用四象限配置。
+
 ### 通用按鍵
 
-`Esc` 暫停選單　　`F3` 效能資訊　　`F5` 快速儲存　　`F9` 快速載入　　`F11` 切換全螢幕　　`F12` 螢幕截圖
+`Esc` 暫停選單　　`F3` 效能資訊　　`F5` 快速儲存　　`F9` 快速載入　　`F11` 切換全螢幕　　`F12`／`Print Screen` 螢幕截圖
+
+全螢幕下不依賴 Windows 的桌面擷取；`F12` 與 `Print Screen` 都會直接讀取遊戲最後完成的 OpenGL
+畫面並存成 `%APPDATA%\Unreal99\screenshots\` 內的 PNG，因此不會得到空白圖片。
 
 ---
 
@@ -248,6 +260,7 @@ Windows 通常會列舉十幾個「幽靈」HID 裝置，因此配對採用**實
 ```
 %APPDATA%\Unreal99\
   settings.json     畫質、輸入、裝置指派、上次的對戰設定、隊伍與個別電腦難度
+  screenshots\*.png F12／Print Screen 擷取的全螢幕或視窗畫面
   saves\slot0.json  存檔內容
   saves\slot0.png   存檔當下的預覽畫面
 ```
@@ -262,7 +275,7 @@ Windows 通常會列舉十幾個「幽靈」HID 裝置，因此配對採用**實
 各自的完整按鍵配置**都會自動保存，下次啟動即還原。裝置指派記錄的是**裝置名稱而非 Raw Input
 代號**——代號每次開機都會重新分配，存下來只會把玩家綁到剛好接手該編號的裝置上。
 
-上一次使用的對戰設定（競技場、模式、本機人數、電腦數量與全域難度、示範模式與代打難度、
+上一次使用的對戰設定（競技場、模式、本機人數、雙人分割方向、電腦數量與全域難度、示範模式與代打難度、
 擊殺／奪旗／時間上限）也會一併記住。每位玩家的名稱與隊伍、每名電腦的隊伍與個別難度覆寫
 同樣會跨工作階段保存。
 選單中的每次調整都會標記為待寫入，實際寫檔延後 0.75 秒——按著方向鍵調整滑桿時，
@@ -410,6 +423,9 @@ src/Unreal99.Installer/
 
 測試不會鎖定、置中或移動桌面游標；每張地圖的移動距離、造訪區域、停滯／來回抖動、墜落死亡、
 日誌及結尾截圖會寫入 `artifacts\bot-traversal\`，總表則輸出為 `results.json` 與 `summary.csv`。
+完整的自動門檻、人工複核方式、失敗調查流程與新地圖強制驗收清單，請見
+[電腦走圖測試與地圖驗收程序](docs/bot-traversal-validation.md)。**任何日後新增的地圖都必須登錄
+到此測試、通過 3600 畫格單圖驗證，再通過完整全地圖回歸，才可視為完成。**
 
 模式：死亡競賽、團隊死亡競賽、奪旗大戰、最後生還者、瞬殺模式，並附有 UT 風格的連殺與多重擊殺
 播報、一血、領先變化與延長賽。

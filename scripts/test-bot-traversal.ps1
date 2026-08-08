@@ -1,3 +1,31 @@
+<#
+.SYNOPSIS
+Runs the mandatory deterministic bot-traversal validation suite for Unreal99 maps.
+
+.DESCRIPTION
+Builds the Release game unless -NoBuild is supplied, then runs a Godlike demo player against
+Newbie opponents on every selected map. The command returns 0 only when every automated gate
+passes and writes per-map logs/screenshots plus JSON and CSV summaries. Human review and the
+required procedure for new maps are documented in docs/bot-traversal-validation.md.
+
+.PARAMETER Frames
+Active-play frames per map. The submission gate uses 3600 frames; the minimum is 600.
+
+.PARAMETER MapIds
+Map identifiers to test. The default must be expanded whenever a map is added.
+
+.PARAMETER OutputDirectory
+Directory for per-map screenshots/logs and aggregate JSON/CSV results.
+
+.PARAMETER NoBuild
+Skips the Release build. Use only for focused reruns against a known-current build.
+
+.EXAMPLE
+.\scripts\test-bot-traversal.ps1 -Frames 3600
+
+.EXAMPLE
+.\scripts\test-bot-traversal.ps1 -MapIds 7,11 -Frames 3600 -NoBuild
+#>
 param(
     [int]$Frames = 3600,
     [int[]]$MapIds = (0..16),

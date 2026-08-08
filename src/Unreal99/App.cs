@@ -82,6 +82,11 @@ public sealed class App : IDisposable
     private bool _noHud;
     private int _weaponGuideCapture = -1;
     private int _weaponProfileCapture = -1;
+    private int _weaponFootageMode = -1;
+    private bool _weaponFootageBothModes;
+    private string _weaponFootageDirectory;
+    private int _weaponFootageFrame;
+    private int _weaponFootageCaptured;
     private bool _flyManual;
     private float _flyRadius, _flyHeight, _flyAngleDeg, _flyLookY;
     private MenuScreen _bootMenuScreen = MenuScreen.Main;
@@ -135,7 +140,7 @@ public sealed class App : IDisposable
         options.Title = Loc.WindowTitle;
         options.API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.Default,
             new APIVersion(3, 3));
-        options.VSync = !_traversalTest;
+        options.VSync = !_traversalTest && _weaponFootageMode < 0;
         options.PreferredDepthBufferBits = 24;
         options.PreferredStencilBufferBits = 0;
         options.WindowBorder = WindowBorder.Resizable;
@@ -245,6 +250,32 @@ public sealed class App : IDisposable
                     _windowed = true;
                     i++;
                     break;
+                case "--weaponfootage" when i + 3 < args.Length:
+                    // Records a short, deterministic sequence of the live first-person weapon
+                    // using its real primary or secondary simulation. The documentation script
+                    // converts the numbered lossless frames into an animated WebP.
+                    _weaponGuideCapture = MathX.Clamp(
+                        int.TryParse(args[i + 1], out int footageWeapon) ? footageWeapon : 0,
+                        0, (int)WeaponKind.Count - 1);
+                    _weaponFootageBothModes = args[i + 2].Equals("both", StringComparison.OrdinalIgnoreCase);
+                    _weaponFootageMode = args[i + 2].Equals("secondary", StringComparison.OrdinalIgnoreCase)
+                        || args[i + 2].Equals("alt", StringComparison.OrdinalIgnoreCase) ? 1 : 0;
+                    _weaponFootageDirectory = args[i + 3];
+                    // Gothic's broad central floor gives the live opponent room to fight without
+                    // repeatedly disappearing behind Morbias's central pillar.
+                    _menu.Map = MapId.Gothic;
+                    _menu.ModeKind = GameModeKind.Deathmatch;
+                    _menu.LocalPlayers = 1;
+                    _menu.BotCount = 1;
+                    _menu.BotSkill = 2;
+                    _menu.FragLimit = 0;
+                    _menu.TimeLimitMinutes = 0;
+                    _renderSettings.Apply(QualityLevel.High);
+                    _cliOverrides.UnionWith(["map", "mode", "players", "bots", "skill", "frags", "time", "quality"]);
+                    _autoStartMatch = true;
+                    _windowed = true;
+                    i += 3;
+                    break;
                 case "--weaponprofile" when i + 1 < args.Length:
                 case "--weaponfloor" when i + 1 < args.Length:
                     // Documentation capture: use the live upright pickup orientation and frame
@@ -315,6 +346,12 @@ public sealed class App : IDisposable
                 case "--players" when i + 1 < args.Length:
                     _menu.LocalPlayers = MathX.Clamp(int.TryParse(args[i + 1], out int p) ? p : 1, 1, 4);
                     _cliOverrides.Add("players");
+                    i++;
+                    break;
+                case "--split" when i + 1 < args.Length:
+                    _menu.VerticalSplit = args[i + 1].Equals("vertical", StringComparison.OrdinalIgnoreCase)
+                        || args[i + 1].Equals("v", StringComparison.OrdinalIgnoreCase);
+                    _cliOverrides.Add("split");
                     i++;
                     break;
                 case "--bots" when i + 1 < args.Length:
@@ -461,7 +498,7 @@ public sealed class App : IDisposable
         _menu.OnDeleteSlot = DeleteSlot;
 
         LoadUserSettings();
-        if (_traversalTest) _window.VSync = false;
+        if (_traversalTest || _weaponFootageMode >= 0) _window.VSync = false;
         RefreshSaveSlots();
     }
 
@@ -475,6 +512,7 @@ public sealed class App : IDisposable
         Map = (int)_menu.Map,
         ModeKind = (int)_menu.ModeKind,
         LocalPlayers = _menu.LocalPlayers,
+        VerticalSplit = _menu.VerticalSplit,
         BotCount = _menu.BotCount,
         BotSkill = _menu.BotSkill,
         FragLimit = _menu.FragLimit,
@@ -503,6 +541,7 @@ public sealed class App : IDisposable
         if (!_cliOverrides.Contains("map")) _menu.Map = (MapId)MathX.Clamp(setup.Map, 0, (int)MapId.Count - 1);
         if (!_cliOverrides.Contains("mode")) _menu.ModeKind = (GameModeKind)setup.ModeKind;
         if (!_cliOverrides.Contains("players")) _menu.LocalPlayers = setup.LocalPlayers;
+        if (!_cliOverrides.Contains("split")) _menu.VerticalSplit = setup.VerticalSplit;
         if (!_cliOverrides.Contains("bots")) _menu.BotCount = setup.BotCount;
         if (!_cliOverrides.Contains("skill")) _menu.BotSkill = setup.BotSkill;
         if (!_cliOverrides.Contains("frags")) _menu.FragLimit = setup.FragLimit;
@@ -526,7 +565,41 @@ public sealed class App : IDisposable
         if (_audio != null) _audio.MasterVolume = volume;
         if (_window != null) _window.VSync = vsync;
         _showDebug = showFps;
+        ResolvePersistedDeviceAssignments();
         _renderer?.OnQualityChanged();
+    }
+
+    /// <summary>
+    /// Raw Input handles are valid only for the current Windows session. Settings therefore keep
+    /// stable display names; after loading, resolve those names back to today's handles. Without
+    /// this step a persisted second mouse looks assigned in the menu but player two falls back to
+    /// keyboard/gamepad input, so its motion, buttons and wheel never reach that player.
+    /// </summary>
+    private void ResolvePersistedDeviceAssignments()
+    {
+        if (!_input.RawAvailable) return;
+
+        Resolve(_input.Raw.Mice, mouse: true);
+        Resolve(_input.Raw.Keyboards, mouse: false);
+
+        void Resolve(IReadOnlyList<RawDevice> devices, bool mouse)
+        {
+            var claimed = new HashSet<nint>();
+            for (int slot = 0; slot < _playerDevices.Length; slot++)
+            {
+                PlayerDevice player = _playerDevices[slot];
+                string savedName = mouse ? player.MouseName : player.KeyboardName;
+                if (string.IsNullOrWhiteSpace(savedName)) continue;
+
+                RawDevice match = devices.FirstOrDefault(d => !claimed.Contains(d.Handle)
+                    && string.Equals(d.Name, savedName, StringComparison.Ordinal));
+                if (match == null) continue;
+
+                claimed.Add(match.Handle);
+                if (mouse) player.MouseHandle = match.Handle;
+                else player.KeyboardHandle = match.Handle;
+            }
+        }
     }
 
     /// <summary>
@@ -1077,7 +1150,7 @@ public sealed class App : IDisposable
         // Behavioral suites use the production update/render path but advance it at a stable
         // 60 Hz without waiting for wall-clock VSync. This makes long all-map runs practical
         // while preserving the same per-tick physics and bot decisions as normal gameplay.
-        if (_traversalTest) dt = 1f / 60f;
+        if (_traversalTest || _weaponFootageMode >= 0) dt = 1f / 60f;
         _time += dt;
         if (_audio != null) _audio.Time = _time;
 
@@ -1119,6 +1192,7 @@ public sealed class App : IDisposable
             RefreshSaveSlots();
         }
         HandleAutoScreenshot();
+        HandleWeaponFootageCapture();
         _input.EndFrame(dt);
     }
 
@@ -1152,7 +1226,10 @@ public sealed class App : IDisposable
 
     private void HandleGlobalKeys()
     {
-        if (_input.KeyPressed(Key.F12)) QueueScreenshot();
+        // Windows may return a blank desktop capture for exclusive/fullscreen OpenGL windows.
+        // Both keys therefore read the game's final framebuffer directly instead of relying on
+        // the operating-system screenshot path.
+        if (_input.KeyPressed(Key.F12) || _input.KeyPressed(Key.PrintScreen)) QueueScreenshot();
         if (_input.KeyPressed(Key.F3)) _showDebug = !_showDebug;
         if (_input.KeyPressed(Key.F11))
         {
@@ -1416,7 +1493,7 @@ public sealed class App : IDisposable
                 _state = AppState.Playing;
                 // Automated traversal runs must never capture or warp the user's real desktop
                 // cursor. Their local player is bot-driven and has no need for mouse-look.
-                if (_traversalTest || _saveTest)
+                if (_traversalTest || _saveTest || _weaponFootageMode >= 0 || _autoShotFrames >= 0)
                     _input.SetPointerMode(InputSystem.PointerMode.Normal);
                 else
                     _input.SetMouseCapture(true);
@@ -1495,9 +1572,13 @@ public sealed class App : IDisposable
             {
                 WeaponKind weapon = (WeaponKind)_weaponGuideCapture;
                 pawn.GiveWeapon(weapon, autoSwitch: false);
+                WeaponDef def = Weapons.Get(weapon);
+                if (def.Ammo != AmmoKind.None)
+                    pawn.Ammo[(int)def.Ammo] = def.MaxAmmo;
                 pawn.Weapon = weapon;
                 pawn.PendingWeapon = WeaponKind.Count;
                 pawn.SwitchTimer = 0f;
+                controller.DocumentationFireMode = _weaponFootageMode;
             }
             _players.Add(controller);
             _viewPawnIds.Add(pawn.Id);
@@ -1532,9 +1613,98 @@ public sealed class App : IDisposable
             _world.AddPawn(controller, name, team, true, -1, GameTypes.BotColor(i * 37 + 11));
         }
 
+        if (_weaponFootageMode >= 0) PrepareWeaponFootageBattle();
+
         for (int i = 0; i < _cameras.Length; i++) _cameras[i] = Camera.Default;
         _menu.ResultsWorld = null;
         _menu.ResultsViewer = null;
+    }
+
+    /// <summary>
+    /// Sets up a repeatable but genuine arena encounter for documentation capture. Both pawns use
+    /// the production simulation; the local player merely receives a scripted fire-mode choice
+    /// and the opponent remains a normal bot. A visible safe nav node keeps the target in frame.
+    /// </summary>
+    private void PrepareWeaponFootageBattle()
+    {
+        if (_players.Count == 0 || _world == null) return;
+        Pawn player = _players[0].Pawn;
+        Pawn opponent = _world.Pawns.FirstOrDefault(p => p.PlayerIndex < 0);
+        if (opponent == null) return;
+
+        if (!player.Alive) _world.RespawnPawn(player);
+        if (!opponent.Alive) _world.RespawnPawn(opponent);
+
+        WeaponKind weapon = (WeaponKind)_weaponGuideCapture;
+        float desiredDistance = weapon switch
+        {
+            WeaponKind.ImpactHammer => 2.4f,
+            WeaponKind.Redeemer => 22f,
+            _ => 11f,
+        };
+
+        // Pick a pair of exposed, same-level nav nodes with direct line of sight. Scoring the
+        // pair—not just the opponent node—keeps both combatants on Gothic's open central floor
+        // and away from pillars, corridors and balcony edges.
+        NavNode? playerStage = null, opponentStage = null;
+        float bestPairScore = float.MaxValue;
+        Vector3 eyeOffset = new(0f, Physics.PawnHeight * Physics.EyeHeightFraction, 0f);
+        foreach (NavNode from in _level.Nav.Nodes)
+        {
+            if (from.Openness < 0.55f) continue;
+            foreach (NavNode to in _level.Nav.Nodes)
+            {
+                if (to.Openness < 0.55f || MathF.Abs(to.Position.Y - from.Position.Y) > 1.2f) continue;
+                float distance = (to.Position - from.Position).Horizontal();
+                if (distance < MathF.Max(1.9f, desiredDistance * 0.65f)
+                    || distance > desiredDistance * 1.45f) continue;
+                if (_level.Collision.Raycast(from.Position + eyeOffset, to.Position + eyeOffset).Hit) continue;
+
+                Vector3 midpoint = (from.Position + to.Position) * 0.5f;
+                float centerDistance = (midpoint - _level.Center).Horizontal();
+                float score = MathF.Abs(distance - desiredDistance) * 3f
+                    + centerDistance * 0.12f - (from.Openness + to.Openness) * 8f;
+                if (score >= bestPairScore) continue;
+                bestPairScore = score;
+                playerStage = from;
+                opponentStage = to;
+            }
+        }
+        if (playerStage.HasValue)
+        {
+            player.Position = playerStage.Value.Position;
+            player.LastGroundPosition = player.Position;
+            player.Velocity = Vector3.Zero;
+        }
+        if (opponentStage.HasValue)
+        {
+            opponent.Position = opponentStage.Value.Position;
+            opponent.LastGroundPosition = opponent.Position;
+            opponent.Velocity = Vector3.Zero;
+        }
+
+        WeaponDef def = Weapons.Get(weapon);
+        player.GiveWeapon(weapon, autoSwitch: false);
+        if (def.Ammo != AmmoKind.None) player.Ammo[(int)def.Ammo] = def.MaxAmmo;
+        player.Weapon = weapon;
+        player.PendingWeapon = WeaponKind.Count;
+        player.SwitchTimer = 0f;
+        player.FireCooldown = 0f;
+        player.ChargeTime = 0f;
+        player.ChargingPrimary = false;
+        player.SpawnProtection = 0f;
+        player.Health = player.MaxHealth;
+        // The opponent remains a fully active, firing bot, but documentation capture must never
+        // lose its camera pawn (or get blasted out of the staged sightline) midway through a clip.
+        player.Invulnerable = true;
+        _players[0].DocumentationFireMode = _weaponFootageMode;
+
+        opponent.Health = opponent.MaxHealth;
+        opponent.Armor = 100f;
+        opponent.SpawnProtection = 0f;
+        Vector3 towardPlayer = player.Center - opponent.Center;
+        MathX.YawPitchFromDir(MathX.SafeNormalize(towardPlayer, MathX.Forward),
+            out opponent.Yaw, out opponent.Pitch);
     }
 
     private void PlaySound(SoundId id, Vector3 position, float volume)
@@ -1638,8 +1808,9 @@ public sealed class App : IDisposable
     private static float VerticalFov(float horizontalDegrees, float aspect)
         => MathX.VerticalFov(horizontalDegrees * MathX.Deg2Rad, aspect);
 
-    /// <summary>Split-screen layout: full, stacked halves, or quadrants.</summary>
-    public static ViewportRect[] ComputeViewports(int count, int width, int height)
+    /// <summary>Split-screen layout: full, configurable two-player halves, or quadrants.</summary>
+    public static ViewportRect[] ComputeViewports(int count, int width, int height,
+        bool verticalTwoPlayerSplit = false)
     {
         switch (count)
         {
@@ -1647,12 +1818,21 @@ public sealed class App : IDisposable
                 return [new ViewportRect(0, 0, width, height)];
             case 2:
                 {
-                    int half = height / 2;
+                    if (verticalTwoPlayerSplit)
+                    {
+                        int verticalHalf = width / 2;
+                        return
+                        [
+                            new ViewportRect(0, 0, verticalHalf, height),
+                            new ViewportRect(verticalHalf, 0, width - verticalHalf, height),
+                        ];
+                    }
+                    int horizontalHalf = height / 2;
                     // GL viewport origin is bottom-left, so index 0 (player 1) is the upper half.
                     return
                     [
-                        new ViewportRect(0, half, width, height - half),
-                        new ViewportRect(0, 0, width, half),
+                        new ViewportRect(0, horizontalHalf, width, height - horizontalHalf),
+                        new ViewportRect(0, 0, width, horizontalHalf),
                     ];
                 }
             default:
@@ -1673,7 +1853,7 @@ public sealed class App : IDisposable
     {
         int viewCount = Math.Max(1, _players.Count);
         _renderSettings.ViewCount = viewCount;
-        var viewports = ComputeViewports(viewCount, Width, Height);
+        var viewports = ComputeViewports(viewCount, Width, Height, _menu.VerticalSplit);
 
         _scene.Clear();
         if (_weaponProfileCapture >= 0 && _players.Count > 0)
@@ -1881,7 +2061,10 @@ public sealed class App : IDisposable
 
         if (viewCount == 2)
         {
-            _ui.Rect(0, Height * 0.5f - thickness * 0.5f, Width, thickness, border);
+            if (_menu.VerticalSplit)
+                _ui.Rect(Width * 0.5f - thickness * 0.5f, 0, thickness, Height, border);
+            else
+                _ui.Rect(0, Height * 0.5f - thickness * 0.5f, Width, thickness, border);
         }
         else
         {
@@ -2036,6 +2219,7 @@ public sealed class App : IDisposable
             _menu.BotSkillOverrides[1] = 0;
             _menu.DemoMode = true;
             _menu.DemoSkill = 4;
+            _menu.VerticalSplit = true;
             SaveUserSettings();
 
             SaveToSlot(0);
@@ -2061,7 +2245,8 @@ public sealed class App : IDisposable
             && settings.BotTeams[0] == 1 && settings.BotTeams[1] == 0
             && settings.BotSkillOverrides.Count >= 2
             && settings.BotSkillOverrides[0] == 5 && settings.BotSkillOverrides[1] == 0
-            && settings.DemoMode && settings.DemoSkill == 4;
+            && settings.DemoMode && settings.DemoSkill == 4
+            && settings.VerticalSplit;
         Console.WriteLine($"  設定檔: {(File.Exists(UserData.SettingsPath) ? "已寫入" : "缺少")}　" +
                           $"控制/隊伍/個別難度/展示模式還原: {(settingsOk ? "通過" : "失敗")}");
 
@@ -2306,13 +2491,13 @@ public sealed class App : IDisposable
 
     private void QueueScreenshot()
     {
-        string dir = Path.Combine(AppContext.BaseDirectory, "screenshots");
+        string dir = Path.Combine(UserData.Root, "screenshots");
         Directory.CreateDirectory(dir);
         string path = Path.Combine(dir, $"unreal99_{DateTime.Now:yyyyMMdd_HHmmss_fff}.png");
         _pendingScreenshots.Add(path);
     }
 
-    private unsafe void SaveScreenshot(string path)
+    private unsafe void SaveScreenshot(string path, bool quiet = false)
     {
         int w = Width, h = Height;
         var pixels = new byte[w * h * 4];
@@ -2323,8 +2508,11 @@ public sealed class App : IDisposable
         try
         {
             Png.Write(path, w, h, pixels, 4, flipVertically: true);
-            SetStatus($"{Loc.SysScreenshotSaved}: {Path.GetFileName(path)}");
-            Console.WriteLine($"截圖已儲存: {path}");
+            if (!quiet)
+            {
+                SetStatus($"{Loc.SysScreenshotSaved}: {Path.GetFileName(path)}");
+                Console.WriteLine($"截圖已儲存: {path}");
+            }
         }
         catch (Exception ex)
         {
@@ -2364,6 +2552,48 @@ public sealed class App : IDisposable
                                   $"行進 {_autoShotTravelDistances.GetValueOrDefault(pawnId):0.0} m · " +
                                   $"最長停滯 {_autoShotLongestStalls.GetValueOrDefault(pawnId):0.00} s");
         if (_traversalTest) FinishTraversalTest();
+        _window.Close();
+    }
+
+    /// <summary>
+    /// Captures 30 frames at 15 fps after live play begins. Keeping simulation at 60 Hz preserves
+    /// normal weapon cadence while the reduced capture rate keeps the final README animations
+    /// compact. The first few ticks provide an idle pose before the controller starts firing.
+    /// </summary>
+    private void HandleWeaponFootageCapture()
+    {
+        if (_weaponFootageMode < 0 || _state != AppState.Playing || _world == null
+            || _world.ResumeCountdown > 0f || _world.Mode.State == MatchState.Warmup) return;
+
+        const int CaptureEvery = 4;
+        const int FrameCount = 30;
+        _weaponFootageFrame++;
+        if ((_weaponFootageFrame - 1) % CaptureEvery != 0) return;
+
+        Directory.CreateDirectory(_weaponFootageDirectory);
+        string captureDirectory = _weaponFootageBothModes
+            ? Path.Combine(_weaponFootageDirectory, _weaponFootageMode == 0 ? "primary" : "secondary")
+            : _weaponFootageDirectory;
+        Directory.CreateDirectory(captureDirectory);
+        string path = Path.Combine(captureDirectory, $"{_weaponFootageCaptured:D3}.png");
+        SaveScreenshot(path, quiet: true);
+        _weaponFootageCaptured++;
+        if (_weaponFootageCaptured < FrameCount) return;
+
+        if (_weaponFootageBothModes && _weaponFootageMode == 0)
+        {
+            _weaponFootageMode = 1;
+            _weaponFootageFrame = 0;
+            _weaponFootageCaptured = 0;
+            Array.Clear(_world.Projectiles);
+            _world.Particles.Clear();
+            _world.Effects.Clear();
+            PrepareWeaponFootageBattle();
+            return;
+        }
+
+        Console.WriteLine($"武器動態擷取完成: {GameTypes.WeaponName((WeaponKind)_weaponGuideCapture)} · " +
+                          $"{(_weaponFootageMode == 0 ? "主要" : "次要")} · {FrameCount} 畫格");
         _window.Close();
     }
 

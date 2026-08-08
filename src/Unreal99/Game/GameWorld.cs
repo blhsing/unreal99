@@ -919,7 +919,8 @@ public sealed class GameWorld
 
             Vector3 push = MathX.SafeNormalize(targetCenter - center, MathX.Up);
             push.Y = MathF.Max(push.Y, 0.35f);
-            target.Velocity += push * knockback * falloff * (selfDamage ? 1.25f : 1f);
+            if (!target.Invulnerable)
+                target.Velocity += push * knockback * falloff * (selfDamage ? 1.25f : 1f);
 
             if (dmg > 0.5f) Damage(target, attacker, dmg, type, push);
         }
@@ -928,7 +929,7 @@ public sealed class GameWorld
     public void Damage(Pawn target, Pawn attacker, float amount, DamageType type, Vector3 direction,
         bool headshot = false)
     {
-        if (!target.Alive || amount <= 0f) return;
+        if (!target.Alive || target.Invulnerable || amount <= 0f) return;
         if (attacker != null && attacker != target && Mode.Kind != GameModeKind.Instagib
             && ControllerFor(attacker) is BotController bot)
             amount *= bot.DamageScale;
@@ -968,7 +969,7 @@ public sealed class GameWorld
 
     public void Kill(Pawn victim, Pawn killer, DamageType type, bool headshot = false)
     {
-        if (!victim.Alive) return;
+        if (!victim.Alive || victim.Invulnerable) return;
         bool killedFlagCarrier = Mode.Kind == GameModeKind.CaptureTheFlag && victim.HasFlag;
         if (type == DamageType.Void) VoidDeaths++;
         else if (type == DamageType.Fall) FallDeaths++;

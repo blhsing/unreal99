@@ -11,7 +11,7 @@ namespace Unreal99.Platform;
 /// </summary>
 public sealed class UserSettings
 {
-    public int Version = 3;
+    public int Version = 4;
 
     // --- video ---
     public int Quality = (int)QualityLevel.High;
@@ -39,6 +39,8 @@ public sealed class UserSettings
     public int Map;
     public int ModeKind;
     public int LocalPlayers = 1;
+    /// <summary>False stacks two views; true places player one left and player two right.</summary>
+    public bool VerticalSplit;
     public int BotCount = 6;
     public int BotSkill = 3;
     public int FragLimit = 20;
@@ -109,6 +111,7 @@ public static class SettingsStore
             Map = setup.Map,
             ModeKind = setup.ModeKind,
             LocalPlayers = setup.LocalPlayers,
+            VerticalSplit = setup.VerticalSplit,
             BotCount = setup.BotCount,
             BotSkill = setup.BotSkill,
             FragLimit = setup.FragLimit,
@@ -167,6 +170,7 @@ public static class SettingsStore
         setup.Map = s.Map;
         setup.ModeKind = s.ModeKind;
         setup.LocalPlayers = Math.Clamp(s.LocalPlayers, 1, 4);
+        setup.VerticalSplit = s.VerticalSplit;
         setup.BotCount = Math.Clamp(s.BotCount, 0, 15);
         setup.BotSkill = Math.Clamp(s.BotSkill, 0, 5);
         setup.FragLimit = Math.Clamp(s.FragLimit, 0, 100);
@@ -221,6 +225,7 @@ public sealed class MatchSetup
     public int Map;
     public int ModeKind;
     public int LocalPlayers = 1;
+    public bool VerticalSplit;
     public int BotCount = 6;
     public int BotSkill = 3;
     public int FragLimit = 20;

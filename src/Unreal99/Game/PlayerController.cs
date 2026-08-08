@@ -36,6 +36,24 @@ public sealed class PlayerController : Controller
     /// </summary>
     public BotController AutoPilot;
 
+    /// <summary>
+    /// -1 reads the player's device normally; 0 and 1 drive repeatable primary/secondary fire
+    /// for the weapon-guide footage recorder. This still passes through the production weapon
+    /// simulation, view model, recoil, particles and projectiles.
+    /// </summary>
+    private int _documentationFireMode = -1;
+    public int DocumentationFireMode
+    {
+        get => _documentationFireMode;
+        set
+        {
+            if (_documentationFireMode == value) return;
+            _documentationFireMode = value;
+            _documentationFireTime = 0f;
+        }
+    }
+    private float _documentationFireTime;
+
     public PlayerController(InputSystem input, int playerIndex, PlayerDevice device, ControlSettings settings)
     {
         _input = input;
@@ -64,6 +82,38 @@ public sealed class PlayerController : Controller
 
         var input = new PawnInput { WeaponSelect = -1 };
         if (Pawn == null) return input;
+
+        if (DocumentationFireMode >= 0)
+        {
+            _documentationFireTime += dt;
+            Pawn opponent = world.Pawns.Where(p => p != Pawn && p.Alive
+                    && (!world.Mode.TeamBased || p.Team != Pawn.Team))
+                .OrderBy(p => Vector3.DistanceSquared(Pawn.Position, p.Position))
+                .FirstOrDefault();
+            if (opponent != null)
+            {
+                Vector3 aim = opponent.Center - Pawn.EyePosition;
+                MathX.YawPitchFromDir(MathX.SafeNormalize(aim, Pawn.ForwardFlat), out _yaw, out _pitch);
+            }
+            FireDef fire = DocumentationFireMode == 0 ? Pawn.WeaponDef.Primary : Pawn.WeaponDef.Alt;
+            float phase = _documentationFireTime % 2.1f;
+            // Chargeable weapons need a visible hold followed by a release. Every other mode is
+            // held long enough to show its cadence, beam/zoom state, recoil and projectile trail.
+            float releaseAt = fire.Chargeable
+                ? MathF.Min(1.45f, MathF.Max(0.75f, fire.MaxCharge * 0.82f))
+                : 1.72f;
+            bool active = phase >= 0.12f && phase < releaseAt;
+            input.Fire = DocumentationFireMode == 0 && active;
+            input.AltFire = DocumentationFireMode == 1 && active;
+            // A gentle orbit makes this a real encounter and exposes the weapon from changing
+            // angles without drowning out its firing animation in frantic bot movement.
+            input.Move = new Vector2(MathF.Sin(_documentationFireTime * 2.1f) * 0.18f, 0.03f);
+            input.Yaw = _yaw;
+            input.Pitch = _pitch;
+            ScoreboardHeld = false;
+            ZoomBlend = MathX.Damp(ZoomBlend, Pawn.ZoomFov > 0f ? 1f : 0f, 14f, dt);
+            return input;
+        }
 
         if (AutoPilot != null)
         {

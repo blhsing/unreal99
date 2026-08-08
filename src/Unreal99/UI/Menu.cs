@@ -77,6 +77,8 @@ public sealed class Menu
     public GameModeKind ModeKind = GameModeKind.Deathmatch;
     public World.MapId Map = World.MapId.Deck16;
     public int LocalPlayers = 1;
+    /// <summary>For two players, false stacks the views and true places them side by side.</summary>
+    public bool VerticalSplit;
     public int BotCount = 7;
     public int BotSkill = 2;
     public int FragLimit = 20;
@@ -568,6 +570,12 @@ public sealed class Menu
             d => LocalPlayers = MathX.Clamp(LocalPlayers + d, 1, 4),
             "第一位玩家使用鍵盤滑鼠，其餘玩家使用手把。");
 
+        if (LocalPlayers == 2)
+            AddChoice(Loc.OptSplitOrientation,
+                () => VerticalSplit ? Loc.OptSplitVertical : Loc.OptSplitHorizontal,
+                _ => VerticalSplit = !VerticalSplit,
+                "水平會上下排列；垂直會讓玩家一在左、玩家二在右。");
+
         for (int i = 0; i < LocalPlayers; i++)
         {
             int slot = i;
@@ -746,7 +754,7 @@ public sealed class Menu
         AddInfo("");
         AddInfo($"■ 通用");
         AddInfo($"{Loc.CtrlDodge}");
-        AddInfo($"{Loc.CtrlPause}：Esc　　{Loc.CtrlScreenshot}：F12　　全螢幕切換：F11　　效能資訊：F3");
+        AddInfo($"{Loc.CtrlPause}：Esc　　{Loc.CtrlScreenshot}：F12 / Print Screen　　全螢幕切換：F11　　效能資訊：F3");
         AddInfo("");
         Add(Loc.DevicesOpen, () => Open(MenuScreen.Devices), "指派專屬裝置並自訂每個按鍵。");
         Add(Loc.MenuBack, () => Open(MenuScreen.Main));

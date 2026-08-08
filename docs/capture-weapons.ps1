@@ -1,6 +1,11 @@
 param(
     [string]$Game = "",
-    [string]$OutputDirectory = ""
+    [string]$OutputDirectory = "",
+    [string]$Python = "python",
+    [switch]$NoBuild,
+    [switch]$SkipProfiles,
+    [ValidateRange(0, 10)][int]$StartWeapon = 0,
+    [ValidateRange(0, 10)][int]$EndWeapon = 10
 )
 
 $ErrorActionPreference = "Stop"
@@ -8,10 +13,16 @@ Add-Type -AssemblyName System.Drawing
 
 $repository = Split-Path -Parent $PSScriptRoot
 if ([string]::IsNullOrWhiteSpace($Game)) {
-    $Game = Join-Path $repository "artifacts\game-current\Unreal99.exe"
+    $Game = Join-Path $repository "src\Unreal99\bin\Release\net10.0\Unreal99.dll"
 }
 if ([string]::IsNullOrWhiteSpace($OutputDirectory)) {
     $OutputDirectory = Join-Path $PSScriptRoot "weapons"
+}
+
+$project = Join-Path $repository "src\Unreal99\Unreal99.csproj"
+if (-not $NoBuild) {
+    & dotnet build $project -c Release
+    if ($LASTEXITCODE -ne 0) { throw "Release build failed with code $LASTEXITCODE" }
 }
 
 $gamePath = [IO.Path]::GetFullPath($Game)
@@ -21,15 +32,54 @@ if (-not (Test-Path -LiteralPath $gamePath -PathType Leaf)) {
 }
 New-Item -ItemType Directory -Force -Path $outputPath | Out-Null
 
-# Prefer the managed entry point when it accompanies the executable. It can capture alongside an
-# installed Unreal99.exe process without Windows treating both app hosts as the same GUI program.
+# Prefer the managed entry point. It can capture alongside an installed Unreal99.exe process
+# without Windows treating both app hosts as the same GUI program.
 $captureCommand = $gamePath
 $capturePrefix = @()
-$managedGame = [IO.Path]::ChangeExtension($gamePath, ".dll")
-if (Test-Path -LiteralPath $managedGame -PathType Leaf) {
+if ([IO.Path]::GetExtension($gamePath) -eq ".dll") {
     $captureCommand = (Get-Command dotnet -ErrorAction Stop).Source
-    $capturePrefix = @($managedGame)
+    $capturePrefix = @($gamePath)
 }
+else {
+    $managedGame = [IO.Path]::ChangeExtension($gamePath, ".dll")
+    if (Test-Path -LiteralPath $managedGame -PathType Leaf) {
+        $captureCommand = (Get-Command dotnet -ErrorAction Stop).Source
+        $capturePrefix = @($managedGame)
+    }
+}
+
+$pythonCommand = (Get-Command $Python -ErrorAction Stop).Source
+$webpBuilder = Join-Path $PSScriptRoot "build-weapon-webp.py"
+$temporaryRoot = [IO.Path]::GetFullPath((Join-Path $outputPath ".capture"))
+$outputPrefix = $outputPath.TrimEnd([IO.Path]::DirectorySeparatorChar) + [IO.Path]::DirectorySeparatorChar
+if (-not $temporaryRoot.StartsWith($outputPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+    throw "Unsafe temporary capture directory: $temporaryRoot"
+}
+
+function Remove-CaptureDirectory {
+    param([string]$Path, [switch]$NonRecursive)
+
+    if (-not (Test-Path -LiteralPath $Path)) { return }
+    # Antivirus/indexing can retain a just-read PNG for several seconds after Pillow exits.
+    # Cleanup is deliberately deferred until the full batch is converted and then retried for
+    # up to one minute so a transient scanner handle cannot abort otherwise valid footage.
+    for ($attempt = 1; $attempt -le 120; $attempt++) {
+        try {
+            if ($NonRecursive) { Remove-Item -LiteralPath $Path -Force -ErrorAction Stop }
+            else { Remove-Item -LiteralPath $Path -Recurse -Force -ErrorAction Stop }
+            return
+        }
+        catch {
+            if ($attempt -eq 120) { throw }
+            Start-Sleep -Milliseconds 500
+        }
+    }
+}
+
+if (Test-Path -LiteralPath $temporaryRoot) {
+    Remove-CaptureDirectory $temporaryRoot
+}
+New-Item -ItemType Directory -Force -Path $temporaryRoot | Out-Null
 
 function Invoke-GameCapture {
     param([object[]]$Arguments)
@@ -89,24 +139,29 @@ function Save-CroppedCapture {
     }
 }
 
-for ($weapon = 0; $weapon -lt $slugs.Count; $weapon++) {
+if ($StartWeapon -gt $EndWeapon) { throw "StartWeapon must not exceed EndWeapon." }
+for ($weapon = $StartWeapon; $weapon -le $EndWeapon; $weapon++) {
     $slug = $slugs[$weapon]
-    $temporary = Join-Path $outputPath ($slug + ".capture.png")
-    $destination = Join-Path $outputPath ($slug + ".jpg")
-    $arguments = @(
-        "--windowed", "--startmatch", "--players", "1", "--bots", "0", "--map", "16",
-        "--weaponshot", $weapon, "--autoshot", "150", $temporary
-    )
-    Invoke-GameCapture $arguments
-    Save-CroppedCapture $temporary $destination ([Drawing.Rectangle]::new(800, 450, 800, 450))
+    $weaponFrameRoot = Join-Path $temporaryRoot $slug
+    Invoke-GameCapture @("--weaponfootage", $weapon, "both", $weaponFrameRoot)
+    foreach ($mode in @("primary", "secondary")) {
+        $frameDirectory = Join-Path $weaponFrameRoot $mode
+        $destination = Join-Path $outputPath ($slug + "-" + $mode + ".webp")
+        & $pythonCommand $webpBuilder --input $frameDirectory --output $destination
+        if ($LASTEXITCODE -ne 0) { throw "WebP conversion failed for $slug $mode" }
+    }
+    if (-not $SkipProfiles) {
+        $profileTemporary = Join-Path $temporaryRoot ($slug + "-profile.capture.png")
+        $profileDestination = Join-Path $outputPath ($slug + "-profile.jpg")
+        $profileArguments = @(
+            "--weaponprofile", $weapon, "--autoshot", "12", $profileTemporary
+        )
+        Invoke-GameCapture $profileArguments
+        Save-CroppedCapture $profileTemporary $profileDestination ([Drawing.Rectangle]::new(500, 280, 1000, 562))
+    }
 
-    $profileTemporary = Join-Path $outputPath ($slug + "-profile.capture.png")
-    $profileDestination = Join-Path $outputPath ($slug + "-profile.jpg")
-    $profileArguments = @(
-        "--weaponprofile", $weapon, "--autoshot", "12", $profileTemporary
-    )
-    Invoke-GameCapture $profileArguments
-    Save-CroppedCapture $profileTemporary $profileDestination ([Drawing.Rectangle]::new(500, 280, 1000, 562))
-
-    Write-Host "Captured $slug first-person and upright profile views"
+    $captureSummary = if ($SkipProfiles) { "action footage" } else { "action footage and upright profile" }
+    Write-Host "Captured $slug primary/secondary $captureSummary"
 }
+
+Remove-CaptureDirectory $temporaryRoot

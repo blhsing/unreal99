@@ -39,6 +39,9 @@ public static class Loc
     public const string OptMap = "競技場";
     public const string OptChooseMap = "選擇競技場";
     public const string OptPlayers = "本機玩家人數";
+    public const string OptSplitOrientation = "雙人分割方向";
+    public const string OptSplitHorizontal = "水平（上下）";
+    public const string OptSplitVertical = "垂直（左右）";
     public const string OptPlayerName = "玩家名稱";
     public const string OptTeam = "隊伍";
     public const string OptTeamAuto = "自動平衡";
