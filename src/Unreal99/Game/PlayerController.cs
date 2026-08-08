@@ -107,7 +107,19 @@ public sealed class PlayerController : Controller
             input.AltFire = DocumentationFireMode == 1 && active;
             // A gentle orbit makes this a real encounter and exposes the weapon from changing
             // angles without drowning out its firing animation in frantic bot movement.
-            input.Move = new Vector2(MathF.Sin(_documentationFireTime * 2.1f) * 0.18f, 0.03f);
+            //
+            // A contact weapon needs one extra thing: the enemy is a normal bot and backs away
+            // from someone swinging at them, so a 3m weapon loses contact within a second and
+            // the rest of the clip is a distant figure walking off. Close the gap the way a
+            // player would. Ranged modes keep the original near-stationary drift.
+            float forward = 0.03f;
+            if (opponent != null && fire.Mode == FireMode.Melee)
+            {
+                float gap = Vector3.Distance(Pawn.Position, opponent.Position);
+                float hold = fire.Range * 0.55f;
+                forward = MathX.Clamp((gap - hold) * 0.9f, -0.45f, 1f);
+            }
+            input.Move = new Vector2(MathF.Sin(_documentationFireTime * 2.1f) * 0.18f, forward);
             input.Yaw = _yaw;
             input.Pitch = _pitch;
             ScoreboardHeld = false;
