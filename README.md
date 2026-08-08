@@ -203,8 +203,8 @@ artifacts\installer\Unreal99Installer.exe --help
 
 圖庫可由 [`docs/capture-weapons.ps1`](docs/capture-weapons.ps1) 重新擷取；腳本會為每把武器產生
 主要／次要射擊的 30 格循環 WebP 與直立側面圖，並在輸出後驗證動畫格數與尺寸。流程使用實際
-關卡、武器模擬和電腦控制器，確保文件展示的永遠是目前引擎實際執行的戰鬥效果。完整的環境、
-指令、局部重建、畫面驗收與版本控制程序見
+關卡、武器模擬和電腦控制器，確保文件展示的永遠是目前引擎實際執行的戰鬥效果。實戰動畫與
+直立側面圖的完整環境、取景方式、裁切數值、局部重建、畫面驗收與版本控制程序見
 [`docs/weapon-footage-capture.md`](docs/weapon-footage-capture.md)。
 
 ---

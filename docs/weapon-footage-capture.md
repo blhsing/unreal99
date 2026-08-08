@@ -46,6 +46,45 @@ README 只引用 WebP 成品和側面圖；`.capture` 下的 PNG 是可重新產
 自動擷取不會鎖定、隱藏或移動桌面游標。畫面直接來自遊戲 framebuffer，也不受 Windows 全螢幕
 桌面截圖可能變成空白的問題影響。
 
+## 直立側面圖如何擷取
+
+武器指南的 `*-profile.jpg` 不是從動畫截一格，也不是把第一人稱槍枝旋轉後裁切。它使用
+`--weaponprofile N` 的獨立遊戲內攝影模式，流程如下：
+
+1. 遊戲以 1600×900 視窗模式進入 Stalwart，建立一名本機玩家且不加入電腦玩家。
+2. HUD、第一人稱武器和一般關卡場景不會送入這個畫面的 `RenderScene`；上一幀可能殘留的粒子與
+   效果也會先清除，因此人物、拾取台、煙霧或競技場物件不會擋住輪廓。
+3. `GameWorld.SubmitWeaponProfile` 取得與實際武器拾取物相同的 `Mesh`、`MeshSection` 和材質，保持
+   模型的直立本地姿態，以 `1.25` 倍縮放放在玩家位置上方 0.55 m。沒有另造文件專用武器模型。
+4. 場景改用無霧、無雲、無星的深色攝影背景，並使用暖色主日光、冷色前側補光和暖色後側輪廓光。
+   這些光仍走遊戲的正常材質、陰影和 renderer，而不是事後加亮。
+5. 攝影機位於武器右側 3.2 m、上方 0.12 m，直接看向武器中心，水平視野為 42°。武器本地長軸
+   因此以 broadside 側面朝向鏡頭，而不是像舊版地面拾取物那樣平躺到難以辨認。
+6. `--autoshot 12` 等待 12 個畫格後，直接從 OpenGL framebuffer 儲存完整 PNG。這段時間不可手動
+   縮放擷取視窗，因為下一步使用 1600×900 畫面的固定裁切座標。
+7. `Save-CroppedCapture` 從原圖 `(x=500, y=280, width=1000, height=562)` 取出武器區域，以高品質
+   bicubic 縮放為 800×450，最後用 JPEG 品質 88 寫入 `docs/weapons/<slug>-profile.jpg`。
+
+協調腳本使用的實際遊戲命令等同於：
+
+```powershell
+dotnet .\src\Unreal99\bin\Release\net10.0\Unreal99.dll `
+  --weaponprofile 8 `
+  --autoshot 12 .\docs\weapons\.capture\rocket-launcher-profile.capture.png
+```
+
+正式產生側面圖時不需要手動執行裁切；不加 `-SkipProfiles` 執行協調腳本，就會在每把武器的兩段
+動畫完成後自動執行上述命令與固定裁切：
+
+```powershell
+# 重建火箭發射器的動畫與側面圖
+.\docs\capture-weapons.ps1 -NoBuild -StartWeapon 8 -EndWeapon 8
+```
+
+`--weaponfloor` 目前仍是 `--weaponprofile` 的相容別名，只供舊腳本使用；新文件和自動化一律使用
+`--weaponprofile`。若只想檢查未裁切的攝影棚畫面，可把直接命令的輸出改到 `artifacts/`，但不可
+用該完整 PNG 直接取代 README 的 800×450 成品。
+
 ## 必要環境
 
 - Windows PowerShell 7。
@@ -180,6 +219,17 @@ PNG；清理會每 500 ms 重試，最長約一分鐘，避免已成功的轉檔
 - 狙擊步槍次要：縮放視角仍能看清敵人。
 - 救世主主要與次要：遠距投射物及大範圍爆炸。
 
+### 側面圖驗收
+
+任何武器模型或攝影棚路徑變更後，也要逐張檢查 `*-profile.jpg`：
+
+- 成品正好是 800×450，武器名稱對應正確。
+- 武器保持直立、側面朝向鏡頭，主要輪廓可立即辨認；不得平躺或只看見槍口端面。
+- 完整模型都在安全邊界內，槍管、握把、彈鼓、刀刃等辨識特徵沒有被固定裁切切掉。
+- 沒有玩家身體、HUD、第一人稱手臂、拾取台、關卡幾何、粒子或文字混入畫面。
+- 深色背景與冷暖輪廓光能分開模型邊緣，材質沒有過曝成白塊或暗到失去細節。
+- 圖片來自目前遊戲的實際 mesh、sections 和 materials；不得用舊截圖掩蓋模型變更。
+
 ## 何時必須重建
 
 下列變更合併前應更新相關動畫；若影響共同算圖或控制流程，應重建全部 22 段：
@@ -190,6 +240,7 @@ PNG；清理會每 500 ms 重試，最長約一分鐘，避免已成功的轉檔
 - Gothic 幾何、碰撞、導航節點、開闊度或站位選擇。
 - `DocumentationFireMode`、攝影玩家無敵規則或 `--weaponfootage` 參數。
 - WebP 尺寸、畫格數、品質或 README 武器指南版面。
+- `SubmitWeaponProfile`、武器本地姿態、攝影棚燈光、42° 鏡頭或固定裁切座標。
 
 ## 版本控制程序
 
