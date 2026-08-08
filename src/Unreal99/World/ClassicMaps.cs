@@ -144,7 +144,10 @@ public static partial class Maps
             b.Solid(new Vector3(-4f, 8.2f, MathF.Min(innerFace, innerFace + 5f * sign)),
                     new Vector3(4f, 8.8f, MathF.Max(innerFace, innerFace + 5f * sign)),
                     MatId.MetalGrate, true, 0.9f);
-            b.AddJumpPad(new Vector3(0f, DeckY + 0.1f, z - 7.5f * sign),
+            // Keep the optional amplifier launcher out of the centreline. At x=0 it occupied
+            // the only direct CTF route out of the tower, repeatedly launching flag runners
+            // back into the upper chambers instead of letting them cross the map.
+            b.AddJumpPad(new Vector3(8.5f, DeckY + 0.1f, z - 7.5f * sign),
                          new Vector3(0f, 10.2f, z - 8f * sign + 5f * sign), new Vector3(0.4f, 0.85f, 1f));
 
             // --- three teleporters out of the flag room, exactly as the original does it ---
@@ -404,14 +407,17 @@ public static partial class Maps
                 b.Weapon(new Vector3(c.X, roof + 5.4f, c.Z), WeaponKind.SniperRifle);
                 b.Ammo(new Vector3(c.X + 3f, roof + 5.2f, c.Z), AmmoKind.SniperRounds);
             }
-            b.Weapon(new Vector3(c.X - 10.5f, roof + 0.9f, c.Z - 10.5f),
+            // Keep gameplay pickups out of the solid corner vents. Placing them at the vent
+            // centres embedded the models inside collision and mapped their nav goals to the
+            // inaccessible vent tops, so dry bots could never re-arm.
+            b.Weapon(new Vector3(c.X - 10.5f, roof + 0.9f, c.Z),
                 t == 0 ? WeaponKind.RocketLauncher : t == 1 ? WeaponKind.RocketLauncher : WeaponKind.ShockRifle);
-            b.Weapon(new Vector3(c.X + 10.5f, roof + 0.9f, c.Z + 10.5f),
+            b.Weapon(new Vector3(c.X + 10.5f, roof + 0.9f, c.Z),
                 t == 0 ? WeaponKind.Minigun : t == 1 ? WeaponKind.PulseGun : WeaponKind.Ripper);
-            if (t == 0) b.Item(new Vector3(c.X - 10.5f, roof + 0.8f, c.Z + 10.5f), PickupKind.BodyArmor);
-            if (t == 2) b.Item(new Vector3(c.X - 10.5f, roof + 0.8f, c.Z + 10.5f), PickupKind.Invisibility);
-            b.Item(new Vector3(c.X + 10.5f, roof + 0.8f, c.Z - 10.5f), PickupKind.HealthPack);
-            b.Item(new Vector3(c.X - 10.5f, roof + 0.8f, c.Z - 10.5f), PickupKind.HealthPack);
+            if (t == 0) b.Item(new Vector3(c.X - 10.5f, roof + 0.8f, c.Z + 5.5f), PickupKind.BodyArmor);
+            if (t == 2) b.Item(new Vector3(c.X + 10.5f, roof + 0.8f, c.Z - 5.5f), PickupKind.Invisibility);
+            b.Item(new Vector3(c.X - 5.5f, roof + 0.8f, c.Z - 10.5f), PickupKind.HealthPack);
+            b.Item(new Vector3(c.X + 5.5f, roof + 0.8f, c.Z + 10.5f), PickupKind.HealthPack);
             b.Ammo(new Vector3(c.X, roof + 0.7f, c.Z - 11f), AmmoKind.Rockets);
             b.Ammo(new Vector3(c.X, roof + 0.7f, c.Z + 11f), AmmoKind.MinigunBullets);
 
@@ -537,8 +543,21 @@ public static partial class Maps
                 MatId.MetalGrate, true, 0.9f);
             b.Ramp(new Vector3(-8f, Lower, z - 4f), new Vector3(-1.5f, Mid, z + 4f), 1, MatId.TechFloor);
             b.Ramp(new Vector3(1.5f, Lower, z - 4f), new Vector3(8f, Mid, z + 4f), 0, MatId.TechFloor);
-            RailRun(b, new Vector3(-8f, Mid, z - 11f), new Vector3(-8f, Mid, z + 11f));
-            RailRun(b, new Vector3(8f, Mid, z - 11f), new Vector3(8f, Mid, z + 11f));
+            // Overlap the high ends with the balcony by more than one pawn radius. Exact
+            // ramp-to-box seams left the capsule pressed against x=+/-8 even though the nav
+            // graph correctly saw a continuous floor, causing rapid reversals at the opening.
+            b.Solid(new Vector3(-9.5f, Mid - 0.5f, z - 5f),
+                new Vector3(-7.2f, Mid, z + 5f), MatId.MetalGrate, true, 0.9f);
+            b.Solid(new Vector3(7.2f, Mid - 0.5f, z - 5f),
+                new Vector3(9.5f, Mid, z + 5f), MatId.MetalGrate, true, 0.9f);
+            // Leave the inner rails open where the lower-to-mid ramps meet the balcony. A
+            // continuous rail across this span trapped bots on the deck at x=+/-8 while their
+            // valid route continued through the ramp entrance on the other side.
+            foreach (float railX in new[] { -8f, 8f })
+            {
+                RailRun(b, new Vector3(railX, Mid, z - 11f), new Vector3(railX, Mid, z - 5f));
+                RailRun(b, new Vector3(railX, Mid, z + 5f), new Vector3(railX, Mid, z + 11f));
+            }
 
             b.CeilingLamp(new Vector3(0f, Mid + 7.5f, z), new Vector3(0.75f, 0.85f, 1f), 26f, 7.5f, 1.4f);
             b.Weapon(new Vector3(0f, Lower + 0.9f, z + 6f * sign),
@@ -629,18 +648,26 @@ public static partial class Maps
         const float WallTop = 22f;
         const float Gallery = 8.5f;
 
-        // --- courtyard floor, sunken in the middle ---
-        b.Solid(new Vector3(-H, -1.5f, -H), new Vector3(H, 0f, H), MatId.Concrete, true, 0.55f);
+        // --- courtyard floor, genuinely sunken in the middle ---
+        // The former single full-size slab still covered the alleged sunken court. Its Redeemer
+        // and super-health sat below that intact floor, so bots could reach the nearest nav node
+        // but never touch the pickup and oscillated around it forever. Build the outer floor as
+        // four slabs and descend through four visible one-metre rings into the open centre.
+        const float StairOuter = 14f;
+        b.Solid(new Vector3(-H, -1.5f, -H), new Vector3(H, 0f, -StairOuter), MatId.Concrete, true, 0.55f);
+        b.Solid(new Vector3(-H, -1.5f, StairOuter), new Vector3(H, 0f, H), MatId.Concrete, true, 0.55f);
+        b.Solid(new Vector3(-H, -1.5f, -StairOuter), new Vector3(-StairOuter, 0f, StairOuter), MatId.Concrete, true, 0.55f);
+        b.Solid(new Vector3(StairOuter, -1.5f, -StairOuter), new Vector3(H, 0f, StairOuter), MatId.Concrete, true, 0.55f);
         b.Solid(new Vector3(-11f, -3.5f, -11f), new Vector3(11f, -2f, 11f), MatId.Concrete, true, 0.55f);
         for (int i = 0; i < 4; i++)
         {
-            // Steps down into the sunken centre on all four sides.
-            float inset = 8f + i * 1.0f;
-            float y = -0.5f * i;
-            b.Solid(new Vector3(-inset - 3f, y - 1f, -inset - 3f), new Vector3(inset + 3f, y, -inset), MatId.Concrete);
-            b.Solid(new Vector3(-inset - 3f, y - 1f, inset), new Vector3(inset + 3f, y, inset + 3f), MatId.Concrete);
-            b.Solid(new Vector3(-inset - 3f, y - 1f, -inset), new Vector3(-inset, y, inset), MatId.Concrete);
-            b.Solid(new Vector3(inset, y - 1f, -inset), new Vector3(inset + 3f, y, inset), MatId.Concrete);
+            float outer = StairOuter - i;
+            float inner = outer - 1f;
+            float top = -0.5f * i;
+            b.Solid(new Vector3(-outer, -2.5f, -outer), new Vector3(outer, top, -inner), MatId.Concrete);
+            b.Solid(new Vector3(-outer, -2.5f, inner), new Vector3(outer, top, outer), MatId.Concrete);
+            b.Solid(new Vector3(-outer, -2.5f, -inner), new Vector3(-inner, top, inner), MatId.Concrete);
+            b.Solid(new Vector3(inner, -2.5f, -inner), new Vector3(outer, top, inner), MatId.Concrete);
         }
 
         // --- outer walls ---
@@ -790,14 +817,22 @@ public static partial class Maps
         // --- ledge ring around the hall, reached by ramps and a lift ---
         b.Solid(new Vector3(-HX, Ledge - 0.5f, -HZ), new Vector3(HX, Ledge, -HZ + 6f), MatId.MetalGrate, true, 0.9f);
         b.Solid(new Vector3(-HX, Ledge - 0.5f, HZ - 6f), new Vector3(HX, Ledge, HZ), MatId.MetalGrate, true, 0.9f);
-        b.Solid(new Vector3(-HX, Ledge - 0.5f, -HZ + 6f), new Vector3(-HX + 6f, Ledge, HZ - 6f), MatId.MetalGrate, true, 0.9f);
-        b.Solid(new Vector3(HX - 6f, Ledge - 0.5f, -HZ + 6f), new Vector3(HX, Ledge, HZ - 6f), MatId.MetalGrate, true, 0.9f);
+        // Overlap the side ledges with their catwalks by at least a full capsule diameter.
+        // Ending exactly at x=+/-26 left a pawn centred just 0.42 m outside the slab hanging
+        // against its vertical lip, even though the connected nav nodes were valid.
+        b.Solid(new Vector3(-HX, Ledge - 0.5f, -HZ + 6f), new Vector3(-HX + 7f, Ledge, HZ - 6f), MatId.MetalGrate, true, 0.9f);
+        b.Solid(new Vector3(HX - 7f, Ledge - 0.5f, -HZ + 6f), new Vector3(HX, Ledge, HZ - 6f), MatId.MetalGrate, true, 0.9f);
         RailRun(b, new Vector3(-HX + 6f, Ledge, -HZ + 6f), new Vector3(HX - 6f, Ledge, -HZ + 6f));
         RailRun(b, new Vector3(-HX + 6f, Ledge, HZ - 6f), new Vector3(HX - 6f, Ledge, HZ - 6f));
-        b.Ramp(new Vector3(-HX + 6f, 0f, -22f), new Vector3(-HX + 18f, Ledge, -16f), 1, MatId.TechFloor);
-        b.Ramp(new Vector3(HX - 18f, 0f, 16f), new Vector3(HX - 6f, Ledge, 22f), 0, MatId.TechFloor);
-        b.Lift(new Vector3(HX - 10f, 0.2f, -22f), new Vector3(HX - 6.4f, 0.6f, -18f),
-            new Vector3(0f, Ledge, 0f), MatId.TechPanelDark, period: 7f);
+        // Meet the open inner edges of the west/east ledges. The old footprints overlapped the
+        // south/north overhead decks, leaving half of each slope buried and making a valid nav
+        // route physically enter the ramp from its vertical side.
+        b.Ramp(new Vector3(-HX + 6f, 0f, -20f), new Vector3(-HX + 18f, Ledge, -14f), 1, MatId.TechFloor);
+        b.Ramp(new Vector3(HX - 18f, 0f, 14f), new Vector3(HX - 6f, Ledge, 20f), 0, MatId.TechFloor);
+        // A broader car gives a capsule knocked during the ride enough landing margin; the old
+        // 3.6-by-4 metre platform let even correct air recovery miss by half a metre.
+        b.Lift(new Vector3(HX - 11f, 0.05f, -23f), new Vector3(HX - 5.5f, 0.45f, -17f),
+            new Vector3(0f, Ledge, 0f), MatId.TechPanelDark, period: 7f, navigable: false);
 
         // --- catwalks reaching the turbine top from the ledge ---
         foreach (var (ax, az) in new[] { (-1f, 0f), (1f, 0f), (0f, -1f), (0f, 1f) })
@@ -835,7 +870,13 @@ public static partial class Maps
         b.AddLight(new Vector3(0f, -2.5f, 0f), new Vector3(0.3f, 0.6f, 0.8f), 16f, 3f);
 
         // --- the hidden alcove behind a false panel, in the spirit of the original's secret ---
-        b.Solid(new Vector3(-HX, Ledge, -3.5f), new Vector3(-HX + 6f, Ledge + 5f, 3.5f), MatId.TechPanelDark, true, 0.8f);
+        // An alcove is an enclosed *space*, not one solid six-metre block. The old block buried
+        // the shield belt inside collision. Keep a substantial floor, side walls and ceiling,
+        // with the decorative false panel marking the open entrance.
+        b.Solid(new Vector3(-HX, Ledge - 0.5f, -3.5f), new Vector3(-HX + 6f, Ledge, 3.5f), MatId.TechPanelDark, true, 0.8f);
+        b.Solid(new Vector3(-HX, Ledge, -3.5f), new Vector3(-HX + 6f, Ledge + 5f, -2.8f), MatId.TechPanelDark, true, 0.8f);
+        b.Solid(new Vector3(-HX, Ledge, 2.8f), new Vector3(-HX + 6f, Ledge + 5f, 3.5f), MatId.TechPanelDark, true, 0.8f);
+        b.Solid(new Vector3(-HX, Ledge + 4.4f, -3.5f), new Vector3(-HX + 6f, Ledge + 5f, 3.5f), MatId.TechPanelDark, true, 0.8f);
         b.Decor(new Vector3(-HX + 5.9f, Ledge, -2.2f), new Vector3(-HX + 6.1f, Ledge + 3.4f, 2.2f), MatId.EnergyPanel, 0.6f);
         b.Item(new Vector3(-HX + 3f, Ledge + 0.8f, 0f), PickupKind.ShieldBelt);
         b.AddLight(new Vector3(-HX + 3f, Ledge + 2f, 0f), new Vector3(1f, 0.4f, 0.9f), 9f, 3f);

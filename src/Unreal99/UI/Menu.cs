@@ -59,7 +59,7 @@ public sealed class Menu
     private string _originalName = "";
 
     private readonly record struct ItemRect(int Index, float X, float Y, float Width, float Height,
-        float LeftArrowX, float RightArrowX, float ArrowWidth);
+        float ValueLeftX, float RightArrowX, float ArrowWidth);
 
     /// <summary>True once the mouse has moved, so the pointer only appears when actually used.</summary>
     public bool PointerVisible => _pointerActive;
@@ -88,6 +88,12 @@ public sealed class Menu
     public int DemoSkill = 3;
     /// <summary>Persistent display names for the four local player slots.</summary>
     public readonly string[] PlayerNames = [.. Loc.PlayerDefaultNames];
+    /// <summary>-1 automatically balances the slot; 0 and 1 force red or blue.</summary>
+    public readonly int[] PlayerTeams = [-1, -1, -1, -1];
+    /// <summary>Per-bot team assignment, using the same -1/0/1 convention.</summary>
+    public readonly int[] BotTeams = [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1];
+    /// <summary>-1 follows BotSkill; 0-5 select an individual tier.</summary>
+    public readonly int[] BotSkillOverrides = [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1];
 
     public Action OnStartMatch;
     public Action OnResume;
@@ -197,8 +203,7 @@ public sealed class Menu
             }
             else if (item is { Kind: MenuItemKind.Choice })
             {
-                PlaySound?.Invoke(SoundId.MenuMove);
-                item.OnAdjust?.Invoke(1);
+                AdjustItem(item, 1);
             }
         }
 
@@ -206,9 +211,9 @@ public sealed class Menu
     }
 
     /// <summary>
-    /// Mouse input for the front-end. Hovering moves the selection, left-click activates an
-    /// action or steps a choice forward, right-click steps it back, and clicking directly on a
-    /// choice's arrows adjusts in that direction. The wheel scrolls long lists.
+    /// Mouse input for the front-end. Hovering moves the selection; left-click activates an
+    /// action or adjusts a choice according to which side of its displayed value was clicked,
+    /// while right-click steps a choice back. The wheel scrolls long lists.
     /// </summary>
     public void HandleMouse(Vector2 position, bool moved, bool leftClick, bool rightClick, float wheel)
     {
@@ -282,18 +287,17 @@ public sealed class Menu
 
         if (leftClick)
         {
-            // Clicking an arrow adjusts in that direction; clicking anywhere else on a choice
-            // row steps forward, which matches how most console menus behave.
+            // Make the whole row useful instead of requiring a precision click on the arrow:
+            // everything left of the displayed value steps backward, while the value and the
+            // remainder of the row step forward.
             if (item.Kind == MenuItemKind.Choice && rect.ArrowWidth > 0f
-                && position.X >= rect.LeftArrowX && position.X <= rect.LeftArrowX + rect.ArrowWidth)
+                && position.X < rect.ValueLeftX)
             {
-                item.OnAdjust?.Invoke(-1);
-                PlaySound?.Invoke(SoundId.MenuMove);
+                AdjustItem(item, -1);
             }
             else if (item.Kind == MenuItemKind.Choice)
             {
-                item.OnAdjust?.Invoke(1);
-                PlaySound?.Invoke(SoundId.MenuMove);
+                AdjustItem(item, 1);
             }
             else if (item.Kind == MenuItemKind.Action && item.Enabled())
             {
@@ -304,8 +308,7 @@ public sealed class Menu
         }
         else if (rightClick && item.Kind == MenuItemKind.Choice)
         {
-            item.OnAdjust?.Invoke(-1);
-            PlaySound?.Invoke(SoundId.MenuMove);
+            AdjustItem(item, -1);
         }
     }
 
@@ -460,7 +463,11 @@ public sealed class Menu
 
     private void Adjust(int direction)
     {
-        var item = Current;
+        AdjustItem(Current, direction);
+    }
+
+    private void AdjustItem(MenuItem item, int direction)
+    {
         if (item is not { Kind: MenuItemKind.Choice }) return;
         item.OnAdjust?.Invoke(direction);
         PlaySound?.Invoke(SoundId.MenuMove);
@@ -517,9 +524,19 @@ public sealed class Menu
 
     private void BuildMain()
     {
-        Add(Loc.MenuInstantAction, () => { LocalPlayers = 1; Open(MenuScreen.Setup); },
+        Add(Loc.MenuInstantAction, () =>
+        {
+            LocalPlayers = 1;
+            OnSettingsChanged?.Invoke();
+            Open(MenuScreen.Setup);
+        },
             Loc.ModeDescription(ModeKind));
-        Add(Loc.MenuSplitScreen, () => { LocalPlayers = Math.Max(2, LocalPlayers); Open(MenuScreen.Setup); },
+        Add(Loc.MenuSplitScreen, () =>
+        {
+            LocalPlayers = Math.Max(2, LocalPlayers);
+            OnSettingsChanged?.Invoke();
+            Open(MenuScreen.Setup);
+        },
             "與最多三位朋友在同一台機器上對戰。");
         Add(Loc.MenuLoadGame, OpenLoadGame, "接續先前儲存的對戰。",
             () => SaveSlots.Any(s => s.Exists));
@@ -532,6 +549,8 @@ public sealed class Menu
 
     private void BuildSetup()
     {
+        bool teamMode = ModeKind is GameModeKind.TeamDeathmatch or GameModeKind.CaptureTheFlag;
+
         AddChoice(Loc.OptGameMode, () => Loc.ModeName(ModeKind), d =>
         {
             int n = Enum.GetValues<GameModeKind>().Length;
@@ -554,6 +573,11 @@ public sealed class Menu
             int slot = i;
             Add($"{Loc.OptPlayerName} {i + 1}　{PlayerNames[i]}", () => BeginPlayerNameEdit(slot),
                 Loc.PlayerNameHint);
+            if (teamMode)
+                AddChoice($"{PlayerNames[i]} · {Loc.OptTeam}",
+                    () => TeamAssignmentName(PlayerTeams[slot]),
+                    d => PlayerTeams[slot] = MathX.Clamp(PlayerTeams[slot] + d, -1, 1),
+                    "可指定紅隊或藍隊；自動平衡會考量其他已指定的隊員。");
         }
 
         AddChoice(Loc.OptBots, () => Loc.BotCount(BotCount),
@@ -562,6 +586,24 @@ public sealed class Menu
         AddChoice(Loc.OptBotSkill, () => Loc.SkillNames[MathX.Clamp(BotSkill, 0, Loc.SkillNames.Length - 1)],
             d => BotSkill = MathX.Clamp(BotSkill + d, 0, Loc.SkillNames.Length - 1),
             "影響電腦的反應速度、瞄準精度與閃避頻率。");
+
+        for (int i = 0; i < BotCount; i++)
+        {
+            int slot = i;
+            string botName = BotDisplayName(slot);
+            if (teamMode)
+                AddChoice($"{botName} · {Loc.OptTeam}",
+                    () => TeamAssignmentName(BotTeams[slot]),
+                    d => BotTeams[slot] = MathX.Clamp(BotTeams[slot] + d, -1, 1),
+                    "個別指定電腦加入紅隊或藍隊；保留自動即可由系統平衡。");
+            AddChoice($"{botName} · {Loc.OptBotSkillOverride}",
+                () => BotSkillOverrides[slot] < 0
+                    ? Loc.OptUseGlobalSkill
+                    : Loc.SkillNames[MathX.Clamp(BotSkillOverrides[slot], 0, Loc.SkillNames.Length - 1)],
+                d => BotSkillOverrides[slot] = MathX.Clamp(BotSkillOverrides[slot] + d,
+                    -1, Loc.SkillNames.Length - 1),
+                "只覆寫這一名電腦；跟隨全域會使用上方的電腦難度。");
+        }
 
         AddChoice(Loc.OptDemoMode, () => DemoMode ? Loc.OptOn : Loc.OptOff,
             d => DemoMode = !DemoMode,
@@ -592,6 +634,19 @@ public sealed class Menu
         Add(Loc.MenuBack, () => Open(MenuScreen.Main));
     }
 
+    private static string TeamAssignmentName(int assignment) => assignment switch
+    {
+        0 => Loc.HudTeamRed,
+        1 => Loc.HudTeamBlue,
+        _ => Loc.OptTeamAuto,
+    };
+
+    private static string BotDisplayName(int index)
+    {
+        string name = Loc.BotNames[index % Loc.BotNames.Length];
+        return index < Loc.BotNames.Length ? name : $"{name} {index / Loc.BotNames.Length + 1}";
+    }
+
     private void OpenMapGallery()
     {
         Screen = MenuScreen.MapGallery;
@@ -607,7 +662,12 @@ public sealed class Menu
         {
             World.MapId id = (World.MapId)i;
             bool compatible = ModeKind != GameModeKind.CaptureTheFlag || World.Maps.SupportsCtf(id);
-            Add(World.Maps.Name(id), () => { Map = id; Open(MenuScreen.Setup); },
+            Add(World.Maps.Name(id), () =>
+            {
+                Map = id;
+                OnSettingsChanged?.Invoke();
+                Open(MenuScreen.Setup);
+            },
                 compatible ? World.Maps.Description(id) : Loc.MapCtfUnavailable,
                 () => compatible);
         }
@@ -918,12 +978,11 @@ public sealed class Menu
             if (item.Selectable)
             {
                 float arrowW = dense ? 26f * s : 30f * s;
-                float leftArrowX = x + panelW - 48f * s
+                float valueLeftX = x + panelW - 48f * s
                     - ui.MeasureText(FaceBold, dense ? 19f * s : 23f * s,
-                        item.Kind == MenuItemKind.Choice && item.Value != null ? item.Value() : "")
-                    - 16f * s - arrowW;
+                        item.Kind == MenuItemKind.Choice && item.Value != null ? item.Value() : "");
                 _itemRects.Add(new ItemRect(i, x, y - 5f * s, panelW, rowH - 2f * s,
-                    leftArrowX, x + panelW - 48f * s + 8f * s,
+                    valueLeftX, x + panelW - 48f * s + 8f * s,
                     item.Kind == MenuItemKind.Choice ? arrowW : 0f));
             }
             bool selected = i == SelectedIndex && item.Selectable;

@@ -73,6 +73,18 @@ public static partial class Maps
             b.Solid(new Vector3(-22f, 12f, z - 16f * sign), new Vector3(22f, 13.4f, z + 16f * sign),
                 MatId.TechPanelDark, true, 0.7f);
 
+            // Explosions and the ridge approach can put players on the fort roof. It used to be
+            // an isolated navigation island with no physical way down, so bots coasted to an
+            // edge and stopped forever. Exterior buttress ramps make the roof a deliberate high
+            // route and provide a walkable descent without opening holes through the ceiling.
+            float roofRampZ = z + 8f * sign;
+            // Eight metres wide keeps the 2 m navigation samples at least a full pawn radius
+            // inside the side fascia instead of placing the first waypoint on its collision edge.
+            b.Ramp(new Vector3(-38f, 0f, roofRampZ - 4f),
+                   new Vector3(-22f, 13.4f, roofRampZ + 4f), 0, MatId.Rock, true, 0.6f);
+            b.Ramp(new Vector3(22f, 0f, roofRampZ - 4f),
+                   new Vector3(38f, 13.4f, roofRampZ + 4f), 1, MatId.Rock, true, 0.6f);
+
             // Front face with a central gate and two side doors.
             float front = z - 16f * sign;
             float f0 = MathF.Min(front, front - 3f * sign), f1 = MathF.Max(front, front - 3f * sign);
@@ -83,8 +95,14 @@ public static partial class Maps
             // --- flag dais and the gallery above it ---
             Vector3 flag = new(0f, 1.2f, z + 7f * sign);
             b.Solid(new Vector3(-6f, 0f, flag.Z - 5f), new Vector3(6f, 1.2f, flag.Z + 5f), MatId.TechPanelDark);
-            b.Ramp(new Vector3(-4f, 0f, MathF.Min(flag.Z - 5f, flag.Z - 9f)),
-                   new Vector3(4f, 1.2f, MathF.Max(flag.Z - 5f, flag.Z - 9f)), sign > 0 ? 2 : 3, MatId.Concrete);
+            // Mirror the ramp toward midfield along with the base. Without the sign on these
+            // offsets, the red ramp was built behind its dais against the back wall, leaving the
+            // flag reachable only by a one-way drop and stranding returning carriers at its face.
+            float rampHighZ = flag.Z - 5f * sign;
+            float rampLowZ = flag.Z - 9f * sign;
+            b.Ramp(new Vector3(-4f, 0f, MathF.Min(rampHighZ, rampLowZ)),
+                   new Vector3(4f, 1.2f, MathF.Max(rampHighZ, rampLowZ)),
+                   sign > 0 ? 2 : 3, MatId.Concrete);
             b.AddFlagBase(flag, team, sign > 0 ? 180f : 0f);
             b.AddLight(new Vector3(0f, 6f, flag.Z), col, 20f, 6f);
 
@@ -92,10 +110,15 @@ public static partial class Maps
                 MatId.MetalGrate, true, 0.9f);
             b.Solid(new Vector3(13f, 6.5f, z - 13f * sign), new Vector3(22f, 7f, z + 13f * sign),
                 MatId.MetalGrate, true, 0.9f);
-            b.Stairs(new Vector3(-17.5f, 0f, z - 11f * sign), new Vector3(-17.5f, 7f, z - 2f * sign), 6f, 12,
-                MatId.Concrete, alongX: false);
-            b.Stairs(new Vector3(17.5f, 0f, z - 11f * sign), new Vector3(17.5f, 7f, z - 2f * sign), 6f, 12,
-                MatId.Concrete, alongX: false);
+            // The former stair runs sat underneath these solid gallery decks, so neither stairs
+            // nor replacement ramps could connect to the room below. Descend through the open
+            // inner edges instead, just midfield of the flag dais: high at x = +/-13 and low
+            // toward the clear centre aisle.
+            float galleryRampZ = z - 2f * sign;
+            b.Ramp(new Vector3(-13f, 0f, galleryRampZ - 3f),
+                new Vector3(-4f, 7f, galleryRampZ + 3f), 1, MatId.Concrete);
+            b.Ramp(new Vector3(4f, 0f, galleryRampZ - 3f),
+                new Vector3(13f, 7f, galleryRampZ + 3f), 0, MatId.Concrete);
 
             b.CeilingLamp(new Vector3(0f, 11.5f, z), col * 0.5f + new Vector3(0.5f), 26f, 8f, 1.5f);
             b.CeilingLamp(new Vector3(-14f, 11.5f, z - 6f * sign), new Vector3(0.9f, 0.85f, 0.8f), 22f, 6f);

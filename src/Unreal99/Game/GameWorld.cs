@@ -276,6 +276,24 @@ public sealed class GameWorld
         Level.Update(dt, Time);
         Mode.Update(this, dt);
 
+        // The countdown is a true pre-match lock, not live play with scoring disabled. Do not
+        // poll controllers, integrate movement, fire weapons, collect pickups, or process flags
+        // until GameMode transitions to InProgress. Presentation still ticks so the countdown
+        // announcements and idle characters remain animated.
+        if (Mode.State == MatchState.Warmup)
+        {
+            foreach (Pawn pawn in Pawns)
+            {
+                Feedbacks[pawn.Id].Update(dt);
+                pawn.Velocity = Vector3.Zero;
+                pawn.TickPresentation(dt);
+            }
+            UpdatePickups(dt);
+            Particles.Update(dt);
+            Effects.Update(dt);
+            return;
+        }
+
         for (int i = 0; i < Pawns.Count; i++)
         {
             var pawn = Pawns[i];

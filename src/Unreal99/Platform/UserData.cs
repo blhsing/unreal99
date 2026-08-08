@@ -25,6 +25,11 @@ public static class UserData
 
     private static string ResolveRoot()
     {
+        // Automated persistence tests need a real, process-local override. Windows may ignore
+        // an APPDATA environment substitution because GetFolderPath resolves the registered
+        // known folder instead; this explicit path keeps tests out of the player's profile.
+        string overrideRoot = Environment.GetEnvironmentVariable("UNREAL99_USERDATA");
+        if (!string.IsNullOrWhiteSpace(overrideRoot)) return Path.GetFullPath(overrideRoot);
         try
         {
             string appData = Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData);

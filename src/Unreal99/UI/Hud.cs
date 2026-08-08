@@ -328,11 +328,14 @@ public sealed class Hud
                 leadScore.ToString(), rank == 1 ? UiRenderer.Rgba(0.4f, 1f, 0.55f) : White, TextAlign.Right);
         }
 
-        // Limit line.
-        if (mode.LimitValue > 0)
-            ui.Text(FaceRegular, 13f * s, cx, y + pillH + 3f * s,
-                $"{Loc.ModeName(mode.Kind)} · {mode.LimitValue}",
-                UiRenderer.Rgba(0.65f, 0.72f, 0.85f, 0.75f), TextAlign.Center);
+        // Persistent match context. This must remain visible even for unlimited matches, where
+        // the previous limit-only line disappeared and left players unable to identify the map
+        // or mode without opening the scoreboard.
+        string matchContext = $"{Loc.ModeName(mode.Kind)} · {world.Level.Name}";
+        if (mode.LimitValue > 0) matchContext += $" · {mode.LimitValue}";
+        ui.TextShadow(FaceRegular, 14f * s, cx, y + pillH + 3f * s, matchContext,
+            UiRenderer.Rgba(0.78f, 0.84f, 0.94f, 0.94f), TextAlign.Center,
+            shadowOffset: MathF.Max(1f, 1.5f * s), shadowAlpha: 0.9f);
     }
 
     private void DrawKillFeed(UiRenderer ui, GameWorld world, int width, int height, float s)

@@ -40,6 +40,10 @@ public static class Loc
     public const string OptChooseMap = "選擇競技場";
     public const string OptPlayers = "本機玩家人數";
     public const string OptPlayerName = "玩家名稱";
+    public const string OptTeam = "隊伍";
+    public const string OptTeamAuto = "自動平衡";
+    public const string OptBotSkillOverride = "個別難度";
+    public const string OptUseGlobalSkill = "跟隨全域";
     public const string PlayerNameTitle = "輸入玩家名稱";
     public const string PlayerNameHint = "設定計分板、擊殺訊息與 HUD 顯示的名稱。";
     public const string PlayerNameTypingHint = "輸入最多 18 個字元，Enter 確定，Esc 取消";

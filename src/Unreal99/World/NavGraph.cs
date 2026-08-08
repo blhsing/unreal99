@@ -130,7 +130,13 @@ public sealed class NavGraph
         var edges = new List<NavEdge>(Nodes.Length * 6);
         float linkRadius = spacing * 1.55f;
         float maxStep = world.StepHeight + 0.05f;
-        const float maxSafeDrop = 2.4f;
+        // A 2.4m ceiling left 2.6m parapets as isolated navigation islands even though stepping
+        // down from them lands well below the game's fall-damage threshold. Allow a little over
+        // three metres: destinations still require a real walkable node and the edge is one-way,
+        // so this connects safe ledge-to-floor drops without authoring routes into open voids.
+        const float maxSafeDrop = 3.25f;
+        float maxVertical = MathF.Max(maxSafeDrop, linkRadius * 0.95f);
+        float candidateRadius = MathF.Sqrt(linkRadius * linkRadius + maxVertical * maxVertical);
         Vector3 half = new(pawnRadius, pawnHeight * 0.5f, pawnRadius);
         var scratch = new List<int>(32);
         var neighbours = new List<int>(16);
@@ -140,7 +146,10 @@ public sealed class NavGraph
             var node = Nodes[i];
             int first = edges.Count;
             neighbours.Clear();
-            QueryRadius(node.Position, linkRadius, neighbours);
+            // QueryRadius measures full 3D distance. Querying with only the horizontal link
+            // radius discarded legitimate ledge-to-floor neighbours before the separate dy and
+            // floor-support checks below could validate them.
+            QueryRadius(node.Position, candidateRadius, neighbours);
 
             foreach (int j in neighbours)
             {
@@ -157,6 +166,7 @@ public sealed class NavGraph
                 float maxWalkableRise = MathF.Max(maxStep, horizontal * 0.95f);
                 if (dy > maxWalkableRise || dy < -maxSafeDrop) continue;
                 bool dropping = dy < -maxStep;
+                Vector3 lateral = new(-flat.Z / horizontal, 0f, flat.X / horizontal);
 
                 // Sample the span at torso height to make sure a pawn can actually pass.
                 bool clear = true;
@@ -165,26 +175,41 @@ public sealed class NavGraph
                 {
                     float t = s / (float)samples;
                     Vector3 p = Vector3.Lerp(a, b, t);
+                    float walkY = p.Y;
                     // During a drop the pawn's torso crosses above the ledge before descending;
                     // interpolating straight through the ledge would reject every valid edge.
-                    if (dropping) p.Y = a.Y;
+                    if (dropping) { p.Y = a.Y; walkY = a.Y; }
                     else
                     {
                         // A clear torso is not enough: without continuous floor support the
                         // graph links across pits, making bots run off edges. This also tells a
                         // genuine ramp from an impassable vertical lip.
                         float tolerance = maxStep + 0.18f;
-                        var floorHit = world.Raycast(
-                            p + new Vector3(0f, tolerance, 0f),
-                            p - new Vector3(0f, tolerance, 0f));
-                        if (!floorHit.Hit || floorHit.Normal.Y < world.MaxWalkableY
-                            || MathF.Abs(floorHit.Point.Y - p.Y) > tolerance)
+                        float sampledFloorY = 0f;
+                        // A centerline alone permits diagonal corner cuts: it can touch floor at
+                        // the exact meeting point of two platforms while half the pawn crosses a
+                        // pit or deep water. Require support under both sides of the capsule too.
+                        for (int lane = -1; lane <= 1; lane++)
                         {
-                            clear = false;
-                            break;
+                            Vector3 support = p + lateral * (lane * pawnRadius * 0.9f);
+                            var floorHit = world.Raycast(
+                                support + new Vector3(0f, tolerance, 0f),
+                                support - new Vector3(0f, tolerance, 0f));
+                            if (!floorHit.Hit || floorHit.Normal.Y < world.MaxWalkableY
+                                || MathF.Abs(floorHit.Point.Y - p.Y) > tolerance)
+                            {
+                                clear = false;
+                                break;
+                            }
+                            if (lane == 0) sampledFloorY = floorHit.Point.Y;
                         }
+                        if (!clear) break;
+                        // Follow the sampled floor rather than the straight chord between grid
+                        // nodes. At a ramp-to-platform seam that chord can sit just below the
+                        // higher surface and falsely report the floor itself as a torso obstacle.
+                        walkY = sampledFloorY + 0.05f;
                     }
-                    Vector3 c = new(p.X, p.Y + pawnHeight * 0.5f + 0.05f, p.Z);
+                    Vector3 c = new(p.X, walkY + pawnHeight * 0.5f, p.Z);
                     if (world.BoxOverlapsSolid(c - half, c + half, scratch)) { clear = false; break; }
                 }
                 if (!clear) continue;
@@ -423,6 +448,55 @@ public sealed class NavGraph
 
         if (closest == start) return false;
         for (int node = closest; node != -1 && node != start; node = _cameFrom[node])
+            outPath.Add(node);
+        outPath.Reverse();
+        return outPath.Count > 0;
+    }
+
+    /// <summary>
+    /// Builds a useful roaming path when a requested goal is on another navigation island.
+    /// Choosing a distant node in the current directed component keeps bots exploring instead
+    /// of repeatedly standing still while random goals or visible opponents remain unreachable.
+    /// </summary>
+    public bool FindPathToFarthestReachable(int start, List<int> outPath, int maxExpansions = 4000)
+    {
+        outPath.Clear();
+        if (start < 0 || start >= Nodes.Length) return false;
+        if (_gScore.Length != Nodes.Length) AllocateSearchBuffers();
+
+        _searchStamp++;
+        int read = 0, write = 0;
+        _openHeap[write++] = start;
+        Touch(start);
+        _cameFrom[start] = -1;
+
+        int farthest = start;
+        float farthestDistance = 0f;
+        int expansions = 0;
+        while (read < write && expansions++ < maxExpansions)
+        {
+            int current = _openHeap[read++];
+            var node = Nodes[current];
+            for (int e = 0; e < node.EdgeCount; e++)
+            {
+                int next = Edges[node.FirstEdge + e].To;
+                if (_stamp[next] == _searchStamp) continue;
+                Touch(next);
+                _cameFrom[next] = current;
+                _openHeap[write++] = next;
+
+                Vector3 delta = Nodes[next].Position - Nodes[start].Position;
+                float distance = delta.X * delta.X + delta.Z * delta.Z + delta.Y * delta.Y * 0.35f;
+                if (distance > farthestDistance)
+                {
+                    farthestDistance = distance;
+                    farthest = next;
+                }
+            }
+        }
+
+        if (farthest == start) return false;
+        for (int node = farthest; node != -1 && node != start; node = _cameFrom[node])
             outPath.Add(node);
         outPath.Reverse();
         return outPath.Count > 0;

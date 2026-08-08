@@ -42,6 +42,8 @@ public sealed class Mover
     public float Period = 6f;       // seconds for a full there-and-back cycle
     public float Phase;
     public float DwellFraction = 0.3f;
+    /// <summary>False keeps a decorative/manual lift out of bot pathfinding.</summary>
+    public bool Navigable = true;
     public Vector3 CurrentOffset;
     public Vector3 Velocity;
     public int MeshInstance = -1;
@@ -314,7 +316,9 @@ public sealed class LevelBuilder
 
         // The old wedge tapered to exactly zero at its low end. A constant-thickness sloped slab
         // gives both side fascias and both ends an unmistakably structural profile.
-        const float RampThickness = 0.65f;
+        // Long exposed ramps (notably November's gallery access) need enough fascia depth to
+        // read as load-bearing structures at gameplay distance, not floating sheets.
+        const float RampThickness = 1.25f;
         Vector3 visualMin = new(min.X, min.Y - RampThickness, min.Z);
         _mesh.AddRampSlab(min, max, risingAxis, RampThickness);
         if (collide)
@@ -626,7 +630,7 @@ public sealed class LevelBuilder
 
     /// <summary>Adds a lift: a platform brush that oscillates between base and base+offset.</summary>
     public void Lift(Vector3 min, Vector3 max, Vector3 offset, MatId material, float period = 7f,
-        float phase = 0f, float dwell = 0.3f)
+        float phase = 0f, float dwell = 0.3f, bool navigable = true)
     {
         var mb = new MeshBuilder { Material = (int)material, WorldUv = true, WorldUvScale = 1f };
         mb.AddBoxMinMax(min, max);
@@ -645,6 +649,7 @@ public sealed class LevelBuilder
             Period = period,
             Phase = phase,
             DwellFraction = dwell,
+            Navigable = navigable,
             MeshInstance = _moverMeshes.Count - 1,
         });
         AddLight((min + max) * 0.5f + offset * 0.5f + MathX.Up, new Vector3(0.3f, 0.7f, 1f), 8f, 1.6f);
@@ -752,6 +757,7 @@ public sealed class LevelBuilder
             _level.Nav.MarkFlag(p.Position, NavFlags.NearPickup, 2.2f);
         foreach (var m in _level.Movers)
         {
+            if (!m.Navigable) continue;
             Vector3 top = (m.BaseMin + m.BaseMax) * 0.5f + m.Offset + new Vector3(0, (m.BaseMax.Y - m.BaseMin.Y) * 0.5f + 0.4f, 0);
             Vector3 bottom = (m.BaseMin + m.BaseMax) * 0.5f + new Vector3(0, (m.BaseMax.Y - m.BaseMin.Y) * 0.5f + 0.4f, 0);
             _level.Nav.AddSpecialLink(bottom, top, NavFlags.JumpPad);

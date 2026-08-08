@@ -22,6 +22,12 @@ public enum TextAlign { Left, Center, Right }
 /// </summary>
 public sealed class UiRenderer : IDisposable
 {
+    /// <summary>Accessibility floor for every piece of in-game and menu text, in screen pixels.</summary>
+    // Match the 22 px flag-carrier message at the 1600x900 reference resolution. Keeping the
+    // floor in the shared renderer guarantees menus, notifications, scoreboards, and debug
+    // overlays cannot quietly opt into smaller text after viewport scaling.
+    public const float MinimumTextSize = 22f;
+
     private static readonly VertexAttrib[] Layout =
     [
         new(0, 2, VertexAttribPointerType.Float, false, 0),
@@ -289,6 +295,7 @@ public sealed class UiRenderer : IDisposable
         TextAlign align = TextAlign.Left, bool fromTop = true, float letterSpacing = 0f)
     {
         if (string.IsNullOrEmpty(text)) return x;
+        size = MathF.Max(MinimumTextSize, size);
 
         float baseline = fromTop ? y + _fonts.Ascent(face, size) : y;
         float width = align == TextAlign.Left ? 0f : _fonts.Measure(face, size, text, letterSpacing);
@@ -359,7 +366,7 @@ public sealed class UiRenderer : IDisposable
     }
 
     public float MeasureText(int face, float size, string text, float letterSpacing = 0f)
-        => _fonts.Measure(face, size, text, letterSpacing);
+        => _fonts.Measure(face, MathF.Max(MinimumTextSize, size), text, letterSpacing);
 
     public void Dispose()
     {

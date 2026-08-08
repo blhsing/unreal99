@@ -233,10 +233,15 @@ public static partial class Maps
         }
         b.Ramp(new Vector3(-H + 5f, 0f, -H + 5f), new Vector3(-H + 16f, Gallery, -H + 9f), 1, MatId.Concrete);
         b.Ramp(new Vector3(H - 16f, 0f, H - 9f), new Vector3(H - 5f, Gallery, H - 5f), 0, MatId.Concrete);
-        b.Lift(new Vector3(H - 9f, -1.2f, -H + 5.5f), new Vector3(H - 5.4f, -0.7f, -H + 9f),
-            new Vector3(0f, Gallery + 0.7f, 0f), MatId.TechPanelDark, period: 6.5f);
-        b.Lift(new Vector3(-H + 5.4f, -1.2f, H - 9f), new Vector3(-H + 9f, -0.7f, H - 5.5f),
-            new Vector3(0f, Gallery + 0.7f, 0f), MatId.TechPanelDark, period: 6.5f, phase: 3f);
+        // These platforms formerly started below the unbroken annulus floor and travelled
+        // through it. Bots waiting at the northwest lift could never board, so their route to
+        // the upper minigun became a long back-and-forth loop. Start on top of the ring floor
+        // and finish flush with the gallery instead.
+        const float LiftBaseTop = 0.45f;
+        b.Lift(new Vector3(H - 9f, 0.05f, -H + 5.5f), new Vector3(H - 5.4f, LiftBaseTop, -H + 9f),
+            new Vector3(0f, Gallery - LiftBaseTop, 0f), MatId.TechPanelDark, period: 6.5f);
+        b.Lift(new Vector3(-H + 5.4f, 0.05f, H - 9f), new Vector3(-H + 9f, LiftBaseTop, H - 5.5f),
+            new Vector3(0f, Gallery - LiftBaseTop, 0f), MatId.TechPanelDark, period: 6.5f, phase: 3f);
 
         // --- machinery lining the walls, for cover and for something to look at ---
         var rng = new Rng(0x3C0D);
@@ -765,8 +770,12 @@ public static partial class Maps
         b.Solid(new Vector3(HX - 5f, Upper - 0.5f, -9f), new Vector3(HX, Upper, 9f), MatId.MetalGrate, true, 0.9f);
         RailRun(b, new Vector3(-HX + 5f, Upper, -9f), new Vector3(-HX + 5f, Upper, 9f));
         RailRun(b, new Vector3(HX - 5f, Upper, -9f), new Vector3(HX - 5f, Upper, 9f));
-        b.Ramp(new Vector3(-8f, 0f, -14f), new Vector3(-2f, Upper, -6f), 3, MatId.TechFloor);
-        b.Ramp(new Vector3(2f, 0f, 6f), new Vector3(8f, Upper, 14f), 2, MatId.TechFloor);
+        // Join the balcony at its open inner edge. The previous ramps ran from ±6 to ±14 while
+        // the balcony slabs occupied ±9..±14, so more than half of each slope was hidden under
+        // solid decking. The graph then found a nominal drop onto that buried surface and the
+        // runtime ledge guard bounced the bot back. These mirrored ramps remain fully exposed.
+        b.Ramp(new Vector3(-14f, 0f, -9f), new Vector3(-8f, Upper, -1f), 3, MatId.TechFloor);
+        b.Ramp(new Vector3(8f, 0f, 1f), new Vector3(14f, Upper, 9f), 2, MatId.TechFloor);
 
         for (int t = -1; t <= 1; t += 2)
         {
@@ -822,8 +831,21 @@ public static partial class Maps
             b.Solid(new Vector3(-4.5f, Upper - 0.5f, sz * 9f), new Vector3(4.5f, Upper, sz * 34f), MatId.MetalGrate, true, 0.9f);
             RailRun(b, new Vector3(-4.5f, Upper, sz * 9f), new Vector3(-4.5f, Upper, sz * 34f));
             RailRun(b, new Vector3(4.5f, Upper, sz * 9f), new Vector3(4.5f, Upper, sz * 34f));
-            // Rising axis has to point back toward the hall, where the catwalk is.
-            b.Ramp(new Vector3(-4.5f, 0f, sz * 34f), new Vector3(4.5f, Upper, sz * 40f), sz < 0f ? 2 : 3, MatId.TechFloor);
+            // Finish the high route on a proper landing, then descend sideways into the flag
+            // room.  The old six-metre run climbed 7.5 m (51 degrees), which is steeper than
+            // the collision world's walkable limit and left the whole catwalk on its own nav
+            // island.  A ten-metre side ramp is a comfortable 37 degrees and keeps the flag
+            // dais clear.  Mirroring X as well as Z preserves the bases' rotational symmetry.
+            float landingZ0 = MathF.Min(sz * 34f, sz * 38f);
+            float landingZ1 = MathF.Max(sz * 34f, sz * 38f);
+            b.Solid(new Vector3(-4.5f, Upper - 0.5f, landingZ0),
+                new Vector3(4.5f, Upper, landingZ1), MatId.MetalGrate, true, 0.9f);
+
+            float rampHighX = -sz * 4.5f;
+            float rampLowX = -sz * 14.5f;
+            b.Ramp(new Vector3(MathF.Min(rampHighX, rampLowX), 0f, landingZ0),
+                new Vector3(MathF.Max(rampHighX, rampLowX), Upper, landingZ1),
+                sz < 0f ? 1 : 0, MatId.TechFloor);
             b.Weapon(new Vector3(0f, Upper + 0.9f, sz * 20f), WeaponKind.SniperRifle);
             b.Ammo(new Vector3(0f, Upper + 0.7f, sz * 24f), AmmoKind.SniperRounds);
 

@@ -11,7 +11,7 @@ namespace Unreal99.Platform;
 /// </summary>
 public sealed class UserSettings
 {
-    public int Version = 2;
+    public int Version = 3;
 
     // --- video ---
     public int Quality = (int)QualityLevel.High;
@@ -46,6 +46,13 @@ public sealed class UserSettings
     public int TimeLimitMinutes = 10;
     public bool DemoMode;
     public int DemoSkill = 3;
+
+    /// <summary>-1 = automatically balance, 0 = red, 1 = blue.</summary>
+    public List<int> PlayerTeams = new();
+    /// <summary>-1 = automatically balance, 0 = red, 1 = blue.</summary>
+    public List<int> BotTeams = new();
+    /// <summary>-1 = use the global bot difficulty; otherwise an index into the skill tiers.</summary>
+    public List<int> BotSkillOverrides = new();
 
     /// <summary>One entry per local slot. Index is the player index.</summary>
     public List<PlayerProfileData> Players = new();
@@ -107,6 +114,9 @@ public static class SettingsStore
             FragLimit = setup.FragLimit,
             CaptureLimit = setup.CaptureLimit,
             TimeLimitMinutes = setup.TimeLimitMinutes,
+            PlayerTeams = [.. setup.PlayerTeams],
+            BotTeams = [.. setup.BotTeams],
+            BotSkillOverrides = [.. setup.BotSkillOverrides],
         };
 
         for (int i = 0; i < devices.Length; i++)
@@ -162,6 +172,12 @@ public static class SettingsStore
         setup.FragLimit = Math.Clamp(s.FragLimit, 0, 100);
         setup.CaptureLimit = Math.Clamp(s.CaptureLimit, 0, 20);
         setup.TimeLimitMinutes = Math.Clamp(s.TimeLimitMinutes, 0, 60);
+        for (int i = 0; i < setup.PlayerTeams.Length && i < s.PlayerTeams.Count; i++)
+            setup.PlayerTeams[i] = Math.Clamp(s.PlayerTeams[i], -1, 1);
+        for (int i = 0; i < setup.BotTeams.Length && i < s.BotTeams.Count; i++)
+            setup.BotTeams[i] = Math.Clamp(s.BotTeams[i], -1, 1);
+        for (int i = 0; i < setup.BotSkillOverrides.Length && i < s.BotSkillOverrides.Count; i++)
+            setup.BotSkillOverrides[i] = Math.Clamp(s.BotSkillOverrides[i], -1, 5);
 
         for (int i = 0; i < playerNames.Length; i++)
             playerNames[i] = i < Unreal99.UI.Loc.PlayerDefaultNames.Length
@@ -210,4 +226,7 @@ public sealed class MatchSetup
     public int FragLimit = 20;
     public int CaptureLimit = 5;
     public int TimeLimitMinutes = 10;
+    public int[] PlayerTeams = [-1, -1, -1, -1];
+    public int[] BotTeams = [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1];
+    public int[] BotSkillOverrides = [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1];
 }

@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Text.Json;
 using Silk.NET.Input;
 using Silk.NET.Maths;
 using Silk.NET.OpenGL;
@@ -71,6 +72,8 @@ public sealed class App : IDisposable
     private readonly Dictionary<int, float> _autoShotTravelDistances = new();
     private readonly Dictionary<int, float> _autoShotStallTimes = new();
     private readonly Dictionary<int, float> _autoShotLongestStalls = new();
+    private readonly Dictionary<int, TraversalMetrics> _traversalMetrics = new();
+    private bool _traversalTest;
     private bool _autoStartMatch;
     private int _loadSlotAtBoot = -1;
     private bool _demoMode;
@@ -83,6 +86,40 @@ public sealed class App : IDisposable
     private float _flyRadius, _flyHeight, _flyAngleDeg, _flyLookY;
     private MenuScreen _bootMenuScreen = MenuScreen.Main;
     private readonly List<string> _pendingScreenshots = new();
+
+    /// <summary>Non-zero when an automated behavioral gate fails.</summary>
+    public int ExitCode { get; private set; }
+
+    private readonly record struct TraversalPoint(float Time, Vector3 Position);
+
+    private sealed class TraversalMetrics
+    {
+        public readonly Queue<TraversalPoint> Samples = new();
+        public readonly HashSet<(int X, int Z)> VisitedCells = new();
+        public float Elapsed;
+        public float SampleAccumulator;
+        public float CurrentOscillation;
+        public float LongestOscillation;
+        public float WorstWindowPath;
+        public float WorstWindowNet;
+        public float WorstWindowExtent;
+        public int MaxWindowReversals;
+        public int OscillationEpisodes;
+        public bool WasOscillating;
+        public Vector3 WorstPosition;
+        public string WorstState = "";
+        public int WorstGoalNode = -1;
+        public int WorstPathCursor;
+        public int WorstPathCount;
+        public int WorstWaypointNode = -1;
+        public int WorstNextWaypointNode = -1;
+        public int WorstActiveLiftBrush = -1;
+        public Vector3 WorstWaypointPosition;
+        public Vector3 WorstNextWaypointPosition;
+        public Vector3 WorstLiftSource;
+        public Vector3 WorstLiftDestination;
+        public bool WorstLiftCommitted;
+    }
 
     public int Width => _window?.Size.X ?? 1600;
     public int Height => _window?.Size.Y ?? 900;
@@ -98,7 +135,7 @@ public sealed class App : IDisposable
         options.Title = Loc.WindowTitle;
         options.API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.Default,
             new APIVersion(3, 3));
-        options.VSync = true;
+        options.VSync = !_traversalTest;
         options.PreferredDepthBufferBits = 24;
         options.PreferredStencilBufferBits = 0;
         options.WindowBorder = WindowBorder.Resizable;
@@ -155,6 +192,30 @@ public sealed class App : IDisposable
                 case "--autoshot" when i + 2 < args.Length:
                     _autoShotFrames = int.TryParse(args[i + 1], out int f) ? f : 240;
                     _autoShotPath = args[i + 2];
+                    i += 2;
+                    break;
+                case "--traversaltest" when i + 2 < args.Length:
+                    // A deterministic, accelerated behavioral gate: one Godlike demo player
+                    // against Newbie opponents, with unlimited scoring/time so the requested
+                    // number of active-play frames always runs. Map and mode remain explicit so
+                    // the suite can exercise every arena in its intended ruleset.
+                    _traversalTest = true;
+                    _windowed = true;
+                    _demoMode = true;
+                    _autoStartMatch = true;
+                    _autoShotFrames = Math.Max(600,
+                        int.TryParse(args[i + 1], out int traversalFrames) ? traversalFrames : 3600);
+                    _autoShotPath = args[i + 2];
+                    _menu.LocalPlayers = 1;
+                    _menu.BotCount = 3;
+                    _menu.BotSkill = 0;
+                    _menu.DemoSkill = 5;
+                    _menu.FragLimit = 0;
+                    _menu.CaptureLimit = 0;
+                    _menu.TimeLimitMinutes = 0;
+                    _renderSettings.Apply(QualityLevel.Low);
+                    _cliOverrides.UnionWith(["players", "bots", "skill", "demoskill", "frags",
+                        "captures", "time", "quality", "participantteams", "botskilloverrides"]);
                     i += 2;
                     break;
                 case "--startmatch":
@@ -277,6 +338,11 @@ public sealed class App : IDisposable
                     _cliOverrides.Add("frags");
                     i++;
                     break;
+                case "--captures" when i + 1 < args.Length:
+                    if (int.TryParse(args[i + 1], out int cl)) _menu.CaptureLimit = MathX.Clamp(cl, 0, 100);
+                    _cliOverrides.Add("captures");
+                    i++;
+                    break;
                 case "--time" when i + 1 < args.Length:
                     if (int.TryParse(args[i + 1], out int tl)) _menu.TimeLimitMinutes = MathX.Clamp(tl, 0, 60);
                     _cliOverrides.Add("time");
@@ -286,6 +352,12 @@ public sealed class App : IDisposable
                     if (int.TryParse(args[i + 1], out int sk))
                         _menu.BotSkill = MathX.Clamp(sk, 0, Loc.SkillNames.Length - 1);
                     _cliOverrides.Add("skill");
+                    i++;
+                    break;
+                case "--demoskill" when i + 1 < args.Length:
+                    if (int.TryParse(args[i + 1], out int demoSkill))
+                        _menu.DemoSkill = MathX.Clamp(demoSkill, 0, Loc.SkillNames.Length - 1);
+                    _cliOverrides.Add("demoskill");
                     i++;
                     break;
                 case "--quality" when i + 1 < args.Length:
@@ -389,6 +461,7 @@ public sealed class App : IDisposable
         _menu.OnDeleteSlot = DeleteSlot;
 
         LoadUserSettings();
+        if (_traversalTest) _window.VSync = false;
         RefreshSaveSlots();
     }
 
@@ -407,6 +480,9 @@ public sealed class App : IDisposable
         FragLimit = _menu.FragLimit,
         CaptureLimit = _menu.CaptureLimit,
         TimeLimitMinutes = _menu.TimeLimitMinutes,
+        PlayerTeams = [.. _menu.PlayerTeams],
+        BotTeams = [.. _menu.BotTeams],
+        BotSkillOverrides = [.. _menu.BotSkillOverrides],
     };
 
     /// <summary>
@@ -430,11 +506,22 @@ public sealed class App : IDisposable
         if (!_cliOverrides.Contains("bots")) _menu.BotCount = setup.BotCount;
         if (!_cliOverrides.Contains("skill")) _menu.BotSkill = setup.BotSkill;
         if (!_cliOverrides.Contains("frags")) _menu.FragLimit = setup.FragLimit;
-        if (!_cliOverrides.Contains("frags")) _menu.CaptureLimit = setup.CaptureLimit;
+        if (!_cliOverrides.Contains("captures")) _menu.CaptureLimit = setup.CaptureLimit;
         if (!_cliOverrides.Contains("time")) _menu.TimeLimitMinutes = setup.TimeLimitMinutes;
+        if (!_cliOverrides.Contains("participantteams"))
+        {
+            Array.Copy(setup.PlayerTeams, _menu.PlayerTeams,
+                Math.Min(setup.PlayerTeams.Length, _menu.PlayerTeams.Length));
+            Array.Copy(setup.BotTeams, _menu.BotTeams,
+                Math.Min(setup.BotTeams.Length, _menu.BotTeams.Length));
+        }
+        if (!_cliOverrides.Contains("botskilloverrides"))
+            Array.Copy(setup.BotSkillOverrides, _menu.BotSkillOverrides,
+                Math.Min(setup.BotSkillOverrides.Length, _menu.BotSkillOverrides.Length));
         if (!_cliOverrides.Contains("quality")) _renderSettings.Apply((QualityLevel)MathX.Clamp(saved.Quality, 0, 3));
         _menu.DemoMode = saved.DemoMode || _demoMode;
-        _menu.DemoSkill = MathX.Clamp(saved.DemoSkill, 0, 5);
+        if (!_cliOverrides.Contains("demoskill"))
+            _menu.DemoSkill = MathX.Clamp(saved.DemoSkill, 0, 5);
 
         if (_audio != null) _audio.MasterVolume = volume;
         if (_window != null) _window.VSync = vsync;
@@ -987,6 +1074,10 @@ public sealed class App : IDisposable
     private void OnRender(double deltaSeconds)
     {
         float dt = MathX.Clamp((float)deltaSeconds, 1f / 400f, 1f / 15f);
+        // Behavioral suites use the production update/render path but advance it at a stable
+        // 60 Hz without waiting for wall-clock VSync. This makes long all-map runs practical
+        // while preserving the same per-tick physics and bot decisions as normal gameplay.
+        if (_traversalTest) dt = 1f / 60f;
         _time += dt;
         if (_audio != null) _audio.Time = _time;
 
@@ -1282,6 +1373,10 @@ public sealed class App : IDisposable
 
     private void BeginMatch()
     {
+        // Starting immediately after a click must not outrun the debounced settings write. CLI
+        // auto-starts leave the store untouched because command-line overrides never mark it
+        // dirty; interactive setup changes are flushed here before loading the arena.
+        if (_settingsDirty) SaveUserSettings();
         _state = AppState.LoadingMatch;
         _loadStep = 0;
     }
@@ -1319,7 +1414,12 @@ public sealed class App : IDisposable
                 }
                 else SpawnMatch();
                 _state = AppState.Playing;
-                _input.SetMouseCapture(true);
+                // Automated traversal runs must never capture or warp the user's real desktop
+                // cursor. Their local player is bot-driven and has no need for mouse-look.
+                if (_traversalTest || _saveTest)
+                    _input.SetPointerMode(InputSystem.PointerMode.Normal);
+                else
+                    _input.SetMouseCapture(true);
                 break;
         }
         _loadStep++;
@@ -1341,7 +1441,34 @@ public sealed class App : IDisposable
         _viewPawnIds.Clear();
 
         int localPlayers = MathX.Clamp(_menu.LocalPlayers, 1, 4);
+        int botCount = MathX.Clamp(_menu.BotCount, 0, 15);
         ConfigureMatchDevices(localPlayers);
+
+        // Resolve all participant teams as one roster so automatic slots balance around any
+        // explicit red/blue assignments instead of blindly alternating and skewing the match.
+        Team[] assignedTeams = new Team[localPlayers + botCount];
+        if (mode.TeamBased)
+        {
+            int red = 0, blue = 0;
+            for (int i = 0; i < assignedTeams.Length; i++)
+            {
+                int assignment = i < localPlayers
+                    ? _menu.PlayerTeams[i]
+                    : _menu.BotTeams[i - localPlayers];
+                if (assignment is 0 or 1)
+                {
+                    assignedTeams[i] = (Team)assignment;
+                    if (assignment == 0) red++; else blue++;
+                }
+                else assignedTeams[i] = Team.None;
+            }
+            for (int i = 0; i < assignedTeams.Length; i++)
+            {
+                if (assignedTeams[i] != Team.None) continue;
+                assignedTeams[i] = red <= blue ? Team.Red : Team.Blue;
+                if (assignedTeams[i] == Team.Red) red++; else blue++;
+            }
+        }
 
         // --- local players ---
         for (int i = 0; i < localPlayers; i++)
@@ -1361,7 +1488,7 @@ public sealed class App : IDisposable
             if (_demoMode || _menu.DemoMode)
                 controller.AutoPilot = new BotController((uint)(101 + i * 977),
                     _menu.PlayerNames[i], DemoSkillValue());
-            Team team = mode.TeamBased ? (Team)(i % 2) : Team.None;
+            Team team = mode.TeamBased ? assignedTeams[i] : Team.None;
             var pawn = _world.AddPawn(controller, _menu.PlayerNames[i], team, false, i,
                 GameTypes.PlayerColor(i));
             if (i == 0 && _weaponGuideCapture >= 0)
@@ -1378,23 +1505,29 @@ public sealed class App : IDisposable
 
         // --- bots ---
         var rng = new Rng((uint)(_time * 1000f) + 7u);
-        int botCount = MathX.Clamp(_menu.BotCount, 0, 15);
         // Tiers 0-4 deliberately leave more room to learn. Tier 5 keeps the original 1.0
         // baseline and its existing per-bot variation.
         ReadOnlySpan<float> skillCurve = [0f, 0.08f, 0.22f, 0.42f, 0.68f, 1f];
         int skillSetting = MathX.Clamp(_menu.BotSkill, 0, skillCurve.Length - 1);
-        float skill = skillCurve[skillSetting];
         for (int i = 0; i < botCount; i++)
         {
             string name = Loc.BotNames[i % Loc.BotNames.Length];
             if (i >= Loc.BotNames.Length) name += $" {i / Loc.BotNames.Length + 1}";
-            Team team = mode.TeamBased ? (Team)((i + localPlayers) % 2) : Team.None;
+            Team team = mode.TeamBased ? assignedTeams[localPlayers + i] : Team.None;
+            int overrideSetting = MathX.Clamp(_menu.BotSkillOverrides[i], -1,
+                skillCurve.Length - 1);
+            int individualSetting = overrideSetting >= 0 ? overrideSetting : skillSetting;
+            float individualSkill = skillCurve[individualSetting];
             // Vary skill slightly so a roster feels like individuals rather than clones.
-            float variation = skillSetting == skillCurve.Length - 1 ? 0.12f
-                : skillSetting == 0 ? 0.035f : 0.06f;
-            float botSkill = skillSetting == 0
-                ? rng.Range(0f, variation)
-                : MathX.Clamp(skill + rng.Symmetric(variation), 0f, 1f);
+            // An explicit per-bot tier is exact: selecting Godlike should really produce 1.0,
+            // while bots following the global setting retain the roster's small variation.
+            float variation = individualSetting == skillCurve.Length - 1 ? 0.12f
+                : individualSetting == 0 ? 0.035f : 0.06f;
+            float botSkill = overrideSetting >= 0
+                ? individualSkill
+                : individualSetting == 0
+                    ? rng.Range(0f, variation)
+                    : MathX.Clamp(individualSkill + rng.Symmetric(variation), 0f, 1f);
             var controller = new BotController(rng.NextUInt(), name, botSkill);
             _world.AddPawn(controller, name, team, true, -1, GameTypes.BotColor(i * 37 + 11));
         }
@@ -1895,6 +2028,14 @@ public sealed class App : IDisposable
             _controls.MouseSensitivity = 0.0037f;
             _controls.InvertY = true;
             _playerDevices[1].Bindings.Rebind(GameAction.Jump, InputBinding.OnKey(Key.Keypad7));
+            _menu.PlayerTeams[0] = 1;
+            _menu.PlayerTeams[1] = 0;
+            _menu.BotTeams[0] = 1;
+            _menu.BotTeams[1] = 0;
+            _menu.BotSkillOverrides[0] = 5;
+            _menu.BotSkillOverrides[1] = 0;
+            _menu.DemoMode = true;
+            _menu.DemoSkill = 4;
             SaveUserSettings();
 
             SaveToSlot(0);
@@ -1913,9 +2054,16 @@ public sealed class App : IDisposable
             && settings.InvertY
             && settings.Players.Count > 1
             && settings.Players[1].BindingKeys.Count > (int)GameAction.Jump
-            && settings.Players[1].BindingKeys[(int)GameAction.Jump] == (int)Key.Keypad7;
+            && settings.Players[1].BindingKeys[(int)GameAction.Jump] == (int)Key.Keypad7
+            && settings.PlayerTeams.Count >= 2
+            && settings.PlayerTeams[0] == 1 && settings.PlayerTeams[1] == 0
+            && settings.BotTeams.Count >= 2
+            && settings.BotTeams[0] == 1 && settings.BotTeams[1] == 0
+            && settings.BotSkillOverrides.Count >= 2
+            && settings.BotSkillOverrides[0] == 5 && settings.BotSkillOverrides[1] == 0
+            && settings.DemoMode && settings.DemoSkill == 4;
         Console.WriteLine($"  設定檔: {(File.Exists(UserData.SettingsPath) ? "已寫入" : "缺少")}　" +
-                          $"靈敏度/反轉/按鍵還原: {(settingsOk ? "通過" : "失敗")}");
+                          $"控制/隊伍/個別難度/展示模式還原: {(settingsOk ? "通過" : "失敗")}");
 
         var reread = SaveStore.Read(0);
         var expected = _saveTestExpected;
@@ -2017,7 +2165,7 @@ public sealed class App : IDisposable
     private void UpdateAutoShotMovement(float dt)
     {
         if (_autoShotFrames < 0 || _state != AppState.Playing || _world == null ||
-            _world.ResumeCountdown > 0f) return;
+            _world.ResumeCountdown > 0f || _world.Mode.State == MatchState.Warmup) return;
 
         foreach (int pawnId in _viewPawnIds)
         {
@@ -2026,6 +2174,12 @@ public sealed class App : IDisposable
             {
                 _autoShotLastPositions.Remove(pawnId);
                 _autoShotStallTimes[pawnId] = 0f;
+                if (_traversalMetrics.TryGetValue(pawnId, out TraversalMetrics deadMetrics))
+                {
+                    deadMetrics.Samples.Clear();
+                    deadMetrics.CurrentOscillation = 0f;
+                    deadMetrics.WasOscillating = false;
+                }
                 continue;
             }
 
@@ -2035,15 +2189,118 @@ public sealed class App : IDisposable
                 continue;
             }
 
-            float distance = (pawn.Position - previous).FlatXZ().Length();
+            Vector3 delta = pawn.Position - previous;
+            float distance = delta.FlatXZ().Length();
             _autoShotLastPositions[pawnId] = pawn.Position;
             _autoShotTravelDistances[pawnId] = _autoShotTravelDistances.GetValueOrDefault(pawnId) + distance;
 
-            float stall = distance / MathF.Max(dt, 1e-4f) < 0.20f
+            // Horizontal distance remains the useful map-traversal metric, but a pawn riding a
+            // lift or moving through a low-gravity arc is not stationary. Use full spatial speed
+            // for stall detection so only genuine zero-motion spans fail the automation gate.
+            float stall = delta.Length() / MathF.Max(dt, 1e-4f) < 0.20f
                 ? _autoShotStallTimes.GetValueOrDefault(pawnId) + dt
                 : 0f;
             _autoShotStallTimes[pawnId] = stall;
             _autoShotLongestStalls[pawnId] = MathF.Max(_autoShotLongestStalls.GetValueOrDefault(pawnId), stall);
+
+            if (_traversalTest) UpdateTraversalMetrics(pawn, dt);
+        }
+    }
+
+    /// <summary>
+    /// Detects the failure that raw distance cannot: repeatedly traversing the same short line
+    /// in opposite directions. A qualifying six-second window must have substantial movement,
+    /// little end-to-end progress, a confined footprint, and several sharp reversals. Requiring
+    /// consecutive qualifying windows filters out ordinary combat strafing and obstacle turns.
+    /// </summary>
+    private void UpdateTraversalMetrics(Pawn pawn, float dt)
+    {
+        if (!_traversalMetrics.TryGetValue(pawn.Id, out TraversalMetrics metrics))
+        {
+            metrics = new TraversalMetrics();
+            _traversalMetrics[pawn.Id] = metrics;
+        }
+
+        metrics.Elapsed += dt;
+        metrics.VisitedCells.Add(((int)MathF.Floor(pawn.Position.X / 4f),
+            (int)MathF.Floor(pawn.Position.Z / 4f)));
+        metrics.SampleAccumulator += dt;
+        if (metrics.SampleAccumulator < 0.20f) return;
+        float sampleStep = metrics.SampleAccumulator;
+        metrics.SampleAccumulator = 0f;
+
+        metrics.Samples.Enqueue(new TraversalPoint(metrics.Elapsed, pawn.Position));
+        while (metrics.Samples.Count > 0 &&
+               metrics.Samples.Peek().Time < metrics.Elapsed - 6f)
+            metrics.Samples.Dequeue();
+        if (metrics.Samples.Count < 8) return;
+
+        TraversalPoint[] points = metrics.Samples.ToArray();
+        float path = 0f;
+        int reversals = 0;
+        Vector3 previousDirection = Vector3.Zero;
+        float minX = float.MaxValue, maxX = float.MinValue;
+        float minZ = float.MaxValue, maxZ = float.MinValue;
+        for (int i = 0; i < points.Length; i++)
+        {
+            Vector3 p = points[i].Position;
+            minX = MathF.Min(minX, p.X); maxX = MathF.Max(maxX, p.X);
+            minZ = MathF.Min(minZ, p.Z); maxZ = MathF.Max(maxZ, p.Z);
+            if (i == 0) continue;
+            Vector3 segment = (p - points[i - 1].Position).FlatXZ();
+            float length = segment.Length();
+            path += length;
+            if (length < 0.22f) continue;
+            Vector3 direction = segment / length;
+            if (previousDirection != Vector3.Zero && Vector3.Dot(previousDirection, direction) < -0.45f)
+                reversals++;
+            previousDirection = direction;
+        }
+
+        float net = (points[^1].Position - points[0].Position).FlatXZ().Length();
+        float extent = new Vector2(maxX - minX, maxZ - minZ).Length();
+        float duration = points[^1].Time - points[0].Time;
+        bool oscillating = duration >= 5f && path >= 9f && net <= 2.5f &&
+                           extent <= 6.5f && reversals >= 3;
+
+        if (oscillating)
+        {
+            if (!metrics.WasOscillating) metrics.OscillationEpisodes++;
+            metrics.CurrentOscillation += sampleStep;
+            metrics.WasOscillating = true;
+            if (metrics.CurrentOscillation > metrics.LongestOscillation)
+            {
+                metrics.LongestOscillation = metrics.CurrentOscillation;
+                metrics.WorstWindowPath = path;
+                metrics.WorstWindowNet = net;
+                metrics.WorstWindowExtent = extent;
+                metrics.MaxWindowReversals = reversals;
+                metrics.WorstPosition = pawn.Position;
+                if (_world.ControllerFor(pawn) is PlayerController { AutoPilot: { } bot })
+                {
+                    metrics.WorstState = bot.DiagnosticState.ToString();
+                    metrics.WorstGoalNode = bot.DiagnosticGoalNode;
+                    metrics.WorstPathCursor = bot.DiagnosticPathCursor;
+                    metrics.WorstPathCount = bot.DiagnosticPathCount;
+                    metrics.WorstWaypointNode = bot.DiagnosticWaypointNode;
+                    metrics.WorstNextWaypointNode = bot.DiagnosticNextWaypointNode;
+                    metrics.WorstActiveLiftBrush = bot.DiagnosticActiveLiftBrush;
+                    metrics.WorstLiftSource = bot.DiagnosticLiftSource;
+                    metrics.WorstLiftDestination = bot.DiagnosticLiftDestination;
+                    metrics.WorstLiftCommitted = bot.DiagnosticLiftCommitted;
+                    if (metrics.WorstWaypointNode >= 0)
+                        metrics.WorstWaypointPosition = _world.Level.Nav.Nodes[
+                            metrics.WorstWaypointNode].Position;
+                    if (metrics.WorstNextWaypointNode >= 0)
+                        metrics.WorstNextWaypointPosition = _world.Level.Nav.Nodes[
+                            metrics.WorstNextWaypointNode].Position;
+                }
+            }
+        }
+        else
+        {
+            metrics.CurrentOscillation = 0f;
+            metrics.WasOscillating = false;
         }
     }
 
@@ -2081,6 +2338,8 @@ public sealed class App : IDisposable
         _pendingScreenshots.Clear();
 
         if (_autoShotFrames < 0) return;
+        if (_traversalTest && (_state != AppState.Playing || _world == null ||
+            _world.ResumeCountdown > 0f || _world.Mode.State == MatchState.Warmup)) return;
         _autoShotFrames--;
         if (_autoShotFrames != 0) return;
 
@@ -2104,7 +2363,88 @@ public sealed class App : IDisposable
                                   $"速度 {pawn.Velocity.Length():0.00} m/s · " +
                                   $"行進 {_autoShotTravelDistances.GetValueOrDefault(pawnId):0.0} m · " +
                                   $"最長停滯 {_autoShotLongestStalls.GetValueOrDefault(pawnId):0.00} s");
+        if (_traversalTest) FinishTraversalTest();
         _window.Close();
+    }
+
+    private void FinishTraversalTest()
+    {
+        bool allPassed = true;
+        foreach (int pawnId in _viewPawnIds)
+        {
+            Pawn pawn = _world?.FindPawn(pawnId);
+            if (pawn == null) continue;
+            _traversalMetrics.TryGetValue(pawnId, out TraversalMetrics metrics);
+            metrics ??= new TraversalMetrics();
+
+            float travel = _autoShotTravelDistances.GetValueOrDefault(pawnId);
+            float longestStall = _autoShotLongestStalls.GetValueOrDefault(pawnId);
+            float minimumTravel = MathF.Max(80f, metrics.Elapsed * 1.8f);
+            int minimumCells = Math.Min(10, Math.Max(6, (int)(metrics.Elapsed / 7.5f)));
+            float mainSkill = (_world.ControllerFor(pawn) as PlayerController)?.AutoPilot?.Skill ?? -1f;
+            float maxOpponentSkill = _world.Pawns.Where(p => p.PlayerIndex < 0)
+                .Select(p => (_world.ControllerFor(p) as BotController)?.Skill ?? 1f)
+                .DefaultIfEmpty(1f).Max();
+
+            var failures = new List<string>();
+            if (mainSkill < 0.999f) failures.Add($"main-skill={mainSkill:0.000}");
+            if (maxOpponentSkill > 0.036f) failures.Add($"opponent-skill={maxOpponentSkill:0.000}");
+            if (travel < minimumTravel) failures.Add($"travel<{minimumTravel:0.0}");
+            if (metrics.VisitedCells.Count < minimumCells) failures.Add($"cells<{minimumCells}");
+            if (longestStall > 8f) failures.Add("stall>8s");
+            // Reaching the detector at all already means at least five seconds of rapid
+            // reversals with little net displacement. Do not hide a visibly bad episode behind
+            // an additional grace period; the production bot should recover before this window.
+            if (metrics.OscillationEpisodes > 0) failures.Add("oscillation-episode");
+            bool passed = failures.Count == 0;
+            allPassed &= passed;
+
+            var result = new
+            {
+                MapId = (int)_menu.Map,
+                Map = Maps.Name(_menu.Map),
+                Mode = _world.Mode.Kind.ToString(),
+                Passed = passed,
+                Failures = failures,
+                ActiveSeconds = MathF.Round(metrics.Elapsed, 2),
+                TravelMeters = MathF.Round(travel, 2),
+                RequiredTravelMeters = MathF.Round(minimumTravel, 2),
+                VisitedCells = metrics.VisitedCells.Count,
+                RequiredCells = minimumCells,
+                LongestStallSeconds = MathF.Round(longestStall, 2),
+                LongestOscillationSeconds = MathF.Round(metrics.LongestOscillation, 2),
+                OscillationEpisodes = metrics.OscillationEpisodes,
+                WorstWindowPathMeters = MathF.Round(metrics.WorstWindowPath, 2),
+                WorstWindowNetMeters = MathF.Round(metrics.WorstWindowNet, 2),
+                WorstWindowExtentMeters = MathF.Round(metrics.WorstWindowExtent, 2),
+                WorstWindowReversals = metrics.MaxWindowReversals,
+                WorstPosition = new
+                {
+                    X = MathF.Round(metrics.WorstPosition.X, 2),
+                    Y = MathF.Round(metrics.WorstPosition.Y, 2),
+                    Z = MathF.Round(metrics.WorstPosition.Z, 2),
+                },
+                WorstState = metrics.WorstState,
+                WorstGoalNode = metrics.WorstGoalNode,
+                WorstPathCursor = metrics.WorstPathCursor,
+                WorstPathCount = metrics.WorstPathCount,
+                WorstWaypointNode = metrics.WorstWaypointNode,
+                WorstNextWaypointNode = metrics.WorstNextWaypointNode,
+                WorstActiveLiftBrush = metrics.WorstActiveLiftBrush,
+                WorstWaypointPosition = metrics.WorstWaypointPosition.ToString(),
+                WorstNextWaypointPosition = metrics.WorstNextWaypointPosition.ToString(),
+                WorstLiftSource = metrics.WorstLiftSource.ToString(),
+                WorstLiftDestination = metrics.WorstLiftDestination.ToString(),
+                WorstLiftCommitted = metrics.WorstLiftCommitted,
+                MainSkill = MathF.Round(mainSkill, 3),
+                MaxOpponentSkill = MathF.Round(maxOpponentSkill, 3),
+                VoidDeaths = _world.VoidDeaths,
+                FallDeaths = _world.FallDeaths,
+                LavaDeaths = _world.LavaDeaths,
+            };
+            Console.WriteLine("TRAVERSAL_RESULT " + JsonSerializer.Serialize(result));
+        }
+        ExitCode = allPassed ? 0 : 2;
     }
 
     private void WriteBotDiagnostics()
