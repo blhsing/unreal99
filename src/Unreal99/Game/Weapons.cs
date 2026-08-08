@@ -82,7 +82,9 @@ public static class Weapons
             IdealRangeMax = 3.2f,
             SwitchTime = 0.22f,
             FpOffset = new Vector3(0.185f, -0.260f, -0.38f), FpScale = 0.86f,
-            MuzzleLocal = new Vector3(0, 0.02f, -0.52f),
+            // The head, not a muzzle: this is where the swing originates from. Kept in step with
+            // the model, which now ends at -0.379 rather than the old -0.53.
+            MuzzleLocal = new Vector3(0, 0.045f, -0.38f),
             Primary = new FireDef
             {
                 Mode = FireMode.Melee, Damage = 42f, Interval = 0.85f, Range = 3.0f, Shots = 1,

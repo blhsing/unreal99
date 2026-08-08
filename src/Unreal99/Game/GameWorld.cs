@@ -516,7 +516,11 @@ public sealed class GameWorld
         float damageScale = chargeScale * (pawn.HasDamageAmp ? 2f : 1f);
         if (Mode.Kind == GameModeKind.Instagib) damageScale *= 40f;
 
-        Particles.MuzzleFlash(origin, aim, alt ? 1.2f : 1f, def.Tint);
+        // A melee weapon has no muzzle. Firing a flash and a flare into the air in front of the
+        // impact hammer made a contact weapon look like it was launching something — which is
+        // exactly how it read on screen. Melee shows its effect where it lands, in MeleeSwing.
+        bool hasMuzzle = fire.Mode != FireMode.Melee;
+        if (hasMuzzle) Particles.MuzzleFlash(origin, aim, alt ? 1.2f : 1f, def.Tint);
         OnSound?.Invoke(WeaponSound(def.Kind, alt), pawn.Position, 1f);
 
         switch (fire.Mode)
@@ -551,8 +555,9 @@ public sealed class GameWorld
             pawn.SwitchToBestAvailable();
 
         // Muzzle light: brief, bright, and priority-boosted so it survives the light cull.
-        _renderer.Particles.Spawn(BlendMode.Additive, origin, Vector3.Zero,
-            new Vector4(def.Tint * 3f, 0.9f), new Vector4(def.Tint, 0f), 0.3f, 0.05f, 0.05f, Spr.Flare);
+        if (hasMuzzle)
+            _renderer.Particles.Spawn(BlendMode.Additive, origin, Vector3.Zero,
+                new Vector4(def.Tint * 3f, 0.9f), new Vector4(def.Tint, 0f), 0.3f, 0.05f, 0.05f, Spr.Flare);
     }
 
     private void HitscanShot(Pawn shooter, Vector3 origin, Vector3 dir, in FireDef fire, float damageScale,
