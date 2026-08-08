@@ -436,14 +436,29 @@ public sealed class WeaponModels : IDisposable
         switch (kind)
         {
             case WeaponKind.ImpactHammer:
-                Grip(mb, 0.20f, 0.05f);
+                // A pneumatic hammer, not a gun. The first version was a long slim body with a
+                // forward cylinder and a small muzzle plate, which is a gun silhouette however
+                // it is textured. What makes this read as a hammer is proportion: a stubby body,
+                // exposed piston rods, and a percussion head far wider than anything behind it.
+                Grip(mb, 0.22f, 0.03f);
                 mb.Material = (int)MatId.WeaponMetal;
-                mb.AddBox(new Vector3(0, 0.03f, -0.14f), new Vector3(0.048f, 0.05f, 0.20f));
-                Barrel(mb, new Vector3(0, 0.03f, -0.40f), 0.075f, 0.085f, 0.20f, 12);
+                // Compact housing sitting straight on the grip.
+                mb.AddBox(new Vector3(0, 0.045f, -0.07f), new Vector3(0.058f, 0.062f, 0.12f));
+                // Pressure bottle along the top.
+                Barrel(mb, new Vector3(0, 0.125f, -0.06f), 0.042f, 0.042f, 0.19f, 12);
+                // Twin piston rods carrying the head, deliberately left exposed.
                 mb.Material = (int)MatId.Trim;
-                mb.AddBox(new Vector3(0, 0.03f, -0.505f), new Vector3(0.088f, 0.088f, 0.022f));
+                foreach (float rodX in new[] { -0.055f, 0.055f })
+                    Barrel(mb, new Vector3(rodX, 0.045f, -0.245f), 0.016f, 0.016f, 0.12f, 8);
+                // The head flares to a touch wider than the flak cannon's muzzle — the widest
+                // thing in the arsenal, but only just. A first attempt at 0.15 was two thirds
+                // wider again and swallowed a quarter of the screen.
+                mb.Material = (int)MatId.WeaponMetal;
+                Barrel(mb, new Vector3(0, 0.045f, -0.325f), 0.072f, 0.100f, 0.06f, 12);
+                mb.Material = (int)MatId.Trim;
+                Collar(mb, new Vector3(0, 0.045f, -0.367f), 0.104f, 0.024f);
                 mb.Material = (int)MatId.EnergyPanel;
-                mb.AddBox(new Vector3(0, 0.09f, -0.16f), new Vector3(0.026f, 0.012f, 0.13f));
+                mb.AddBox(new Vector3(0, 0.168f, -0.06f), new Vector3(0.020f, 0.008f, 0.075f));
                 break;
 
             case WeaponKind.Enforcer:

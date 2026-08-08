@@ -76,6 +76,7 @@ public sealed class App : IDisposable
     private bool _traversalTest;
     private bool _autoStartMatch;
     private int _loadSlotAtBoot = -1;
+    private int _forceWeapon = -1;
     private bool _demoMode;
     private bool _windowed;
     private bool _flyby;
@@ -314,6 +315,12 @@ public sealed class App : IDisposable
                 case "--loadslot" when i + 1 < args.Length:
                     // Resume a saved match straight from the command line.
                     if (int.TryParse(args[i + 1], out int ls)) _loadSlotAtBoot = ls;
+                    i++;
+                    break;
+                case "--weapon" when i + 1 < args.Length:
+                    // Forces player one's held weapon each frame. For inspecting view models,
+                    // which is otherwise awkward because the pawn auto-selects its best gun.
+                    if (int.TryParse(args[i + 1], out int wk)) _forceWeapon = wk;
                     i++;
                     break;
                 case "--savetest":
@@ -1180,6 +1187,13 @@ public sealed class App : IDisposable
 
         if (_inputTest) UpdateInputSelfTest();
         if (_saveTest) UpdateSaveSelfTest();
+        if (_forceWeapon >= 0 && _players.Count > 0 && _players[0].Pawn is { } p0)
+        {
+            var want = (WeaponKind)MathX.Clamp(_forceWeapon, 0, (int)WeaponKind.Count - 1);
+            p0.HasWeapon[(int)want] = true;
+            p0.Weapon = want;
+            p0.PendingWeapon = WeaponKind.Count;
+        }
         if (_menuTestPoint.HasValue) UpdateMenuPointerTest();
         UpdateAutoShotMovement(dt);
         UpdateSettingsPersistence(dt);
