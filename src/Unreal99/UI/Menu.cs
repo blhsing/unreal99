@@ -570,6 +570,12 @@ public sealed class Menu
             // Same for Domination: it needs control points, which only the DOM arenas have.
             if (ModeKind == GameModeKind.Domination && !World.Maps.SupportsDomination(Map))
                 Map = World.MapId.Leadworks;
+            // Onslaught needs a node graph and Assault an objective sequence; neither exists
+            // on an arena that was not authored for it.
+            if (ModeKind == GameModeKind.Onslaught && !World.Maps.SupportsOnslaught(Map))
+                Map = World.MapId.Torlan;
+            if (ModeKind == GameModeKind.Assault && !World.Maps.SupportsAssault(Map))
+                Map = World.MapId.Convoy;
         }, Loc.ModeDescription(ModeKind));
 
         Add($"{Loc.OptChooseMap}　{World.Maps.Name(Map)}", OpenMapGallery, World.Maps.Description(Map));
@@ -689,6 +695,8 @@ public sealed class Menu
             {
                 GameModeKind.CaptureTheFlag => World.Maps.SupportsCtf(id),
                 GameModeKind.Domination => World.Maps.SupportsDomination(id),
+                GameModeKind.Onslaught => World.Maps.SupportsOnslaught(id),
+                GameModeKind.Assault => World.Maps.SupportsAssault(id),
                 _ => true,
             };
             Add(World.Maps.Name(id), () =>

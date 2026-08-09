@@ -67,6 +67,7 @@ public sealed class Hud
         DrawKillFeed(ui, world, width, height, s);
         DrawAnnouncements(ui, feedback, width, height, s);
         DrawObjective(ui, world, pawn, width, height, s);
+        if (pawn.InVehicle) DrawVehicleStatus(ui, world, pawn, width, height, s);
 
         if (world.Frozen) DrawResumeCountdown(ui, world, width, height, s);
         if (!pawn.Alive) DrawDeathOverlay(ui, world, pawn, width, height, s);
@@ -908,11 +909,196 @@ public sealed class Hud
             UiRenderer.Rgba(0.72f, 0.80f, 0.92f), TextAlign.Center);
     }
 
+    /// <summary>
+    /// The Onslaught node chain. One card per node in map order, coloured by owner, with the
+    /// reachable ones outlined — that outline is the whole strategic read of the mode, because a
+    /// node you cannot reach is not a target no matter how close it is. Build progress and damage
+    /// show as a bar across the bottom of the card.
+    /// </summary>
+    private void DrawOnslaughtNodes(UiRenderer ui, GameWorld world, Pawn pawn, int width, int height, float s)
+    {
+        var nodes = world.Onslaught.Nodes;
+        if (nodes.Count == 0) return;
+
+        bool compact = CompactLayout(width, height);
+        float font = LayoutFont(14f * s);
+        float statusFont = LayoutFont(12f * s);
+        float gap = compact ? 6f : 8f * s;
+        float available = width - (compact ? 24f : 48f * s);
+        float cardWidth = MathF.Min(compact ? 150f : 118f * s,
+            (available - (nodes.Count - 1) * gap) / nodes.Count);
+        float total = nodes.Count * cardWidth + (nodes.Count - 1) * gap;
+        float x = width * 0.5f - total * 0.5f;
+        float cardHeight = MathF.Max(50f, 46f * s);
+        float y = CompactBottomRow(width, height) ? height - 151f
+            : compact ? height - 216f : height - 152f * s;
+
+        for (int i = 0; i < nodes.Count; i++)
+        {
+            var node = nodes[i];
+            Vector3 col = node.Team == Team.None
+                ? new Vector3(0.62f, 0.64f, 0.70f) : GameTypes.TeamColor(node.Team);
+            bool reachable = node.Team != pawn.Team && world.Onslaught.IsReachable(i, pawn.Team);
+            if (node.IsCore && node.Team != pawn.Team) reachable = world.Onslaught.CoreVulnerable(node.Team);
+
+            ui.ChamferRect(x, y, cardWidth, cardHeight, 6f * s, UiRenderer.Rgba(col * 0.34f, 0.62f));
+            if (reachable)
+                ui.RectOutline(x, y, cardWidth, cardHeight, 1.8f * s,
+                    UiRenderer.Rgba(new Vector3(1f, 0.82f, 0.35f), 0.95f));
+            else if (node.Team == pawn.Team)
+                ui.RectOutline(x, y, cardWidth, cardHeight, 1.4f * s, UiRenderer.Rgba(col, 0.7f));
+
+            string name = FitText(ui, FaceBold, font, node.Name, cardWidth - MathF.Max(14f, 18f * s));
+            ui.Text(FaceBold, font, x + MathF.Max(7f, 9f * s), y + 2f, name,
+                UiRenderer.Rgba(0.94f, 0.96f, 1f));
+
+            string status = node.IsCore || node.IsActive
+                ? (node.Team == Team.None ? Loc.DomNeutral : GameTypes.TeamName(node.Team))
+                : $"{(int)(node.Built * 100f)}%";
+            ui.Text(FaceRegular, statusFont, x + MathF.Max(7f, 9f * s), y + 24f, status,
+                UiRenderer.Rgba(col * 1.25f, 0.98f));
+
+            // Health while it is standing, build progress while it is going up.
+            float fill = node.IsActive
+                ? (node.MaxHealth > 0f ? node.Health / node.MaxHealth : 1f)
+                : node.Built;
+            ui.ChamferRect(x + 6f, y + cardHeight - 8f, (cardWidth - 12f) * MathX.Saturate(fill), 3f * s, 1f,
+                UiRenderer.Rgba(col * 1.4f, 0.9f));
+            x += cardWidth + gap;
+        }
+
+        // The one line that decides what a player should be doing right now.
+        bool ourCoreExposed = world.Onslaught.CoreVulnerable(pawn.Team);
+        Team enemy = pawn.Team == Team.Red ? Team.Blue : Team.Red;
+        bool theirCoreExposed = world.Onslaught.CoreVulnerable(enemy);
+        string headline = ourCoreExposed ? Loc.OnsOurCoreExposed
+            : theirCoreExposed ? Loc.OnsEnemyCoreExposed
+            : Loc.OnsCoreShielded;
+        Vector3 headlineCol = ourCoreExposed ? new Vector3(1f, 0.45f, 0.3f)
+            : theirCoreExposed ? new Vector3(0.5f, 1f, 0.55f)
+            : new Vector3(0.72f, 0.80f, 0.92f);
+        ui.Text(FaceRegular, LayoutFont(14f * s), width * 0.5f, y - 28f,
+            FitText(ui, FaceRegular, LayoutFont(14f * s), headline, width - 24f),
+            UiRenderer.Rgba(headlineCol, 0.95f), TextAlign.Center);
+    }
+
+    /// <summary>
+    /// The Assault objective card: what is live now, how far along it is, whether the viewer is
+    /// attacking or defending, and the time to beat in round two. Nothing else on screen tells a
+    /// player which of the two very different jobs they currently have.
+    /// </summary>
+    private void DrawAssaultObjective(UiRenderer ui, GameWorld world, Pawn pawn, int width, int height, float s)
+    {
+        var state = world.Assault;
+        if (state.Objectives.Count == 0) return;
+
+        bool compact = CompactLayout(width, height);
+        float titleFont = LayoutFont(16f * s);
+        float statusFont = LayoutFont(13f * s);
+        float cardWidth = compact ? MathF.Min(300f, width - 24f) : 340f * s;
+        float cardHeight = MathF.Max(72f, 66f * s);
+        float x = width * 0.5f - cardWidth * 0.5f;
+        float y = CompactBottomRow(width, height) ? height - 173f
+            : compact ? height - 238f : height - 174f * s;
+
+        bool attacking = pawn.Team == state.Attackers;
+        Vector3 col = attacking ? new Vector3(1f, 0.72f, 0.28f) : new Vector3(0.42f, 0.72f, 1f);
+
+        ui.ChamferRect(x, y, cardWidth, cardHeight, 7f * s, UiRenderer.Rgba(col * 0.30f, 0.66f));
+        ui.RectOutline(x, y, cardWidth, cardHeight, 1.6f * s, UiRenderer.Rgba(col, 0.85f));
+
+        var objective = state.CurrentObjective;
+        string title = objective?.Name ?? Loc.AsObjectivesCleared;
+        ui.Text(FaceBold, titleFont, x + MathF.Max(10f, 12f * s), y + 4f,
+            FitText(ui, FaceBold, titleFont, title, cardWidth - 24f), UiRenderer.Rgba(0.95f, 0.97f, 1f));
+
+        // Round, role, and progress through the sequence.
+        string role = attacking ? Loc.AsAttacking : Loc.AsDefending;
+        string round = state.Round == 1 ? Loc.AsRoundOne : Loc.AsRoundTwo;
+        string counter = $"{state.CompletedCount}/{state.Objectives.Count}";
+        ui.Text(FaceRegular, statusFont, x + MathF.Max(10f, 12f * s), y + 28f,
+            $"{round}　{role}　{counter}", UiRenderer.Rgba(col * 1.2f, 0.98f));
+
+        // Round two runs against a clock, so the target is the most important number on screen.
+        if (state.Round == 2)
+        {
+            string target = state.TargetTime < float.MaxValue
+                ? $"{Loc.AsTargetTime} {(int)(state.TargetTime / 60f):0}:{(int)(state.TargetTime % 60f):00}"
+                : $"{Loc.AsTargetTime} {Loc.AsNoTarget}";
+            ui.Text(FaceRegular, statusFont, x + cardWidth - MathF.Max(10f, 12f * s), y + 28f, target,
+                UiRenderer.Rgba(0.92f, 0.86f, 0.62f, 0.95f), TextAlign.Right);
+        }
+
+        if (objective != null)
+            ui.ChamferRect(x + 8f, y + cardHeight - 10f, (cardWidth - 16f) * MathX.Saturate(objective.Progress),
+                4f * s, 1f, UiRenderer.Rgba(col * 1.5f, 0.95f));
+    }
+
+    /// <summary>
+    /// What the crew needs while mounted: which vehicle, which seat, and the hull integrity —
+    /// none of which the ordinary health/armour readout describes, because that is still the
+    /// occupant's own body and is not what is about to explode.
+    /// </summary>
+    private void DrawVehicleStatus(UiRenderer ui, GameWorld world, Pawn pawn, int width, int height, float s)
+    {
+        var v = world.FindVehicle(pawn.VehicleId);
+        if (v == null || !v.Alive) return;
+        var def = v.Def;
+        int seat = MathX.Clamp(pawn.VehicleSeat, 0, def.Seats.Length - 1);
+
+        bool compact = CompactLayout(width, height);
+        float cardWidth = compact ? 168f : 210f * s;
+        float cardHeight = MathF.Max(58f, 54f * s);
+        float x = width * 0.5f - cardWidth * 0.5f;
+        // Clear of the objective cards below it: the Onslaught chain headline sits at -180s.
+        float y = compact ? height - 300f : height - 252f * s;
+
+        float integrity = def.Health > 0f ? MathX.Saturate(v.Health / def.Health) : 1f;
+        // Red below a third: at that point the right decision is usually to get out.
+        Vector3 col = integrity > 0.6f ? new Vector3(0.55f, 0.85f, 1f)
+            : integrity > 0.33f ? new Vector3(1f, 0.82f, 0.35f)
+            : new Vector3(1f, 0.38f, 0.28f);
+
+        ui.ChamferRect(x, y, cardWidth, cardHeight, 6f * s, UiRenderer.Rgba(col * 0.28f, 0.62f));
+        ui.RectOutline(x, y, cardWidth, cardHeight, 1.4f * s, UiRenderer.Rgba(col, 0.75f));
+
+        float font = LayoutFont(15f * s);
+        float statusFont = LayoutFont(12f * s);
+        ui.Text(FaceBold, font, x + MathF.Max(9f, 11f * s), y + 3f,
+            FitText(ui, FaceBold, font, def.Name, cardWidth - 22f),
+            UiRenderer.Rgba(0.95f, 0.97f, 1f));
+        ui.Text(FaceRegular, statusFont, x + MathF.Max(9f, 11f * s), y + 25f,
+            $"{def.Seats[seat].Role}　{(int)MathF.Ceiling(v.Health)}",
+            UiRenderer.Rgba(col * 1.2f, 0.98f));
+
+        // The Paladin's shield and the Leviathan's deploy are states you cannot see from inside.
+        if (def.HasShield && v.ShieldUp && v.ShieldHealth > 0f)
+            ui.Text(FaceRegular, statusFont, x + cardWidth - MathF.Max(9f, 11f * s), y + 25f,
+                Loc.VehShieldUp, UiRenderer.Rgba(0.5f, 0.85f, 1f, 0.95f), TextAlign.Right);
+        else if (def.CanDeploy && v.Deploy > 0f)
+            ui.Text(FaceRegular, statusFont, x + cardWidth - MathF.Max(9f, 11f * s), y + 25f,
+                v.Deploy >= 1f ? Loc.VehDeployed : Loc.VehDeploying,
+                UiRenderer.Rgba(1f, 0.8f, 0.4f, 0.95f), TextAlign.Right);
+
+        ui.ChamferRect(x + 7f, y + cardHeight - 9f, (cardWidth - 14f) * integrity, 3.5f * s, 1f,
+            UiRenderer.Rgba(col * 1.4f, 0.95f));
+    }
+
     private void DrawObjective(UiRenderer ui, GameWorld world, Pawn pawn, int width, int height, float s)
     {
         if (world.Mode.Kind == GameModeKind.Domination)
         {
             DrawDominationPoints(ui, world, pawn, width, height, s);
+            return;
+        }
+        if (world.Mode.Kind == GameModeKind.Onslaught)
+        {
+            DrawOnslaughtNodes(ui, world, pawn, width, height, s);
+            return;
+        }
+        if (world.Mode.Kind == GameModeKind.Assault)
+        {
+            DrawAssaultObjective(ui, world, pawn, width, height, s);
             return;
         }
         if (world.Mode.Kind != GameModeKind.CaptureTheFlag) return;
@@ -1074,6 +1260,8 @@ public sealed class Hud
             {
                 GameModeKind.CaptureTheFlag => Loc.ScoreCaptures,
                 GameModeKind.Domination => Loc.ScoreDomCaptures,
+                GameModeKind.Onslaught => Loc.ScoreNodes,
+                GameModeKind.Assault => Loc.ScoreObjectives,
                 _ => Loc.ScoreRatio,
             },
             headerCol, TextAlign.Right);
@@ -1105,6 +1293,7 @@ public sealed class Hud
                 UiRenderer.Rgba(0.75f, 0.85f, 0.95f), TextAlign.Right);
 
             string extra = mode.Kind is GameModeKind.CaptureTheFlag or GameModeKind.Domination
+                    or GameModeKind.Onslaught or GameModeKind.Assault
                 ? p.Captures.ToString()
                 : $"{(p.Deaths > 0 ? p.Frags / (float)p.Deaths : p.Frags):0.0}";
             ui.Text(FaceRegular, 17f * s, colExtra, ry + 1f * s, extra,

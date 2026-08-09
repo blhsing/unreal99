@@ -200,7 +200,16 @@ public sealed class BotController : Controller
     private int _ctfHoldStep;
     private int _ctfRearmAttempts;
     private int _dominationPatrolStep;
-    private int _dominationRearmAttempts;
+    /// <summary>Shared by every objective mode: how many times this bot has broken off to re-arm.</summary>
+    private int _objectiveRearmAttempts;
+    private int _onslaughtPatrolStep;
+    private int _assaultPatrolStep;
+    /// <summary>Which vehicle this bot has decided to fetch, so it does not change its mind every tick.</summary>
+    private int _vehicleTargetId = -1;
+    private float _vehicleBoardTimer;
+    /// <summary>How long the bot has been driving without getting anywhere, so it can bail out.</summary>
+    private float _vehicleStuckTimer;
+    private Vector3 _lastVehiclePosition;
     private bool _hasGoalPosition;
     private bool _pathFound;
     private Vector3 _goalPosition;
@@ -298,7 +307,12 @@ public sealed class BotController : Controller
         _ctfHoldStep = 0;
         _ctfRearmAttempts = 0;
         _dominationPatrolStep = 0;
-        _dominationRearmAttempts = 0;
+        _objectiveRearmAttempts = 0;
+        _onslaughtPatrolStep = 0;
+        _assaultPatrolStep = 0;
+        _vehicleTargetId = -1;
+        _vehicleBoardTimer = 0f;
+        _vehicleStuckTimer = 0f;
         _hasGoalPosition = false;
         _pathFound = false;
         _path.Clear();
@@ -341,8 +355,10 @@ public sealed class BotController : Controller
             ? MathX.SafeNormalize((attacker.Position - Pawn.Position).FlatXZ(), -direction)
             : -MathX.SafeNormalize(direction.FlatXZ(), Pawn.ForwardFlat);
 
-        // Being shot from off-screen is the main reason a bot turns around.
-        if (attacker != null && attacker.Alive && _targetId != attacker.Id)
+        // Being shot from off-screen is the main reason a bot turns around. Self-inflicted splash
+        // must not count: taking yourself as the target makes the aim solver point at your own
+        // feet, which reads on screen as a bot standing still staring at the floor.
+        if (attacker != null && attacker != Pawn && attacker.Alive && _targetId != attacker.Id)
         {
             bool noCurrentTarget = world.FindPawn(_targetId) is not { Alive: true };
             if (noCurrentTarget || _rng.Chance(0.35f + Skill * 0.4f))
@@ -389,6 +405,17 @@ public sealed class BotController : Controller
             _lastSeenTargetTime = world.Time;
         }
 
+        // Crewing a vehicle replaces on-foot behaviour outright: the nav graph, the dodging and
+        // the ledge avoidance all describe a body running around, none of which applies to
+        // something with a turning circle.
+        _vehicleBoardTimer = MathF.Max(0f, _vehicleBoardTimer - dt);
+        if (pawn.InVehicle)
+        {
+            _vehicleTargetId = -1;
+            DriveVehicle(world, target, targetVisible, ref input, dt);
+            return input;
+        }
+
         UpdateState(world, target, targetVisible);
         DetectAndRecoverRouteOscillation(world, dt);
 
@@ -411,9 +438,27 @@ public sealed class BotController : Controller
         if (targetVisible && _reactionTimer <= 0f && target != null
             && !_specialTraversalLock && !_jumpPadFlight)
             DecideFire(world, target, ref input);
+        else if (!_specialTraversalLock && !_jumpPadFlight)
+            ShootObjective(world, ref input, dt);
 
         // --- avoid falling into hazards while roaming ---
         AvoidLedges(world, ref input);
+
+
+        // Board the vehicle we walked over here for. Edge-triggered, because holding use down
+        // would board and immediately dismount on alternate frames.
+        if (_vehicleTargetId >= 0 && _vehicleBoardTimer <= 0f)
+        {
+            var wanted = world.FindVehicle(_vehicleTargetId);
+            if (wanted == null || !wanted.Alive || wanted.FreeSeat() < 0) _vehicleTargetId = -1;
+            else if (Vector3.Distance(pawn.Position, wanted.Position) < 3.6f)
+            {
+                input.UseVehicle = true;
+                _vehicleBoardTimer = 0.8f;
+                _vehicleStuckTimer = 0f;
+                _lastVehiclePosition = wanted.Position;
+            }
+        }
 
         return input;
     }
@@ -1410,6 +1455,14 @@ public sealed class BotController : Controller
             && TryChooseDominationGoal(world, nav))
             return;
 
+        if (world.Mode.Kind == GameModeKind.Onslaught && Pawn.Team != Team.None
+            && TryChooseOnslaughtGoal(world, nav))
+            return;
+
+        if (world.Mode.Kind == GameModeKind.Assault && Pawn.Team != Team.None
+            && TryChooseAssaultGoal(world, nav))
+            return;
+
         // CTF carriers, recoveries and team roles take priority over ordinary combat.
         if (world.Mode.Kind == GameModeKind.CaptureTheFlag && Pawn.Team != Team.None)
         {
@@ -1575,11 +1628,11 @@ public sealed class BotController : Controller
         bool noRangedAmmo = !HasUsableRangedWeapon(Pawn);
         bool needsSupply = noRangedAmmo || !HasUsefulWeaponUpgrade(Pawn)
             || NeedsCombatResupply(Pawn);
-        if (!needsSupply) _dominationRearmAttempts = 0;
-        if (needsSupply && _dominationRearmAttempts < 2
+        if (!needsSupply) _objectiveRearmAttempts = 0;
+        if (needsSupply && _objectiveRearmAttempts < 2
             && TryChoosePickupGoal(world, noRangedAmmo ? 100f : 45f, combatOnly: true))
         {
-            _dominationRearmAttempts++;
+            _objectiveRearmAttempts++;
             return true;
         }
 
@@ -1620,6 +1673,410 @@ public sealed class BotController : Controller
         float captureRadius = MathF.Max(0.75f, points[assigned].Radius * 0.72f);
         return SetPreciseGoal(nav, points[assigned].Position, objective: true,
             radius: captureRadius, refresh: 1.2f);
+    }
+
+    /// <summary>
+    /// Onslaught target selection.
+    ///
+    /// The mistake a naive bot makes here is running at the enemy core: it cannot be hurt until
+    /// the chain reaches it, so that is a bot jogging across the map to stand somewhere harmless.
+    /// The chain therefore drives everything — <see cref="OnslaughtState.NextObjectiveFor"/>
+    /// returns only what is actually reachable, and a share of each team stays back on whichever
+    /// of its own nodes the enemy can currently touch.
+    ///
+    /// The other half of the mode is the vehicles. Onslaught maps are big enough that crossing
+    /// them on foot loses the game on its own, so before committing to a node a bot will take
+    /// anything parked nearby that is pointed the right way.
+    /// </summary>
+    private bool TryChooseOnslaughtGoal(GameWorld world, NavGraph nav)
+    {
+        var state = world.Onslaught;
+        if (state.Nodes.Count == 0) return false;
+
+        Team enemy = Pawn.Team == Team.Red ? Team.Blue : Team.Red;
+
+        int teamBotSlot = 0;
+        foreach (Pawn mate in world.Pawns)
+            if (mate.Team == Pawn.Team && mate.Id < Pawn.Id && IsAiDriven(world, mate)) teamBotSlot++;
+
+        // Everything stops if our own core is exposed: at that point there is no attack worth
+        // making, because one more enemy push ends the match outright.
+        bool coreExposed = state.CoreVulnerable(Pawn.Team);
+        bool defend = coreExposed || teamBotSlot % 3 == 2;
+
+        int goal = -1;
+        if (defend)
+        {
+            goal = state.MostThreatenedFriendly(Pawn.Team, Pawn.Position);
+            // Nothing of ours is under threat, so there is nothing to guard — go and push.
+            if (goal < 0) defend = false;
+        }
+        if (goal < 0) goal = state.NextObjectiveFor(Pawn.Team, Pawn.Position);
+        // Every reachable node is already ours and the enemy core is still shielded: the front
+        // has stalled somewhere, so fall back to guarding whatever the enemy can still reach.
+        if (goal < 0) goal = state.MostThreatenedFriendly(Pawn.Team, Pawn.Position);
+        if (goal < 0) return false;
+
+        var node = state.Nodes[goal];
+
+        // Re-arm before setting out. A bot that walks a hundred metres to a node with an empty
+        // pistol arrives as a free frag rather than a capture.
+        bool noRangedAmmo = !HasUsableRangedWeapon(Pawn);
+        if ((noRangedAmmo || NeedsCombatResupply(Pawn)) && _objectiveRearmAttempts < 2
+            && TryChoosePickupGoal(world, noRangedAmmo ? 100f : 45f, combatOnly: true))
+        {
+            _objectiveRearmAttempts++;
+            return true;
+        }
+        if (!noRangedAmmo) _objectiveRearmAttempts = 0;
+
+        // Worth driving? Only for a real journey, and only if the ride is closer than the walk.
+        float distance = Vector3.Distance(Pawn.Position, node.Position);
+        if (distance > 34f && TryBoardVehicle(world, nav, node.Position)) return true;
+
+        // Defenders circle their node rather than standing on it, so they are not free frags and
+        // do not block the pad the mode needs them to keep clear.
+        if (defend && node.Team == Pawn.Team)
+            return TryChoosePatrolGoal(nav, node.Position, ref _onslaughtPatrolStep, 10f);
+
+        _ = enemy;
+        return SetPreciseGoal(nav, node.Position, objective: true, radius: 3.0f, refresh: 1.2f);
+    }
+
+    /// <summary>
+    /// Assault target selection.
+    ///
+    /// Only one objective is live at a time, so both sides have exactly one place to be — which
+    /// makes the roles unusually clean. Attackers converge on the current objective; defenders
+    /// hold the ground around it rather than standing on it, because a defender inside the ring
+    /// of a hold objective stalls the plant but a defender standing on a generator is just a
+    /// target. The rest is ordinary combat, which the base behaviour already handles.
+    /// </summary>
+    private bool TryChooseAssaultGoal(GameWorld world, NavGraph nav)
+    {
+        var state = world.Assault;
+        var objective = state.CurrentObjective;
+        if (objective == null) return false;
+
+        bool attacking = Pawn.Team == state.Attackers;
+
+        bool noRangedAmmo = !HasUsableRangedWeapon(Pawn);
+        if ((noRangedAmmo || NeedsCombatResupply(Pawn)) && _objectiveRearmAttempts < 2
+            && TryChoosePickupGoal(world, noRangedAmmo ? 100f : 45f, combatOnly: true))
+        {
+            _objectiveRearmAttempts++;
+            return true;
+        }
+        if (!noRangedAmmo) _objectiveRearmAttempts = 0;
+
+        if (!attacking)
+        {
+            // Defenders on a hold objective stand in the ring on purpose — that is what stalls it.
+            if (objective.Kind == ObjectiveKind.Hold && objective.HoldProgress > 0.01f)
+                return SetPreciseGoal(nav, objective.Position, objective: true, radius: objective.Radius * 0.6f,
+                    refresh: 0.8f);
+            return TryChoosePatrolGoal(nav, objective.Position, ref _assaultPatrolStep, 14f);
+        }
+
+        float distance = Vector3.Distance(Pawn.Position, objective.Position);
+        if (distance > 40f && TryBoardVehicle(world, nav, objective.Position)) return true;
+
+        // A destroy objective is shot, so stopping at weapon range is correct; the other kinds
+        // need a body inside the ring. The standoff has to clear a rocket's own blast radius,
+        // or the bot spends the fight blowing itself up against the thing it is attacking.
+        float radius = objective.Kind == ObjectiveKind.Destroy
+            ? MathF.Max(objective.Radius + 6f, 10f)
+            : MathF.Max(0.8f, objective.Radius * 0.6f);
+        return SetPreciseGoal(nav, objective.Position, objective: true, radius: radius, refresh: 1.0f);
+    }
+
+    /// <summary>
+    /// Shoots the thing the mode wants shot when there is nobody to fight. Assault's destroy
+    /// objectives and Onslaught's nodes are inert scenery to the ordinary combat code — a bot
+    /// that only ever fires at pawns walks all the way to a generator and then stands admiring
+    /// it, which is exactly what happened before this existed.
+    /// </summary>
+    private void ShootObjective(GameWorld world, ref PawnInput input, float dt)
+    {
+        if (Pawn.Team == Team.None) return;
+        Vector3 aimAt;
+        float reach;
+
+        switch (world.Mode.Kind)
+        {
+            case GameModeKind.Assault:
+            {
+                var objective = world.Assault.CurrentObjective;
+                if (objective == null || objective.Kind != ObjectiveKind.Destroy) return;
+                if (Pawn.Team != world.Assault.Attackers) return;
+                aimAt = objective.Position + MathX.Up * 1.5f;
+                reach = 40f;
+                break;
+            }
+            case GameModeKind.Onslaught:
+            {
+                var state = world.Onslaught;
+                int index = state.NextObjectiveFor(Pawn.Team, Pawn.Position);
+                if (index < 0) return;
+                var node = state.Nodes[index];
+                // Neutral ground is built by standing on it, not by shooting it.
+                if (!node.IsCore && node.Team == Team.None) return;
+                aimAt = node.Position + MathX.Up * 2.4f;
+                reach = 55f;
+                break;
+            }
+            default:
+                return;
+        }
+
+        Vector3 eye = Pawn.EyePosition;
+        Vector3 delta = aimAt - eye;
+        float distance = delta.Length();
+        if (distance > reach || distance < 0.2f) return;
+        // Never rocket something you are standing next to. Onslaught in particular wants bots
+        // right on top of a node to build it, and a splash weapon fired from there costs more
+        // health than the shot is worth.
+        float splash = Pawn.WeaponDef.Primary.SplashRadius;
+        if (splash > 0f && distance < splash + 2f) return;
+        Vector3 dir = delta / distance;
+        // Do not shoot through the map: the line has to be clear or the shot is wasted, and on
+        // Assault a rocket into the bulkhead in front of you is worse than wasted.
+        var blocked = world.Level.Collision.Raycast(eye, eye + dir * (distance - 1.6f));
+        if (blocked.Hit) return;
+
+        MathX.YawPitchFromDir(dir, out float yaw, out float pitch);
+
+        input.Yaw = Pawn.Yaw + MathX.WrapAngle(yaw - Pawn.Yaw) * (1f - MathF.Exp(-9f * dt));
+        input.Pitch = MathX.Damp(Pawn.Pitch, pitch, 9f, dt);
+        // Only pull the trigger once actually pointed at it, so the first shots do not spray.
+        if (MathF.Abs(MathX.WrapAngle(yaw - Pawn.Yaw)) < 0.14f && MathF.Abs(pitch - Pawn.Pitch) < 0.14f)
+            input.Fire = true;
+    }
+
+    /// <summary>
+    /// Picks a vehicle worth walking to on the way somewhere. Only worth it if the ride is much
+    /// closer than the destination — a bot that walks eighty metres to a Manta in order to save
+    /// a hundred has gained nothing and has spent the whole trip defenceless.
+    /// </summary>
+    private bool TryBoardVehicle(GameWorld world, NavGraph nav, Vector3 destination)
+    {
+        if (Pawn.InVehicle || world.Vehicles.Count == 0) return false;
+
+        // Keep the last choice while it is still valid, so the bot does not swap targets
+        // every time another vehicle happens to become marginally closer.
+        var held = _vehicleTargetId >= 0 ? world.FindVehicle(_vehicleTargetId) : null;
+        if (held != null && held.Alive && held.FreeSeat() >= 0
+            && (held.Team == Team.None || held.Team == Pawn.Team))
+            return SetPreciseGoal(nav, held.Position, objective: true, radius: 2.4f, refresh: 0.8f);
+
+        _vehicleTargetId = -1;
+        float toDestination = Vector3.Distance(Pawn.Position, destination);
+        Vehicle best = null;
+        float bestScore = float.MaxValue;
+
+        foreach (var v in world.Vehicles)
+        {
+            if (!v.Alive || v.FreeSeat() < 0) continue;
+            if (v.Team != Team.None && v.Team != Pawn.Team) continue;
+            float walk = Vector3.Distance(Pawn.Position, v.Position);
+            if (walk > 45f) continue;
+            // It has to actually shorten the journey: a vehicle behind us is a detour.
+            float remaining = Vector3.Distance(v.Position, destination);
+            if (walk + remaining > toDestination * 1.25f) continue;
+            if (walk < bestScore) { bestScore = walk; best = v; }
+        }
+        if (best == null) return false;
+
+        _vehicleTargetId = best.Id;
+        return SetPreciseGoal(nav, best.Position, objective: true, radius: 2.4f, refresh: 0.8f);
+    }
+
+    /// <summary>
+    /// Where a crewed vehicle should be heading. Whatever the mode wants is also what the vehicle
+    /// wants — there is no separate vehicle objective.
+    /// </summary>
+    private Vector3 VehicleDestination(GameWorld world, Pawn target)
+    {
+        switch (world.Mode.Kind)
+        {
+            case GameModeKind.Onslaught:
+            {
+                var state = world.Onslaught;
+                int index = state.CoreVulnerable(Pawn.Team)
+                    ? state.MostThreatenedFriendly(Pawn.Team, Pawn.Position)
+                    : state.NextObjectiveFor(Pawn.Team, Pawn.Position);
+                if (index < 0) index = state.MostThreatenedFriendly(Pawn.Team, Pawn.Position);
+                if (index >= 0) return state.Nodes[index].Position;
+                break;
+            }
+            case GameModeKind.Assault:
+            {
+                var objective = world.Assault.CurrentObjective;
+                if (objective != null) return objective.Position;
+                break;
+            }
+        }
+        return target is { Alive: true } ? target.Position : world.Level.Center;
+    }
+
+    /// <summary>
+    /// Flies, drives or walks a vehicle. What separates a competent crew from a bad one in this
+    /// game is not aim, it is standoff: armour that closes to knife range dies to the rockets it
+    /// could have out-ranged, and light attack vehicles that hang back never trade at all. So the
+    /// hold distance is derived from the vehicle's own class, and everything else — steering,
+    /// altitude, when to bail out — follows from trying to sit at it.
+    ///
+    /// Gunners in the passenger seats are handled separately: they never touch the controls and
+    /// simply fight from a moving platform, which is the entire reason those seats exist.
+    /// </summary>
+    private void DriveVehicle(GameWorld world, Pawn target, bool targetVisible, ref PawnInput input,
+        float dt)
+    {
+        var v = world.FindVehicle(Pawn.VehicleId);
+        if (v == null || !v.Alive) return;
+        var def = v.Def;
+        bool driver = Pawn.VehicleSeat == 0;
+
+        Vector3 destination = VehicleDestination(world, target);
+        Vector3 aimAt = targetVisible && target != null ? target.Center : destination;
+        // Lead a moving target: at vehicle-weapon ranges the flight time is long enough to miss by
+        // a whole body length otherwise.
+        if (targetVisible && target != null)
+            aimAt += target.Velocity * MathX.Clamp(Vector3.Distance(v.Position, target.Center) / 90f, 0f, 0.55f);
+
+        // --- gunner seats ---
+        if (!driver)
+        {
+            Vector3 muzzle = v.SeatWorld(Pawn.VehicleSeat);
+            MathX.YawPitchFromDir(MathX.SafeNormalize(aimAt - muzzle, MathX.Forward),
+                out float gYaw, out float gPitch);
+            input.Yaw = Pawn.Yaw + MathX.WrapAngle(gYaw - Pawn.Yaw) * (1f - MathF.Exp(-7f * dt));
+            input.Pitch = MathX.Damp(Pawn.Pitch, gPitch, 7f, dt);
+            input.Fire = targetVisible && target != null && target.Team != Pawn.Team;
+            // A gunner whose driver has abandoned the vehicle is just a stationary target.
+            if (!v.Occupied || v.Driver < 0) { _vehicleBoardTimer = 0.6f; input.UseVehicle = true; }
+            return;
+        }
+
+        // --- driver ---
+        // Hold distance by class. Artillery and heavy armour fight from range and lose if they
+        // close; light attack vehicles have to be on top of things to do anything at all.
+        float hold = def.Kind switch
+        {
+            VehicleKind.Spma or VehicleKind.Leviathan => 55f,
+            VehicleKind.Goliath or VehicleKind.IonTank or VehicleKind.Darkwalker
+                or VehicleKind.Nemesis or VehicleKind.Paladin => 34f,
+            VehicleKind.Hellbender or VehicleKind.Cicada => 26f,
+            VehicleKind.Raptor or VehicleKind.Fury => 20f,
+            VehicleKind.Hoverboard => 4f,
+            _ => 6f,
+        };
+
+        Vector3 flat = (destination - v.Position).FlatXZ();
+        float distance = flat.Length();
+
+        // Deployable artillery is worthless mobile and devastating parked, so deploy on arrival.
+        if (def.CanDeploy && distance <= hold * 1.2f && v.Deploy <= 0f && !v.Deploying)
+            input.AltFire = true;
+
+        float desiredYaw = distance > 0.01f
+            ? MathF.Atan2(flat.X, flat.Z)
+            : v.Yaw;
+        float yawError = MathX.WrapAngle(desiredYaw - v.Yaw);
+        // Steering is inverted relative to the yaw error: the solver subtracts the input.
+        input.Move.X = MathX.Clamp(-yawError * 1.8f, -1f, 1f);
+
+        // Throttle. Back off when a standoff vehicle has been pushed inside its own hold range —
+        // a tank that lets infantry get underneath it cannot depress far enough to answer.
+        float throttle;
+        if (distance > hold) throttle = MathF.Abs(yawError) > 1.25f ? 0.45f : 1f;
+        else if (distance < hold * 0.55f && hold > 12f) throttle = -0.7f;
+        else throttle = 0f;
+        input.Move.Y = throttle;
+
+        // Aircraft hold an altitude over whatever they are attacking rather than orbiting at
+        // whatever height they happened to take off at.
+        if (def.Motion == VehicleMotion.Air)
+        {
+            float desiredY = aimAt.Y + (targetVisible ? 14f : 20f);
+            if (v.Position.Y < desiredY - 2f) input.Jump = true;
+            else if (v.Position.Y > desiredY + 2f) input.Crouch = true;
+        }
+
+        // A hull-mounted weapon aims by steering, so it fires only when already pointed there;
+        // a turret seat aims independently and can shoot across the arc.
+        bool turret = def.Seats.Length > 0 && def.Seats[0].Turret;
+        if (turret)
+        {
+            Vector3 muzzle = v.SeatWorld(0);
+            MathX.YawPitchFromDir(MathX.SafeNormalize(aimAt - muzzle, MathX.Forward),
+                out float tYaw, out float tPitch);
+            input.Yaw = Pawn.Yaw + MathX.WrapAngle(tYaw - Pawn.Yaw) * (1f - MathF.Exp(-6f * dt));
+            input.Pitch = MathX.Damp(Pawn.Pitch, tPitch, 6f, dt);
+        }
+        else
+        {
+            // Hull-mounted weapon: the yaw is the vehicle's, but the elevation still comes from
+            // the driver's view, so a Manta can shoot at something above or below it.
+            input.Yaw = v.Yaw;
+            input.Pitch = MathX.Damp(Pawn.Pitch,
+                MathF.Atan2(aimAt.Y - (v.Position.Y + 1f), MathF.Max(distance, 1f)), 6f, dt);
+        }
+
+        if (def.Seats.Length > 0 && def.Seats[0].Armed && !input.AltFire)
+        {
+            bool aimed = turret || MathF.Abs(yawError) < 0.22f;
+            // Objectives are legitimate targets in their own right: shelling a node or a
+            // generator from outside its defenders' range is what the heavy vehicles are for.
+            bool objectiveInRange = world.Mode.Kind is GameModeKind.Onslaught or GameModeKind.Assault
+                && distance < hold * 1.6f;
+            input.Fire = aimed && ((targetVisible && target != null && target.Team != Pawn.Team)
+                || objectiveInRange);
+        }
+
+        // --- bail-out conditions ---
+        _vehicleStuckTimer = Vector3.DistanceSquared(v.Position, _lastVehiclePosition) < 0.09f
+            ? _vehicleStuckTimer + dt
+            : 0f;
+        _lastVehiclePosition = v.Position;
+
+        bool wrecked = v.Health < def.Health * 0.14f;
+        bool arrivedOnTransport = def.Kind == VehicleKind.Hoverboard && distance < 8f;
+        bool jammed = _vehicleStuckTimer > 4.5f && throttle != 0f;
+        if ((wrecked || arrivedOnTransport || jammed) && _vehicleBoardTimer <= 0f)
+        {
+            _vehicleBoardTimer = 0.8f;
+            _vehicleStuckTimer = 0f;
+            input.UseVehicle = true;
+        }
+    }
+
+    /// <summary>
+    /// Generic "hold this area without standing on it" movement, shared by the Onslaught and
+    /// Assault defenders. A goal placed exactly on the thing being guarded completes every frame
+    /// and leaves the bot vibrating in place.
+    /// </summary>
+    private bool TryChoosePatrolGoal(NavGraph nav, Vector3 point, ref int step, float range)
+    {
+        _navScratch.Clear();
+        nav.QueryRadius(point, range, _navScratch);
+        if (_navScratch.Count == 0) return false;
+
+        float angle = step++ * 2.3999632f + Pawn.Id * 0.71f;
+        Vector3 desired = point + new Vector3(MathF.Cos(angle) * range * 0.65f, 0f,
+            MathF.Sin(angle) * range * 0.65f);
+        int best = -1;
+        float bestScore = float.MaxValue;
+        foreach (int nodeIndex in _navScratch)
+        {
+            NavNode node = nav.Nodes[nodeIndex];
+            float fromPoint = (node.Position - point).FlatXZ().Length();
+            if (fromPoint < range * 0.28f || fromPoint > range * 0.95f) continue;
+            float score = (node.Position - desired).FlatXZ().Length() + node.Openness * 1.2f;
+            if (score < bestScore) { bestScore = score; best = nodeIndex; }
+        }
+        if (best < 0) return false;
+        return SetPreciseGoal(nav, nav.Nodes[best].Position, objective: false, radius: 1.2f, refresh: 3.0f);
     }
 
     private static bool IsAiDriven(GameWorld world, Pawn pawn)

@@ -33,6 +33,12 @@ public enum MapId
     Sesmar,
     Olden,
     Cinder,
+    // Onslaught. Built for the mode: open ground, a node chain, vehicles at every node.
+    Torlan,
+    Primeval,
+    // Assault. One-way maps: a fixed objective sequence and forward spawns behind it.
+    Convoy,
+    Frigate,
     Count
 }
 
@@ -69,6 +75,10 @@ public static partial class Maps
         MapId.Sesmar => Loc.MapSesmar,
         MapId.Olden => Loc.MapOlden,
         MapId.Cinder => Loc.MapCinder,
+        MapId.Torlan => Loc.MapTorlan,
+        MapId.Primeval => Loc.MapPrimeval,
+        MapId.Convoy => Loc.MapConvoy,
+        MapId.Frigate => Loc.MapFrigate,
         _ => Loc.MapDeck16,
     };
 
@@ -95,11 +105,21 @@ public static partial class Maps
         MapId.Sesmar => Loc.MapSesmarDesc,
         MapId.Olden => Loc.MapOldenDesc,
         MapId.Cinder => Loc.MapCinderDesc,
+        MapId.Torlan => Loc.MapTorlanDesc,
+        MapId.Primeval => Loc.MapPrimevalDesc,
+        MapId.Convoy => Loc.MapConvoyDesc,
+        MapId.Frigate => Loc.MapFrigateDesc,
         _ => Loc.MapDeck16Desc,
     };
 
     public static bool SupportsCtf(MapId id)
         => id is MapId.Coret or MapId.November or MapId.FacingWorlds or MapId.LavaGiant;
+
+    /// <summary>Onslaught needs a node graph, so only the ONS arenas can host it.</summary>
+    public static bool SupportsOnslaught(MapId id) => id is MapId.Torlan or MapId.Primeval;
+
+    /// <summary>Assault needs an objective sequence, so only the AS arenas can host it.</summary>
+    public static bool SupportsAssault(MapId id) => id is MapId.Convoy or MapId.Frigate;
 
     /// <summary>Domination needs control points, so only the DOM arenas can host it.</summary>
     public static bool SupportsDomination(MapId id)
@@ -128,6 +148,10 @@ public static partial class Maps
         MapId.Sesmar => BuildSesmar(gl),
         MapId.Olden => BuildOlden(gl),
         MapId.Cinder => BuildCinder(gl),
+        MapId.Torlan => BuildTorlan(gl),
+        MapId.Primeval => BuildPrimeval(gl),
+        MapId.Convoy => BuildConvoy(gl),
+        MapId.Frigate => BuildFrigate(gl),
         _ => BuildDeck16(gl),
     };
 

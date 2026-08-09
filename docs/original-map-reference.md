@@ -1,6 +1,6 @@
 # 原作地圖對照表
 
-本檔記錄二十一座競技場所依據的原作資料，來源為 The Liandri Archives
+本檔記錄二十五座競技場所依據的原作資料，來源為 The Liandri Archives
 （<https://unrealarchive.org/wikis/the-liandri-archives/>）。每次調整佈局或道具配置前先看這裡，
 不要憑印象——先前憑印象重建對峙世界，塔樓結構與上下樓方式兩件事都弄錯了。
 
@@ -57,6 +57,51 @@ AS-RobotFactory。
 
 規則依據：[The Liandri Archives — Assault](https://unrealarchive.org/wikis/the-liandri-archives/Assault.html)
 
+## 攻堅與突擊地圖
+
+原作攻堅（ONS）地圖：ONS-ArcticStronghold、ONS-Crossfire、ONS-Dawn、ONS-Dria、ONS-Frostbite、
+ONS-Primeval、ONS-RedPlanet、ONS-Severance、ONS-Torlan（Editor's Choice 追加 ONS-Adara、
+ONS-IslandHop、ONS-Tricky、ONS-Urban；XP 版另有 ONS-Aridoom、ONS-Ascendancy）。
+
+**ONS-Torlan** 是攻堅模式的代表作（試玩版即收錄）：
+
+- 乾涸的叢林邊緣，兩座基地大致對稱，中央一座通訊塔既是狙擊點也是掩體，一條乾河床橫貫戰場，
+  是穿越中路的主要進攻路線。
+- **五個節點呈鏈狀**：節點 1、5 位於兩側角落，2、4 夾住中央的 3，3 同時連往兩座核心。
+- 載具配置：每個節點與核心都有 Manta；節點 2、3、4 有 Scorpion；核心與中央塔上層有 Hellbender
+  與 Raptor；角落節點 1、5 有 Goliath。追加載具為節點 2、4 的 Paladin、中央的 SPMA、核心的 Cicada。
+
+原作突擊（AS）地圖：UT99 為 AS-Frigate、AS-Guardia、AS-HiSpeed、AS-Mazon、AS-OceanFloor、
+AS-Overlord、AS-Rook；UT2004 為 AS-Convoy、AS-FallenCity、AS-Glacier、AS-Junkyard、
+AS-Mothership、AS-RobotFactory。
+
+**ONS-Primeval**（原始森林，6–10 人的小圖）：
+
+- **三個節點**。節點 3 位於正中央，是全圖唯一的 Goliath（開啟追加載具時換成 Paladin）
+  生成點，兩側各放兩個醫療包，共四個。
+- 載具配置：節點 1、2 有 Manta；兩座基地與節點 1、2 有 Scorpion；Hellbender 只在基地；
+  每座基地各一座能量砲塔。
+- 原文為 stub，未載明節點連線。本作採對稱解讀：兩座核心各自連往節點 1、2（兩條側翼路線），
+  節點 3 連往 1 與 2，作為爭奪中路火力的樞紐。
+
+**AS-Convoy** 的目標序列（攻方依序完成）：伸出登艦平台 → 開啟武器艙面板 → 在艙門安置炸藥
+（需持續佔位一段時間）→ 開啟後艙門 → 啟動前方側門開關 → 跳進 Nexus 飛彈拖車 → 取出飛彈。
+整張圖架在沙漠中行進的數輛載具之間。
+
+**AS-Frigate**（UT99）：目標是被修復的地球軍艦 SS Victory。攻方從貨艙出發，可走木橋或水下
+入口兩條路線登艦；木橋由一座 Sentinel 迷你砲塔守衛。目標序列只有兩個：
+
+1. **摧毀液壓壓縮機**（位於船尾艙房）——控制室的門由它鎖住，不破壞就進不去。
+2. **啟動艦砲**——沿梯子登上頂層控制室，按下紅色按鈕讓軍艦得以出港。
+
+時限 6 分鐘。
+
+資料來源：[ONS-Torlan](https://unrealarchive.org/wikis/the-liandri-archives/ONS-Torlan.html)、
+[ONS-Primeval](https://unrealarchive.org/wikis/the-liandri-archives/ONS-Primeval.html)、
+[AS-Convoy](https://unrealarchive.org/wikis/the-liandri-archives/AS-Convoy.html)、
+[AS-Frigate](https://unrealarchive.org/wikis/the-liandri-archives/AS-Frigate.html)、
+[UT2004 地圖總表](https://unrealarchive.org/wikis/the-liandri-archives/Unreal_Tournament_2004.html)
+
 ## 載具一覽
 
 UT2004（Editor's Choice 追加者標註 EC）：
@@ -90,6 +135,22 @@ UT3 沿用上述 Axon 系列（SPMA 更名 Hellfire SPMA），並新增 Necris �
 資料來源：[Vehicles in UT2004](https://academickids.com/encyclopedia/index.php/Vehicles_in_Unreal_Tournament_2004)、
 [UT3 載具](https://www.gamepressure.com/unrealtournamentiii/vehicles/z510c1)、
 [Unreal Wiki — UT3](https://unreal.fandom.com/wiki/Unreal_Tournament_3)
+
+### 本作的實作範圍
+
+上列 **Space Fighter 以外的十七種全部實作**（`Game/Vehicles.cs`）。Space Fighter 只出現在
+UT2004 的太空戰特殊關卡，與攻堅／突擊無關，因此未收錄。
+
+實作時特別對照原作、且容易做錯的幾點：
+
+- **Hellbender 的駕駛沒有武器**，火力全在後兩座；把駕駛座配上武器就毀掉這台車的設計。
+- **Leviathan 五個座位**，且離子砲只有在架設完成後才可用，架設期間完全不能移動。
+- **Paladin 的護盾可無限維持**，因此它是唯一能替隊友擋下正面火力的載具。
+- **Viper 可自爆**、**Nightshade 靜止時隱形**——兩者都是狀態而非攻擊，所以做成次要鍵的切換。
+- **Hoverboard 無武裝且不輾壓**，是純交通工具。
+
+另外，原作多數攻堅地圖在基地放有**能量砲塔**（固定式，非載具）。本作尚未實作砲塔實體，
+ONS-原始林的基地因此少了這一項。
 
 ## 統治模式規則
 

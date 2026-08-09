@@ -28,7 +28,7 @@ Skips the Release build. Use only for focused reruns against a known-current bui
 #>
 param(
     [int]$Frames = 3600,
-    [int[]]$MapIds = (0..20),
+    [int[]]$MapIds = (0..24),
     [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\artifacts\bot-traversal'),
     [switch]$NoBuild
 )
@@ -41,7 +41,7 @@ $outputRoot = [System.IO.Path]::GetFullPath($OutputDirectory)
 
 if ($Frames -lt 600) { throw 'Frames must be at least 600 (10 active-play seconds).' }
 foreach ($mapId in $MapIds) {
-    if ($mapId -lt 0 -or $mapId -gt 20) { throw "Map id is outside 0..20: $mapId" }
+    if ($mapId -lt 0 -or $mapId -gt 24) { throw "Map id is outside 0..24: $mapId" }
 }
 
 if (-not $NoBuild) {
@@ -55,7 +55,8 @@ $mapNames = @(
     'morbias', 'stalwart', 'curse', 'grinder', 'codex', 'gothic', 'deck16',
     'turbine', 'phobos', 'peak', 'liandri', 'morpheus', 'hyperblast',
     'coret', 'november', 'facing-worlds', 'lava-giant',
-    'leadworks', 'sesmar', 'olden', 'cinder'
+    'leadworks', 'sesmar', 'olden', 'cinder',
+    'ons-torlan', 'ons-primeval', 'as-convoy', 'as-frigate'
 )
 
 $results = [System.Collections.Generic.List[object]]::new()
@@ -67,7 +68,13 @@ $env:UNREAL99_NAV_DEBUG = '1'
 try {
     foreach ($mapId in $MapIds) {
         $name = $mapNames[$mapId]
-        $mode = if ($mapId -ge 17) { 5 } elseif ($mapId -ge 13) { 2 } else { 0 }
+        # Each arena is exercised in the ruleset it was authored for. Onslaught and Assault also
+        # gate the vehicle and objective code paths, which nothing else reaches.
+        $mode = if ($mapId -ge 23) { 7 }
+                elseif ($mapId -ge 21) { 6 }
+                elseif ($mapId -ge 17) { 5 }
+                elseif ($mapId -ge 13) { 2 }
+                else { 0 }
         $screenshot = Join-Path $outputRoot ('{0:D2}-{1}.png' -f $mapId, $name)
         $log = Join-Path $outputRoot ('{0:D2}-{1}.log' -f $mapId, $name)
         Write-Host ("[{0}/{1}] {2}: {3} active-play frames ({4:N1} s), mode {5}" -f `
@@ -90,6 +97,8 @@ try {
                 Mode = switch ($mode) {
                     2 { 'CaptureTheFlag' }
                     5 { 'Domination' }
+                    6 { 'Onslaught' }
+                    7 { 'Assault' }
                     default { 'Deathmatch' }
                 }
                 Passed = $false

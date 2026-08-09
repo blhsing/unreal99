@@ -7,9 +7,17 @@
 #
 # Domination arenas are captured in Domination (--mode 5) rather than deathmatch, so the
 # control points appear in their held colours instead of neutral grey — a DOM map photographed
-# in deathmatch shows none of what makes it a DOM map.
+# in deathmatch shows none of what makes it a DOM map. The same applies to Onslaught (--mode 6)
+# and Assault (--mode 7): power nodes, objective markers and every vehicle on the map exist only
+# while their own mode is running.
 #
 # Usage:  pwsh docs/capture-arenas.ps1
+#         pwsh docs/capture-arenas.ps1 -Maps 21,22,23,24   # only the listed arenas
+#
+# -Maps re-shoots a subset and leaves every other docs/arenas/*.jpg untouched, which is what you
+# want after adding or restyling a single arena — a full run is roughly twenty minutes.
+
+param([int[]]$Maps)
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
@@ -20,7 +28,8 @@ New-Item -ItemType Directory -Force $out, $tmp | Out-Null
 
 $names = @('morbias','stalwart','curse','grinder','codex','gothic','deck16','turbine','phobos',
            'peak','liandri','morpheus','hyperblast','coret','november','facingworlds','lavagiant',
-           'leadworks','sesmar','olden','cinder')
+           'leadworks','sesmar','olden','cinder',
+           'ons-torlan','ons-primeval','as-convoy','as-frigate')
 $last = $names.Count - 1
 
 # Arenas the automatic orbit cannot frame, with the camera authored by hand.
@@ -40,18 +49,34 @@ $authored = @{
     # down into open sand and wasted the bottom third of the frame on nothing.
     19 = '20 11 200 8'      # Olden        — across the moat, colonnade ringing it, shrine above
     20 = '38 20 200 3'      # Cinder       — the casting channel with the furnace beyond
+    # The Onslaught and Assault arenas are far larger than anything above and the orbit rule,
+    # which sizes itself from spawn points, ends up inside the geometry on all four.
+    21 = '86 44 200 12'     # Torlan       — high enough to hold the tower and both node lines
+    22 = '64 30 200 8'      # Primeval     — above the canopy, looking down the centre clearing
+    23 = '92 34 160 10'     # Convoy       — along the column so several rigs stack in frame
+    24 = '78 30 200 12'     # Frigate      — from over the dock, along the bridge onto the ship
 }
 
-# Domination arenas: shot in DOM so the control points show their held colours.
+# Domination arenas: shot in DOM so the control points show their held colours. The ONS and AS
+# arenas need the same treatment for the same reason — nodes and objectives only exist in mode.
 $domFirst = 17
+$onsFirst = 21
+$asFirst  = 23
+
+# Which arenas to shoot this run. Everything by default.
+$targets = if ($Maps) { @($Maps | Where-Object { $_ -ge 0 -and $_ -le $last } | Sort-Object -Unique) }
+           else       { 0..$last }
+if (-not $targets) { throw "No valid arena ids in -Maps (range is 0..$last)." }
 
 dotnet build $proj -c Release -v q --nologo
 
-foreach ($i in 0..$last) {
+foreach ($i in $targets) {
     $png = Join-Path $tmp "map$i.png"
     $args = @('--windowed', '--nohud', '--demo', '--players', '1', '--bots', '6', '--map', $i)
     # Let the bots hold points for a while before the shutter, or every point is still neutral.
-    if ($i -ge $domFirst) { $args += @('--mode', 5) }
+    if     ($i -ge $asFirst)  { $args += @('--mode', 7) }
+    elseif ($i -ge $onsFirst) { $args += @('--mode', 6) }
+    elseif ($i -ge $domFirst) { $args += @('--mode', 5) }
     $frames = if ($i -ge $domFirst) { 1500 } else { 400 }
     if ($authored.ContainsKey($i)) { $args += @('--flycam') + $authored[$i].Split(' ') + @('--autoshot', $frames, $png) }
     else                          { $args += @('--flyby', '--autoshot', 460, $png) }
@@ -64,7 +89,7 @@ Add-Type -AssemblyName System.Drawing
 $codec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Object { $_.MimeType -eq 'image/jpeg' }
 $ep = New-Object System.Drawing.Imaging.EncoderParameters 1
 $ep.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality), 82L
-foreach ($i in 0..$last) {
+foreach ($i in $targets) {
     $img = [System.Drawing.Image]::FromFile((Join-Path $tmp "map$i.png"))
     $w = 960; $h = [int]($img.Height * $w / $img.Width)
     $bmp = New-Object System.Drawing.Bitmap $w, $h
@@ -74,4 +99,4 @@ foreach ($i in 0..$last) {
     $bmp.Save((Join-Path $out ("{0:d2}-{1}.jpg" -f $i, $names[$i])), $codec, $ep)
     $g.Dispose(); $bmp.Dispose(); $img.Dispose()
 }
-Write-Host "wrote $($names.Count) arena shots to $out"
+Write-Host "wrote $($targets.Count) arena shots to $out"

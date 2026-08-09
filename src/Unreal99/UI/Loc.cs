@@ -107,6 +107,72 @@ public static class Loc
     public const string ModeLastManStandingDesc = "生命有限，最後存活者獲勝。";
     public const string ModeInstagibDesc = "只有震盪步槍，一擊必殺。";
 
+    // ---------------------------------------------------------------- onslaught / assault
+    public const string ModeOnslaught = "攻堅模式";
+    public const string ModeOnslaughtDesc = "沿著節點鏈推進，佔下與敵方核心相連的節點才能攻擊核心。";
+    public const string ModeAssault = "突擊模式";
+    public const string ModeAssaultDesc = "一隊依序攻下目標，另一隊防守；攻守交換後比誰更快。";
+
+    public const string MapTorlan = "ONS-托蘭";
+    public const string MapTorlanDesc = "乾涸的叢林邊緣，五個節點連成一線，中央通訊塔俯瞰整片戰場。";
+    public const string MapPrimeval = "ONS-原始林";
+    public const string MapPrimevalDesc = "昏暗的原始森林，只有三個節點；中央林間空地是全圖唯一的重裝甲。";
+    public const string MapConvoy = "AS-車隊";
+    public const string MapConvoyDesc = "橫越沙漠的運輸車隊，攻方從尾車逐節推進，直到取出前方的飛彈。";
+    public const string MapFrigate = "AS-護衛艦";
+    public const string MapFrigateDesc = "停泊中的復原軍艦；木橋與水下通道兩條路線，通往艦橋控制室。";
+
+    public const string NodeRedCore = "紅隊核心";
+    public const string NodeBlueCore = "藍隊核心";
+    public const string NodeWestCorner = "西側角落";
+    public const string NodeWestFlank = "西側側翼";
+    public const string NodeTower = "中央通訊塔";
+    public const string NodeEastFlank = "東側側翼";
+    public const string NodeEastCorner = "東側角落";
+    public const string NodeNorthTrail = "北側林道";
+    public const string NodeSouthTrail = "南側林道";
+    public const string NodeGrove = "中央林間空地";
+
+    public const string ObjBoardingPlatform = "伸出登艦平台";
+    public const string ObjWeaponsPanel = "開啟武器艙面板";
+    public const string ObjPlantCharge = "在艙門安置炸藥";
+    public const string ObjRearDoor = "開啟後艙門";
+    public const string ObjSideSwitch = "啟動前方側門開關";
+    public const string ObjEnterNexus = "進入 Nexus 飛彈拖車";
+    public const string ObjTakeMissile = "取出飛彈";
+    public const string ObjCompressor = "摧毀液壓壓縮機";
+    public const string ObjFireCannons = "啟動艦砲";
+
+    public const string OnsCoreShielded = "核心受節點保護";
+    public const string OnsCoreVulnerable = "核心暴露！";
+    public const string OnsOurCoreExposed = "我方核心暴露！快回防！";
+    public const string OnsEnemyCoreExposed = "敵方核心暴露！全力進攻！";
+    public const string OnsNodeBlocked = "尚未連結到我方節點";
+    public const string OnsNodeUnderAttack = "節點遭受攻擊";
+
+    public const string AsAttacking = "進攻";
+    public const string AsDefending = "防守";
+    public const string AsRoundOne = "第一回合";
+    public const string AsRoundTwo = "第二回合";
+    public const string AsSidesSwapped = "攻守交換！";
+    public const string AsTargetTime = "目標時間";
+    public const string AsNoTarget = "無紀錄";
+    public const string ScoreNodes = "節點";
+    public const string ScoreObjectives = "目標";
+
+    public const string VehShieldUp = "護盾展開";
+    public const string VehDeploying = "架設中";
+    public const string VehDeployed = "已架設";
+
+    public const string AsHoldPosition = "佔住位置";
+    public const string AsContested = "位置遭爭奪";
+    public const string AsDefendersHold = "防守成功";
+    public const string AsObjectivesCleared = "所有目標完成！";
+    public static string AsObjectiveDone(string who, string objective) => $"{who} 完成了 {objective}";
+    public static string AsNextObjective(string objective) => $"下一個目標：{objective}";
+    public static string OnsNodeCaptured(string who, string node) => $"{who} 建立了 {node}";
+    public static string OnsNodeLost(string node) => $"{node} 已失守";
+
     // ---------------------------------------------------------------- vehicles
     public const string VehScorpion = "蠍式突擊車";
     public const string VehHellbender = "地獄使者";
@@ -469,6 +535,8 @@ public static class Loc
         GameModeKind.LastManStanding => ModeLastManStanding,
         GameModeKind.Instagib => ModeInstagib,
         GameModeKind.Domination => ModeDomination,
+        GameModeKind.Onslaught => ModeOnslaught,
+        GameModeKind.Assault => ModeAssault,
         _ => ModeDeathmatch,
     };
 
@@ -480,6 +548,8 @@ public static class Loc
         GameModeKind.LastManStanding => ModeLastManStandingDesc,
         GameModeKind.Instagib => ModeInstagibDesc,
         GameModeKind.Domination => ModeDominationDesc,
+        GameModeKind.Onslaught => ModeOnslaughtDesc,
+        GameModeKind.Assault => ModeAssaultDesc,
         _ => ModeDeathmatchDesc,
     };
 
@@ -519,4 +589,6 @@ public enum GameModeKind
     LastManStanding,
     Instagib,
     Domination,
+    Onslaught,
+    Assault,
 }

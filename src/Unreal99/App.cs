@@ -748,6 +748,8 @@ public sealed class App : IDisposable
             "08-phobos.jpg", "09-peak.jpg", "10-liandri.jpg", "11-morpheus.jpg",
             "12-hyperblast.jpg", "13-coret.jpg", "14-november.jpg",
             "15-facingworlds.jpg", "16-lavagiant.jpg",
+            "17-leadworks.jpg", "18-sesmar.jpg", "19-olden.jpg", "20-cinder.jpg",
+            "21-ons-torlan.jpg", "22-ons-primeval.jpg", "23-as-convoy.jpg", "24-as-frigate.jpg",
         ];
 
         for (int i = 0; i < files.Length && i < _mapThumbnails.Length; i++)

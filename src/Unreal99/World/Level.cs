@@ -22,6 +22,12 @@ public struct SpawnPoint
     public Vector3 Position;
     public float Yaw;
     public Team Team;
+    /// <summary>
+    /// Assault only. Group 0 is always live; higher groups open as the attackers complete
+    /// objectives, and the attackers then use the highest group they have unlocked. Defenders
+    /// never advance, so their spawns stay on group 0. Every other mode ignores this.
+    /// </summary>
+    public int AssaultGroup;
 }
 
 public struct PickupPlacement
@@ -75,6 +81,20 @@ public struct FlagBase
     public float Yaw;
 }
 
+/// <summary>
+/// One node in an Onslaught power network. Links are indices into the level's own node list,
+/// which is what encodes the chain a team has to advance along.
+/// </summary>
+public struct PowerNodeDef
+{
+    public Vector3 Position;
+    public string Name;
+    public bool IsCore;
+    /// <summary>Set only for cores; nodes start neutral.</summary>
+    public Team Team;
+    public int[] Links;
+}
+
 /// <summary>A vehicle spawn pad: what parks here, facing which way, and how fast it comes back.</summary>
 public struct VehicleSpawn
 {
@@ -84,6 +104,38 @@ public struct VehicleSpawn
     /// <summary>Which team may drive it. None means anyone.</summary>
     public Team Team;
     public float RespawnSeconds;
+}
+
+/// <summary>How an Assault objective is completed.</summary>
+public enum ObjectiveKind
+{
+    /// <summary>Shoot it until it breaks: a generator, a panel, a door mechanism.</summary>
+    Destroy,
+    /// <summary>Stand in the radius uncontested for a while: planting a charge, holding a switch.</summary>
+    Hold,
+    /// <summary>Reach it. Grabbing the missile at the end of Convoy is this.</summary>
+    Touch,
+}
+
+/// <summary>
+/// One step in an Assault map's fixed sequence. Objectives are completed strictly in the order
+/// they are declared — that ordering is the mode, and it is what lets the defenders concentrate.
+/// </summary>
+public struct AssaultObjectiveDef
+{
+    public Vector3 Position;
+    public string Name;
+    public ObjectiveKind Kind;
+    public float Radius;
+    /// <summary>Hit points for <see cref="ObjectiveKind.Destroy"/>.</summary>
+    public float Health;
+    /// <summary>Seconds of occupation for <see cref="ObjectiveKind.Hold"/>.</summary>
+    public float HoldSeconds;
+    /// <summary>
+    /// Attacker spawns unlocked by finishing this one. The original pushes the attacking team's
+    /// spawn forward after every objective; without that the last objective is unwinnable.
+    /// </summary>
+    public int UnlocksSpawnGroup;
 }
 
 /// <summary>
@@ -157,6 +209,10 @@ public sealed class Level : IDisposable
     public readonly List<FlagBase> FlagBases = new();
     public readonly List<ControlPoint> ControlPoints = new();
     public readonly List<VehicleSpawn> VehicleSpawns = new();
+    public readonly List<PowerNodeDef> PowerNodes = new();
+    public readonly List<AssaultObjectiveDef> Objectives = new();
+    /// <summary>Assault only: which side attacks in round one. Defenders get the other colour.</summary>
+    public Team AssaultAttackers = Team.Red;
     public NavGraph Nav = new();
     public EnvironmentSettings Environment = new();
 
@@ -226,11 +282,31 @@ public sealed class Level : IDisposable
         }
     }
 
-    public SpawnPoint PickSpawn(Rng rng, Team team, IReadOnlyList<Vector3> avoid, float minDistance = 9f)
+    /// <summary>
+    /// Picks a spawn for a team. <paramref name="assaultGroup"/> is the highest forward spawn the
+    /// attackers have unlocked; pass -1 outside Assault to ignore grouping entirely. Attackers
+    /// always come in at their furthest unlocked group, which is what stops the last objective on
+    /// a long map from being a hopeless run back down the level.
+    /// </summary>
+    public SpawnPoint PickSpawn(Rng rng, Team team, IReadOnlyList<Vector3> avoid, float minDistance = 9f,
+        int assaultGroup = -1)
     {
         var candidates = new List<int>(Spawns.Count);
         for (int i = 0; i < Spawns.Count; i++)
-            if (team == Team.None || Spawns[i].Team == Team.None || Spawns[i].Team == team) candidates.Add(i);
+        {
+            if (!(team == Team.None || Spawns[i].Team == Team.None || Spawns[i].Team == team)) continue;
+            if (assaultGroup >= 0 && Spawns[i].AssaultGroup > assaultGroup) continue;
+            candidates.Add(i);
+        }
+
+        // Attackers use the furthest unlocked group they have; the ones behind it are dead weight.
+        if (assaultGroup > 0 && candidates.Count > 0)
+        {
+            int furthest = 0;
+            foreach (int i in candidates) furthest = Math.Max(furthest, Spawns[i].AssaultGroup);
+            if (furthest > 0) candidates.RemoveAll(i => Spawns[i].AssaultGroup != furthest);
+        }
+
         if (candidates.Count == 0)
         {
             for (int i = 0; i < Spawns.Count; i++) candidates.Add(i);
@@ -603,12 +679,14 @@ public sealed class LevelBuilder
 
     // ---------------------------------------------------------------- gameplay placements
 
-    public void Spawn(Vector3 position, float yawDegrees = 0f, Team team = Team.None)
+    public void Spawn(Vector3 position, float yawDegrees = 0f, Team team = Team.None,
+        int assaultGroup = 0)
         => _level.Spawns.Add(new SpawnPoint
         {
             Position = position,
             Yaw = yawDegrees * MathX.Deg2Rad,
             Team = team,
+            AssaultGroup = assaultGroup,
         });
 
     public void Weapon(Vector3 position, WeaponKind weapon, float respawn = 22f)
@@ -757,6 +835,83 @@ public sealed class LevelBuilder
         Decor(position - new Vector3(0.34f, 0f, 0.34f), position + new Vector3(0.34f, 2.6f, 0.34f),
             MatId.TechPanelDark, 0.8f);
         AddLight(position + new Vector3(0, 2.2f, 0), new Vector3(0.85f, 0.85f, 0.9f), 13f, 3.2f);
+    }
+
+    /// <summary>
+    /// Adds one power node or core. Links are indices into the order these are added, so a map
+    /// declares its chain by construction order — Torlan's five nodes go 1-2-3-4-5 with the
+    /// centre wired to both cores.
+    /// </summary>
+    public int AddPowerNode(Vector3 position, string name, int[] links, bool isCore = false,
+        Team team = Team.None)
+    {
+        _level.PowerNodes.Add(new PowerNodeDef
+        {
+            Position = position, Name = name, IsCore = isCore, Team = team, Links = links ?? [],
+        });
+        // A node reads as a pylon: a base ring, a column and a cap. Colour is applied at runtime.
+        float r = isCore ? 3.4f : 2.4f;
+        float h = isCore ? 6.5f : 4.6f;
+        Decor(position - new Vector3(r, 0.24f, r), position + new Vector3(r, 0.10f, r), MatId.Trim, 1.1f);
+        Decor(position - new Vector3(0.55f, 0f, 0.55f), position + new Vector3(0.55f, h, 0.55f),
+            MatId.TechPanelDark, 0.8f);
+        Decor(position + new Vector3(-1.1f, h, -1.1f), position + new Vector3(1.1f, h + 0.7f, 1.1f),
+            MatId.EnergyPanel, 0.7f);
+        AddLight(position + new Vector3(0, h + 1.6f, 0),
+            isCore && team != Team.None ? GameTypes.TeamColor(team) : new Vector3(0.85f, 0.85f, 0.9f),
+            isCore ? 26f : 18f, isCore ? 6f : 4f);
+        return _level.PowerNodes.Count - 1;
+    }
+
+    /// <summary>
+    /// Wires a node's links after the fact. Links are indices, so a chain that refers forwards
+    /// cannot be declared at construction time — every node has to exist first.
+    /// </summary>
+    public void LinkPowerNodes(int index, int[] links)
+    {
+        if (index < 0 || index >= _level.PowerNodes.Count) return;
+        var def = _level.PowerNodes[index];
+        def.Links = links ?? [];
+        _level.PowerNodes[index] = def;
+    }
+
+    /// <summary>
+    /// Adds the next Assault objective. Declaration order is completion order, so a map reads as
+    /// its own walkthrough. The marker geometry differs by kind so a player can tell at a glance
+    /// whether to shoot the thing or stand on it.
+    /// </summary>
+    public int AddObjective(Vector3 position, string name, ObjectiveKind kind, float radius = 3.4f,
+        float health = 900f, float holdSeconds = 8f, int unlocksSpawnGroup = 0)
+    {
+        _level.Objectives.Add(new AssaultObjectiveDef
+        {
+            Position = position, Name = name, Kind = kind, Radius = radius,
+            Health = health, HoldSeconds = holdSeconds, UnlocksSpawnGroup = unlocksSpawnGroup,
+        });
+
+        switch (kind)
+        {
+            case ObjectiveKind.Destroy:
+                // A housing with an exposed panel: obviously something to shoot.
+                Decor(position - new Vector3(1.5f, 0f, 1.5f), position + new Vector3(1.5f, 3.0f, 1.5f),
+                    MatId.TechPanelDark, 0.75f);
+                Decor(position + new Vector3(-1.1f, 0.7f, 1.5f), position + new Vector3(1.1f, 2.4f, 1.62f),
+                    MatId.EnergyPanel, 0.6f);
+                break;
+            case ObjectiveKind.Hold:
+                // A marked floor plate, so its footprint is the thing you read.
+                Decor(position - new Vector3(radius, 0.24f, radius), position + new Vector3(radius, 0.08f, radius),
+                    MatId.Trim, 1.1f);
+                Decor(position - new Vector3(radius * 0.7f, 0f, radius * 0.7f),
+                    position + new Vector3(radius * 0.7f, 0.14f, radius * 0.7f), MatId.EnergyPanel, 0.6f);
+                break;
+            default:
+                Decor(position - new Vector3(0.5f, 0f, 0.5f), position + new Vector3(0.5f, 1.8f, 0.5f),
+                    MatId.EnergyPanel, 0.7f);
+                break;
+        }
+        AddLight(position + new Vector3(0, 2.6f, 0), new Vector3(1f, 0.75f, 0.35f), 15f, 3.6f);
+        return _level.Objectives.Count - 1;
     }
 
     /// <summary>

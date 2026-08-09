@@ -225,10 +225,17 @@ public sealed class Vehicle
         }
     }
 
-    private static float GroundHeight(Level level, Vector3 at)
+    /// <summary>
+    /// Height of the surface under a vehicle. A miss must not report the bottom of the world:
+    /// the probe starts just above the hull and a vehicle wedged inside geometry makes the ray
+    /// begin inside a brush, which reads as no hit. Answering "the floor of the level" there
+    /// teleports the vehicle — and its crew — through the map. Holding station is the safe
+    /// answer, because the caller only ever uses this to decide whether to rest or keep falling.
+    /// </summary>
+    private float GroundHeight(Level level, Vector3 at)
     {
         Vector3 from = at + new Vector3(0f, 4f, 0f);
         var hit = level.Collision.Raycast(from, from - new Vector3(0f, 400f, 0f));
-        return hit.Hit ? hit.Point.Y : level.Min.Y;
+        return hit.Hit ? hit.Point.Y : at.Y - Def.HalfExtents.Y;
     }
 }
