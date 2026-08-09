@@ -28,6 +28,11 @@ public enum MapId
     November,
     FacingWorlds,
     LavaGiant,
+    // Domination. Every stock DOM map carries exactly three control points.
+    Leadworks,
+    Sesmar,
+    Olden,
+    Cinder,
     Count
 }
 
@@ -60,6 +65,10 @@ public static partial class Maps
         MapId.November => Loc.MapNovember,
         MapId.FacingWorlds => Loc.MapFacingWorlds,
         MapId.LavaGiant => Loc.MapLavaGiant,
+        MapId.Leadworks => Loc.MapLeadworks,
+        MapId.Sesmar => Loc.MapSesmar,
+        MapId.Olden => Loc.MapOlden,
+        MapId.Cinder => Loc.MapCinder,
         _ => Loc.MapDeck16,
     };
 
@@ -82,11 +91,19 @@ public static partial class Maps
         MapId.November => Loc.MapNovemberDesc,
         MapId.FacingWorlds => Loc.MapFacingWorldsDesc,
         MapId.LavaGiant => Loc.MapLavaGiantDesc,
+        MapId.Leadworks => Loc.MapLeadworksDesc,
+        MapId.Sesmar => Loc.MapSesmarDesc,
+        MapId.Olden => Loc.MapOldenDesc,
+        MapId.Cinder => Loc.MapCinderDesc,
         _ => Loc.MapDeck16Desc,
     };
 
     public static bool SupportsCtf(MapId id)
         => id is MapId.Coret or MapId.November or MapId.FacingWorlds or MapId.LavaGiant;
+
+    /// <summary>Domination needs control points, so only the DOM arenas can host it.</summary>
+    public static bool SupportsDomination(MapId id)
+        => id is MapId.Leadworks or MapId.Sesmar or MapId.Olden or MapId.Cinder;
 
     public static Level Build(GL gl, MapId id) => id switch
     {
@@ -107,6 +124,10 @@ public static partial class Maps
         MapId.November => BuildNovember(gl),
         MapId.FacingWorlds => BuildFacingWorlds(gl),
         MapId.LavaGiant => BuildLavaGiant(gl),
+        MapId.Leadworks => BuildLeadworks(gl),
+        MapId.Sesmar => BuildSesmar(gl),
+        MapId.Olden => BuildOlden(gl),
+        MapId.Cinder => BuildCinder(gl),
         _ => BuildDeck16(gl),
     };
 

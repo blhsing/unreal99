@@ -112,6 +112,18 @@ public sealed class GameWorld
     private readonly List<Vector3> _spawnAvoid = new(16);
 
     // CTF state
+    /// <summary>Who holds each control point, indexed alongside <see cref="Level.ControlPoints"/>.</summary>
+    public readonly List<Team> ControlPointOwners = new();
+    /// <summary>Seconds since each point last changed hands, for the capture flash on the HUD.</summary>
+    public readonly List<float> ControlPointSince = new();
+
+    public int ControlPointsHeldBy(Team team)
+    {
+        int n = 0;
+        foreach (var owner in ControlPointOwners) if (owner == team) n++;
+        return n;
+    }
+
     public readonly Dictionary<Team, Vector3> FlagHome = new();
     public readonly Dictionary<Team, Vector3> FlagPosition = new();
     public readonly Dictionary<Team, int> FlagCarrier = new();
@@ -175,6 +187,10 @@ public sealed class GameWorld
                 Phase = Rng.Range(0f, MathX.TwoPi),
             });
         }
+
+        ControlPointOwners.Clear();
+        ControlPointSince.Clear();
+        foreach (var _ in level.ControlPoints) { ControlPointOwners.Add(Team.None); ControlPointSince.Add(99f); }
 
         FlagHome.Clear(); FlagPosition.Clear(); FlagCarrier.Clear(); FlagDroppedTimer.Clear();
         foreach (var fb in level.FlagBases)
@@ -323,6 +339,7 @@ public sealed class GameWorld
         UpdateProjectiles(dt);
         UpdatePickups(dt);
         UpdateFlags(dt);
+        UpdateControlPoints(dt);
 
         for (int i = KillFeed.Count - 1; i >= 0; i--)
         {
@@ -1371,6 +1388,50 @@ public sealed class GameWorld
         }
     }
 
+    /// <summary>
+    /// Domination capture. Touching a point takes it — there is no channel, no timer and no
+    /// requirement to stand and hold. A point already yours is a no-op, so walking over your own
+    /// does not re-announce it.
+    /// </summary>
+    private void UpdateControlPoints(float dt)
+    {
+        if (Mode.Kind != GameModeKind.Domination) return;
+        var points = Level.ControlPoints;
+
+        for (int i = 0; i < points.Count && i < ControlPointOwners.Count; i++)
+        {
+            ControlPointSince[i] += dt;
+            var point = points[i];
+
+            foreach (var pawn in Pawns)
+            {
+                if (!pawn.Alive || pawn.Team == Team.None || pawn.Team == ControlPointOwners[i]) continue;
+                // Generous vertically so standing on the dais counts, tight horizontally so you
+                // cannot take a point by brushing past it in a corridor.
+                Vector3 d = pawn.Position - point.Position;
+                if (MathF.Abs(d.Y) > 2.6f) continue;
+                if (new Vector2(d.X, d.Z).LengthSquared() > point.Radius * point.Radius) continue;
+
+                Team previous = ControlPointOwners[i];
+                ControlPointOwners[i] = pawn.Team;
+                ControlPointSince[i] = 0f;
+                pawn.Captures++;
+
+                AddKillFeed(Loc.DomCaptured(pawn.Name, point.Name), GameTypes.TeamColor(pawn.Team));
+                OnSound?.Invoke(SoundId.FlagCapture, point.Position, 1f);
+                foreach (var viewer in Pawns)
+                {
+                    if (viewer.PlayerIndex < 0) continue;
+                    if (viewer.Team == pawn.Team)
+                        FeedbackFor(viewer).Sub($"{Loc.AnnDomTaken}：{point.Name}", 1.6f);
+                    else if (viewer.Team == previous)
+                        FeedbackFor(viewer).Sub($"{Loc.AnnDomLost}：{point.Name}", 1.6f);
+                }
+                break;
+            }
+        }
+    }
+
     private void UpdateFlags(float dt)
     {
         if (Mode.Kind != GameModeKind.CaptureTheFlag) return;
@@ -1447,6 +1508,7 @@ public sealed class GameWorld
         SubmitProjectiles(scene);
         SubmitPickups(scene);
         SubmitFlags(scene);
+        SubmitControlPoints(scene);
         _ = viewCount;
     }
 
@@ -1777,6 +1839,51 @@ public sealed class GameWorld
                 UvScale = material.UvScale,
                 OwnerView = -1,
             });
+        }
+    }
+
+    /// <summary>
+    /// Draws each control point in its owner's colour. The dais and pillar are baked into the
+    /// level, but ownership is the one thing about a control point that changes, so the coloured
+    /// part has to be submitted per frame: a slowly turning marker above the pillar plus a light
+    /// in the same colour, which is what makes the state readable across a room.
+    /// </summary>
+    private void SubmitControlPoints(RenderScene scene)
+    {
+        if (Mode.Kind != GameModeKind.Domination) return;
+        var points = Level.ControlPoints;
+
+        for (int i = 0; i < points.Count && i < ControlPointOwners.Count; i++)
+        {
+            Team owner = ControlPointOwners[i];
+            Vector3 pos = points[i].Position + new Vector3(0, 3.0f, 0);
+            Vector3 col = owner == Team.None ? new Vector3(0.75f, 0.75f, 0.8f) : GameTypes.TeamColor(owner);
+
+            // A capture flashes for a moment so a change of hands is obvious even off-screen edge.
+            float since = ControlPointSince[i];
+            float flash = since < 0.9f ? 1f + (0.9f - since) * 3.4f : 1f;
+
+            Matrix4x4 xf = Matrix4x4.CreateScale(0.42f)
+                * Matrix4x4.CreateRotationY(Time * 1.1f + i)
+                * Matrix4x4.CreateTranslation(pos);
+            foreach (var section in _pickupModels.FlagSections)
+            {
+                Material mat = Materials.Get(section.Material);
+                scene.Opaque.Add(new DrawCall
+                {
+                    Mesh = _pickupModels.Flag,
+                    IndexOffset = section.IndexOffset,
+                    IndexCount = section.IndexCount,
+                    Material = mat,
+                    Transform = xf,
+                    BoneBase = -1,
+                    Tint = new Vector4(col * flash, 1f),
+                    Center = pos,
+                    Radius = 1.4f,
+                    CastShadow = false,
+                });
+            }
+            scene.AddLight(pos, 13f, col, 3.4f * flash, 1.2f);
         }
     }
 

@@ -1186,6 +1186,11 @@ public sealed class BotController : Controller
             _routeRecoveryGoalNode = -1;
         }
 
+        // Domination is won by standing on ground, not by winning fights near it.
+        if (world.Mode.Kind == GameModeKind.Domination && Pawn.Team != Team.None
+            && TryChooseDominationGoal(world, nav))
+            return;
+
         // CTF carriers, recoveries and team roles take priority over ordinary combat.
         if (world.Mode.Kind == GameModeKind.CaptureTheFlag && Pawn.Team != Team.None)
         {
@@ -1330,6 +1335,60 @@ public sealed class BotController : Controller
         _objectiveGoal = objective;
         _goalTimer = MathF.Min(_goalTimer, refresh);
         return true;
+    }
+
+    /// <summary>
+    /// Domination target selection.
+    ///
+    /// The score in this mode accrues from ground held, so a bot that simply fights whoever it
+    /// can see contributes nothing — it has to go and touch things. Points the team does not own
+    /// are worth taking; points it does own are worth a body only once the team is already ahead,
+    /// because a defender parked on a lead is worth more than a fourth attacker on the same pad.
+    /// </summary>
+    private bool TryChooseDominationGoal(GameWorld world, NavGraph nav)
+    {
+        var points = world.Level.ControlPoints;
+        if (points.Count == 0) return false;
+
+        Team enemy = Pawn.Team == Team.Red ? Team.Blue : Team.Red;
+        int ours = world.ControlPointsHeldBy(Pawn.Team);
+        int theirs = world.ControlPointsHeldBy(enemy);
+
+        // Number bots within their own team so roles are spread. Without this the whole squad
+        // converges on the single nearest point and leaves the rest of the map uncontested.
+        int teamBotSlot = 0;
+        foreach (Pawn mate in world.Pawns)
+            if (mate.IsBot && mate.Team == Pawn.Team && mate.Id < Pawn.Id) teamBotSlot++;
+
+        // Only spare someone for defence while ahead and holding more than one point. Behind or
+        // level, every body attacks — sitting on a losing position just loses more slowly.
+        bool defend = ours > theirs && ours >= 2 && teamBotSlot % 3 == 0;
+
+        int best = -1;
+        float bestScore = float.MaxValue;
+        for (int i = 0; i < points.Count && i < world.ControlPointOwners.Count; i++)
+        {
+            Team owner = world.ControlPointOwners[i];
+            bool mine = owner == Pawn.Team;
+            // Defenders want ours; attackers want everything that is not.
+            if (defend != mine) continue;
+
+            float dist = (points[i].Position - Pawn.Position).FlatXZ().Length();
+            // A neutral pad is a cheaper gain than prising one out of enemy hands, so it wins
+            // ties at a longer distance. Enemy-held points are still taken when they are close.
+            float weight = owner == Team.None ? 0.7f : 1f;
+            float score = dist * weight;
+            if (score < bestScore) { bestScore = score; best = i; }
+        }
+
+        if (best < 0) return false;
+
+        // An attacker must actually reach the pad, so it commits to the route as an objective.
+        // A defender holds a loose perimeter with ordinary combat behaviour instead, otherwise
+        // it stands on the pad being shot at while refusing to strafe.
+        return defend
+            ? SetPreciseGoal(nav, points[best].Position, objective: false, radius: 4.5f, refresh: 2.2f)
+            : SetPreciseGoal(nav, points[best].Position, objective: true, radius: 0.9f, refresh: 1.2f);
     }
 
     private bool TryChooseFlagHoldGoal(GameWorld world, Vector3 home)

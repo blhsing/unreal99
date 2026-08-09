@@ -373,7 +373,8 @@ public sealed class App : IDisposable
                     break;
                 case "--mode" when i + 1 < args.Length:
                     if (int.TryParse(args[i + 1], out int gm))
-                        _menu.ModeKind = (GameModeKind)MathX.Clamp(gm, 0, 4);
+                        _menu.ModeKind = (GameModeKind)MathX.Clamp(gm, 0,
+                            Enum.GetValues<GameModeKind>().Length - 1);
                     _cliOverrides.Add("mode");
                     i++;
                     break;
@@ -1525,6 +1526,13 @@ public sealed class App : IDisposable
             mode = GameMode.Create(GameModeKind.TeamDeathmatch, _menu.FragLimit, _menu.TimeLimitMinutes,
                 _menu.CaptureLimit);
             SetStatus("此地圖不支援奪旗，已改為團隊死亡競賽");
+        }
+        // Domination without control points would be a team deathmatch whose score never moves.
+        if (mode.Kind == GameModeKind.Domination && _level.ControlPoints.Count == 0)
+        {
+            mode = GameMode.Create(GameModeKind.TeamDeathmatch, _menu.FragLimit, _menu.TimeLimitMinutes,
+                _menu.CaptureLimit);
+            SetStatus("此地圖沒有控制點，已改為團隊死亡競賽");
         }
 
         _world.LoadLevel(_level, mode);

@@ -408,8 +408,54 @@ public sealed class Hud
         }
     }
 
+    /// <summary>
+    /// One card per control point, named and coloured by who holds it. Domination is unreadable
+    /// without this: the score moves on its own and a player needs to know which points are
+    /// earning it and which one to go and take.
+    /// </summary>
+    private void DrawDominationPoints(UiRenderer ui, GameWorld world, Pawn pawn, int width, int height, float s)
+    {
+        var points = world.Level.ControlPoints;
+        if (points.Count == 0) return;
+
+        float cardWidth = 132f * s;
+        float gap = 10f * s;
+        float total = points.Count * cardWidth + (points.Count - 1) * gap;
+        float x = width * 0.5f - total * 0.5f;
+        float y = height - 146f * s;
+
+        for (int i = 0; i < points.Count; i++)
+        {
+            Team owner = i < world.ControlPointOwners.Count ? world.ControlPointOwners[i] : Team.None;
+            Vector3 col = owner == Team.None ? new Vector3(0.62f, 0.64f, 0.70f) : GameTypes.TeamColor(owner);
+            // A freshly taken point pulses so the change registers without watching the feed.
+            float since = i < world.ControlPointSince.Count ? world.ControlPointSince[i] : 99f;
+            float pulse = since < 1.2f ? 0.62f + 0.38f * MathF.Cos(since * 18f) : 0.62f;
+
+            ui.ChamferRect(x, y, cardWidth, 42f * s, 6f * s, UiRenderer.Rgba(col * 0.34f, pulse));
+            if (owner == pawn.Team && owner != Team.None)
+                ui.RectOutline(x, y, cardWidth, 42f * s, 1.6f * s, UiRenderer.Rgba(col, 0.85f));
+
+            ui.Text(FaceBold, 15f * s, x + 10f * s, y + 3f * s, points[i].Name,
+                UiRenderer.Rgba(0.94f, 0.96f, 1f));
+            ui.Text(FaceRegular, 13f * s, x + 10f * s, y + 23f * s,
+                owner == Team.None ? Loc.DomNeutral : GameTypes.TeamName(owner),
+                UiRenderer.Rgba(col * 1.25f, 0.98f));
+            x += cardWidth + gap;
+        }
+
+        int mine = world.ControlPointsHeldBy(pawn.Team);
+        ui.Text(FaceRegular, 14f * s, width * 0.5f, y - 20f * s, Loc.DomTeamHolds(mine),
+            UiRenderer.Rgba(0.72f, 0.80f, 0.92f), TextAlign.Center);
+    }
+
     private void DrawObjective(UiRenderer ui, GameWorld world, Pawn pawn, int width, int height, float s)
     {
+        if (world.Mode.Kind == GameModeKind.Domination)
+        {
+            DrawDominationPoints(ui, world, pawn, width, height, s);
+            return;
+        }
         if (world.Mode.Kind != GameModeKind.CaptureTheFlag) return;
 
         float cardWidth = 180f * s;

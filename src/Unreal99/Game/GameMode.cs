@@ -19,6 +19,13 @@ public sealed class GameMode
 
     public int FragLimit = 20;
     public int CaptureLimit = 5;
+    public int DominationLimit = 100;
+    /// <summary>
+    /// Seconds a team must hold a control point to bank one point for it. The original scores
+    /// every held point once per five seconds, so holding two ticks twice as fast as holding one.
+    /// </summary>
+    public const float DominationTickSeconds = 5f;
+    private readonly float[] _dominationTick = new float[2];
     public float TimeLimit = 600f;       // seconds; 0 = unlimited
     public int LivesPerPlayer = 3;       // last man standing
 
@@ -46,9 +53,13 @@ public sealed class GameMode
             FragLimit = fragLimit,
             CaptureLimit = captureLimit,
             TimeLimit = timeLimitMinutes * 60f,
-            TeamBased = kind is GameModeKind.TeamDeathmatch or GameModeKind.CaptureTheFlag,
+            TeamBased = kind is GameModeKind.TeamDeathmatch or GameModeKind.CaptureTheFlag
+                or GameModeKind.Domination,
         };
         mode.TimeRemaining = mode.TimeLimit;
+        // Domination scores in ticks rather than kills, so it needs its own limit: the stock
+        // maps run to 100-125, which takes a few minutes of holding two of three points.
+        if (kind == GameModeKind.Domination) mode.DominationLimit = 100;
         if (kind == GameModeKind.LastManStanding) mode.RespawnDelay = 2.4f;
         if (kind == GameModeKind.Instagib) mode.RespawnDelay = 1.2f;
         return mode;
@@ -57,13 +68,20 @@ public sealed class GameMode
     public bool IsOver => State == MatchState.Finished;
 
     /// <summary>Score used for ranking: frags, team frags, or captures depending on the mode.</summary>
-    public int ScoreOf(Pawn p) => Kind == GameModeKind.CaptureTheFlag
-        ? p.Frags + p.Captures * 7 + p.FlagCarrierKills * 3
-        : p.Frags;
+    public int ScoreOf(Pawn p) => Kind switch
+    {
+        GameModeKind.CaptureTheFlag => p.Frags + p.Captures * 7 + p.FlagCarrierKills * 3,
+        // Captures here are control points touched. Weighted well above a frag so the
+        // scoreboard rewards the player who actually runs the points rather than the one who
+        // camped a corridor with a minigun.
+        GameModeKind.Domination => p.Frags + p.Captures * 5,
+        _ => p.Frags,
+    };
 
     public int LimitValue => Kind switch
     {
         GameModeKind.CaptureTheFlag => CaptureLimit,
+        GameModeKind.Domination => DominationLimit,
         _ => FragLimit,
     };
 
@@ -118,6 +136,8 @@ public sealed class GameMode
                             else Finish(world);
                         }
                     }
+                    if (Kind == GameModeKind.Domination) TickDomination(world, dt);
+
                     _announceTimer -= dt;
                     if (_announceTimer <= 0f)
                     {
@@ -131,6 +151,32 @@ public sealed class GameMode
             case MatchState.Finished:
                 PostMatchTimer += dt;
                 break;
+        }
+    }
+
+    /// <summary>
+    /// Banks a point for every control point a team holds, once per tick. Each point keeps its
+    /// own share of the clock through a single per-team accumulator: holding two points fills it
+    /// twice as fast, which is the whole economy of the mode.
+    /// </summary>
+    private void TickDomination(GameWorld world, float dt)
+    {
+        for (int t = 0; t < 2; t++)
+        {
+            int held = world.ControlPointsHeldBy((Team)t);
+            if (held <= 0) continue;
+            _dominationTick[t] += dt * held;
+            while (_dominationTick[t] >= DominationTickSeconds)
+            {
+                _dominationTick[t] -= DominationTickSeconds;
+                TeamScores[t]++;
+                if (DominationLimit > 0 && TeamScores[t] >= DominationLimit)
+                {
+                    WinningTeam = (Team)t;
+                    Finish(world);
+                    return;
+                }
+            }
         }
     }
 

@@ -103,6 +103,15 @@ public static class Loc
     public const string ModeLastManStandingDesc = "生命有限，最後存活者獲勝。";
     public const string ModeInstagibDesc = "只有震盪步槍，一擊必殺。";
 
+    // ---------------------------------------------------------------- domination
+    public const string DomControlPoints = "控制點";
+    public const string DomNeutral = "中立";
+    public const string DomScoreLimit = "得分上限";
+    public static string DomCaptured(string who, string point) => $"{who} 佔領了 {point}";
+    public static string DomTeamHolds(int n) => $"持有 {n} 個控制點";
+    public const string AnnDomLost = "控制點失守";
+    public const string AnnDomTaken = "控制點已佔領";
+
     // ---------------------------------------------------------------- saves
     public const string MenuSaveGame = "儲存進度";
     public const string MenuLoadGame = "載入進度";
@@ -152,6 +161,16 @@ public static class Loc
     public const string MapMorbiasDesc = "一個圓、一根柱子、沒有地方可躲。史上最純粹的近身混戰。";
     public const string MapCoretDesc = "緊湊的室內設施，上下兩條路線從基地直通中央大廳。";
     public const string MapNovemberDesc = "潛艦碼頭，中央水道停著一艘潛艦，艦身就是最高的爭奪點。";
+
+    public const string MapLeadworks = "DOM-熔鉛廠";
+    public const string MapSesmar = "DOM-賽斯瑪之墓";
+    public const string MapOlden = "DOM-奧登含水層";
+    public const string MapCinder = "DOM-灰燼鑄造廠";
+
+    public const string MapLeadworksDesc = "熔鉛工廠。塔樓、長橋與孤島各據一個控制點，腳下全是熔融金屬。";
+    public const string MapSesmarDesc = "埃及陵墓的三座墓室，火箭與機槍多得誇張，走廊短促而致命。";
+    public const string MapOldenDesc = "山中古代神殿的含水層，小巧而垂直，四到六人最合適。";
+    public const string MapCinderDesc = "停工後被標下的鑄造廠，熔爐、吊車與澆鑄平台各鎮守一點。";
 
     public const string MapFacingWorlds = "CTF-對峙世界";
     public const string MapMorpheus = "DM-摩菲斯之塔";
@@ -391,6 +410,7 @@ public static class Loc
         GameModeKind.CaptureTheFlag => ModeCaptureTheFlag,
         GameModeKind.LastManStanding => ModeLastManStanding,
         GameModeKind.Instagib => ModeInstagib,
+        GameModeKind.Domination => ModeDomination,
         _ => ModeDeathmatch,
     };
 
@@ -401,6 +421,7 @@ public static class Loc
         GameModeKind.CaptureTheFlag => ModeCaptureTheFlagDesc,
         GameModeKind.LastManStanding => ModeLastManStandingDesc,
         GameModeKind.Instagib => ModeInstagibDesc,
+        GameModeKind.Domination => ModeDominationDesc,
         _ => ModeDeathmatchDesc,
     };
 
@@ -439,4 +460,5 @@ public enum GameModeKind
     CaptureTheFlag,
     LastManStanding,
     Instagib,
+    Domination,
 }

@@ -75,6 +75,18 @@ public struct FlagBase
     public float Yaw;
 }
 
+/// <summary>
+/// A Domination control point. Captured by standing on it — there is no carry and no timer to
+/// complete — and it then scores for whoever touched it last until somebody takes it back.
+/// </summary>
+public struct ControlPoint
+{
+    public Vector3 Position;
+    /// <summary>Shown on the HUD, e.g. Tower / Bridge / Storage.</summary>
+    public string Name;
+    public float Radius;
+}
+
 /// <summary>Sky, sun and fog parameters for one arena.</summary>
 public sealed class EnvironmentSettings
 {
@@ -132,6 +144,7 @@ public sealed class Level : IDisposable
     public readonly List<JumpPad> JumpPads = new();
     public readonly List<Teleporter> Teleporters = new();
     public readonly List<FlagBase> FlagBases = new();
+    public readonly List<ControlPoint> ControlPoints = new();
     public NavGraph Nav = new();
     public EnvironmentSettings Environment = new();
 
@@ -712,6 +725,21 @@ public sealed class LevelBuilder
         _mesh.AddCylinder(position + new Vector3(0, 0.16f, 0), 1.05f, 1.05f, 0.08f, 20);
         _mesh.WorldUv = true;
         AddLight(position + new Vector3(0, 1.6f, 0), col, 11f, 3.6f);
+    }
+
+    /// <summary>
+    /// A Domination control point: a low dais with a pillar, so it reads from across a room and
+    /// from above. The team colour is applied at runtime by the renderer, not baked here — the
+    /// whole point of the thing is that it changes hands.
+    /// </summary>
+    public void AddControlPoint(Vector3 position, string name, float radius = 2.2f)
+    {
+        _level.ControlPoints.Add(new ControlPoint { Position = position, Name = name, Radius = radius });
+        Decor(position - new Vector3(radius, 0.22f, radius), position + new Vector3(radius, 0.10f, radius),
+            MatId.Trim, 1.1f);
+        Decor(position - new Vector3(0.34f, 0f, 0.34f), position + new Vector3(0.34f, 2.6f, 0.34f),
+            MatId.TechPanelDark, 0.8f);
+        AddLight(position + new Vector3(0, 2.2f, 0), new Vector3(0.85f, 0.85f, 0.9f), 13f, 3.2f);
     }
 
     // ---------------------------------------------------------------- finalise

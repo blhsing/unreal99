@@ -551,7 +551,8 @@ public sealed class Menu
 
     private void BuildSetup()
     {
-        bool teamMode = ModeKind is GameModeKind.TeamDeathmatch or GameModeKind.CaptureTheFlag;
+        bool teamMode = ModeKind is GameModeKind.TeamDeathmatch or GameModeKind.CaptureTheFlag
+            or GameModeKind.Domination;
 
         AddChoice(Loc.OptGameMode, () => Loc.ModeName(ModeKind), d =>
         {
@@ -562,6 +563,9 @@ public sealed class Menu
             // would silently throw the map choice away.
             if (ModeKind == GameModeKind.CaptureTheFlag && !World.Maps.SupportsCtf(Map))
                 Map = World.MapId.Coret;
+            // Same for Domination: it needs control points, which only the DOM arenas have.
+            if (ModeKind == GameModeKind.Domination && !World.Maps.SupportsDomination(Map))
+                Map = World.MapId.Leadworks;
         }, Loc.ModeDescription(ModeKind));
 
         Add($"{Loc.OptChooseMap}　{World.Maps.Name(Map)}", OpenMapGallery, World.Maps.Description(Map));
@@ -669,7 +673,12 @@ public sealed class Menu
         for (int i = 0; i < (int)World.MapId.Count; i++)
         {
             World.MapId id = (World.MapId)i;
-            bool compatible = ModeKind != GameModeKind.CaptureTheFlag || World.Maps.SupportsCtf(id);
+            bool compatible = ModeKind switch
+            {
+                GameModeKind.CaptureTheFlag => World.Maps.SupportsCtf(id),
+                GameModeKind.Domination => World.Maps.SupportsDomination(id),
+                _ => true,
+            };
             Add(World.Maps.Name(id), () =>
             {
                 Map = id;
