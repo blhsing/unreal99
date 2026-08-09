@@ -107,6 +107,39 @@ public static class Loc
     public const string ModeLastManStandingDesc = "生命有限，最後存活者獲勝。";
     public const string ModeInstagibDesc = "只有震盪步槍，一擊必殺。";
 
+    // ---------------------------------------------------------------- vehicles
+    public const string VehScorpion = "蠍式突擊車";
+    public const string VehHellbender = "地獄使者";
+    public const string VehGoliath = "歌利亞戰車";
+    public const string VehLeviathan = "利維坦要塞";
+    public const string VehPaladin = "聖騎士防禦車";
+    public const string VehSpma = "自走砲";
+    public const string VehManta = "魔鬼魚氣墊艇";
+    public const string VehRaptor = "猛禽戰機";
+    public const string VehCicada = "蟬式炮艇";
+    public const string VehIonTank = "離子戰車";
+    public const string VehViper = "毒蛇懸浮機車";
+    public const string VehScavenger = "拾荒者";
+    public const string VehNemesis = "復仇女神";
+    public const string VehNightshade = "夜影";
+    public const string VehFury = "狂怒戰機";
+    public const string VehDarkwalker = "暗行者";
+    public const string VehHoverboard = "懸浮滑板";
+
+    public const string VehSeatDriver = "駕駛";
+    public const string VehSeatPilot = "飛行員";
+    public const string VehSeatGunner = "射手";
+    public const string VehSeatSkymine = "天雷砲手";
+    public const string VehSeatLaser = "雷射砲手";
+    public const string VehSeatMachineGun = "機槍手";
+    public const string VehSeatCornerTurret = "側砲手";
+    public const string VehSeatArtillery = "砲兵";
+    public const string VehSeatRider = "乘坐者";
+
+    public const string VehEnterPrompt = "按 E 搭乘";
+    public const string VehFull = "載具已滿";
+    public const string VehDestroyed = "載具已摧毀";
+
     // ---------------------------------------------------------------- domination
     public const string DomControlPoints = "控制點";
     public const string DomNeutral = "中立";

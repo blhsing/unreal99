@@ -75,6 +75,17 @@ public struct FlagBase
     public float Yaw;
 }
 
+/// <summary>A vehicle spawn pad: what parks here, facing which way, and how fast it comes back.</summary>
+public struct VehicleSpawn
+{
+    public Vector3 Position;
+    public float Yaw;
+    public VehicleKind Kind;
+    /// <summary>Which team may drive it. None means anyone.</summary>
+    public Team Team;
+    public float RespawnSeconds;
+}
+
 /// <summary>
 /// A Domination control point. Captured by standing on it — there is no carry and no timer to
 /// complete — and it then scores for whoever touched it last until somebody takes it back.
@@ -145,6 +156,7 @@ public sealed class Level : IDisposable
     public readonly List<Teleporter> Teleporters = new();
     public readonly List<FlagBase> FlagBases = new();
     public readonly List<ControlPoint> ControlPoints = new();
+    public readonly List<VehicleSpawn> VehicleSpawns = new();
     public NavGraph Nav = new();
     public EnvironmentSettings Environment = new();
 
@@ -745,6 +757,24 @@ public sealed class LevelBuilder
         Decor(position - new Vector3(0.34f, 0f, 0.34f), position + new Vector3(0.34f, 2.6f, 0.34f),
             MatId.TechPanelDark, 0.8f);
         AddLight(position + new Vector3(0, 2.2f, 0), new Vector3(0.85f, 0.85f, 0.9f), 13f, 3.2f);
+    }
+
+    /// <summary>
+    /// Parks a vehicle. The pad is drawn but not collided — a solid slab under a wheeled
+    /// vehicle would leave it permanently resting on a lip it has to climb off.
+    /// </summary>
+    public void AddVehicle(VehicleKind kind, Vector3 position, float yawDegrees = 0f,
+        Team team = Team.None, float respawnSeconds = 30f)
+    {
+        _level.VehicleSpawns.Add(new VehicleSpawn
+        {
+            Position = position, Yaw = yawDegrees, Kind = kind, Team = team, RespawnSeconds = respawnSeconds,
+        });
+        var def = VehicleDef.Get(kind);
+        float r = MathF.Max(def.HalfExtents.X, def.HalfExtents.Z) + 0.8f;
+        Decor(position - new Vector3(r, 0.18f, r), position + new Vector3(r, -0.02f, r), MatId.Trim, 1.1f);
+        Vector3 col = team == Team.None ? new Vector3(0.7f, 0.72f, 0.8f) : GameTypes.TeamColor(team);
+        AddLight(position + new Vector3(0, 1.4f, 0), col, 9f, 2.4f);
     }
 
     // ---------------------------------------------------------------- finalise

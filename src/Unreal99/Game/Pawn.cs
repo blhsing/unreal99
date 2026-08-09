@@ -52,6 +52,16 @@ public sealed class Pawn
     public Vector3 DeathImpulseDir;
     public bool Gibbed;
 
+    // --- vehicle occupancy ---
+    /// <summary>Vehicle this pawn is aboard, or -1 on foot.</summary>
+    public int VehicleId = -1;
+    public int VehicleSeat = -1;
+    public bool InVehicle => VehicleId >= 0;
+    /// <summary>Driving input, forwarded from the controller when this pawn holds seat 0.</summary>
+    public Vector2 VehicleDrive;
+    public bool VehicleUp;
+    public bool VehicleDown;
+
     public bool OnGround;
     public bool Crouching;
     public float CrouchBlend;

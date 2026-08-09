@@ -155,6 +155,63 @@ public sealed class GameWorld
     private readonly List<Vector3> _spawnAvoid = new(16);
 
     // Domination state
+    public readonly List<Vehicle> Vehicles = new(16);
+    public int NextVehicleId = 1;
+
+    public Vehicle FindVehicle(int id)
+    {
+        foreach (var v in Vehicles) if (v.Id == id) return v;
+        return null;
+    }
+
+    /// <summary>Nearest boardable vehicle within reach of a pawn on foot, or null.</summary>
+    public Vehicle VehicleToBoard(Pawn pawn, float reach = 3.6f)
+    {
+        Vehicle best = null;
+        float bestDist = reach * reach;
+        foreach (var v in Vehicles)
+        {
+            if (!v.Alive || v.FreeSeat() < 0) continue;
+            if (v.Team != Team.None && pawn.Team != Team.None && v.Team != pawn.Team) continue;
+            float d = Vector3.DistanceSquared(v.Position, pawn.Position);
+            float radius = MathF.Max(v.Def.HalfExtents.X, v.Def.HalfExtents.Z) + reach;
+            if (d > radius * radius || d > bestDist) continue;
+            bestDist = d; best = v;
+        }
+        return best;
+    }
+
+    public bool EnterVehicle(Pawn pawn, Vehicle vehicle)
+    {
+        if (pawn == null || vehicle == null || !vehicle.Alive || pawn.VehicleId >= 0) return false;
+        int seat = vehicle.FreeSeat();
+        if (seat < 0) return false;
+        vehicle.Occupants[seat] = pawn.Id;
+        vehicle.SeatYaw[seat] = vehicle.Yaw;
+        vehicle.SeatPitch[seat] = 0f;
+        // First one aboard claims it. It stays claimed after they leave, so an abandoned tank
+        // does not immediately become a free gift to whoever walks past.
+        if (vehicle.Team == Team.None) vehicle.Team = pawn.Team;
+        pawn.VehicleId = vehicle.Id;
+        pawn.VehicleSeat = seat;
+        OnSound?.Invoke(SoundId.Respawn, vehicle.Position, 0.7f);
+        return true;
+    }
+
+    public void ExitVehicle(Pawn pawn)
+    {
+        if (pawn == null || pawn.VehicleId < 0) return;
+        var v = FindVehicle(pawn.VehicleId);
+        if (v != null && pawn.VehicleSeat >= 0 && pawn.VehicleSeat < v.Occupants.Length)
+        {
+            v.Occupants[pawn.VehicleSeat] = -1;
+            pawn.Position = v.ExitPosition(Level.Collision);
+            pawn.Velocity = v.Velocity * 0.35f;
+        }
+        pawn.VehicleId = -1;
+        pawn.VehicleSeat = -1;
+    }
+
     /// <summary>Who holds each control point, indexed alongside <see cref="Level.ControlPoints"/>.</summary>
     public readonly List<Team> ControlPointOwners = new();
     /// <summary>Seconds since each point last changed hands, for the capture flash on the HUD.</summary>
@@ -235,6 +292,16 @@ public sealed class GameWorld
                 Active = true,
                 Phase = Rng.Range(0f, MathX.TwoPi),
             });
+        }
+
+        Vehicles.Clear();
+        NextVehicleId = 1;
+        foreach (var vs in level.VehicleSpawns)
+        {
+            var v = new Vehicle { Id = NextVehicleId++ };
+            v.Configure(vs.Kind, vs.Position + new Vector3(0f, VehicleDef.Get(vs.Kind).HalfExtents.Y, 0f), vs.Yaw);
+            v.Team = vs.Team;
+            Vehicles.Add(v);
         }
 
         ControlPointOwners.Clear();
@@ -385,6 +452,21 @@ public sealed class GameWorld
             }
 
             PawnInput input = Controllers[i].Update(this, dt);
+
+            // A pawn aboard a vehicle does not walk. UpdateVehicles places it in its seat, and
+            // letting Move() also run would have the two fighting over the same position every
+            // frame — the rider would jitter and could shove itself through the hull.
+            if (pawn.InVehicle)
+            {
+                pawn.VehicleDrive = input.Move;
+                pawn.VehicleUp = input.Jump;
+                pawn.VehicleDown = input.Crouch;
+                pawn.TickPresentation(dt);
+                HandleVehicleFire(pawn, input, dt);
+                Mode.OnPawnUpdate(this, pawn, dt);
+                continue;
+            }
+
             var events = pawn.Move(Level, input, dt);
             HandleMoveEvents(pawn, events, dt);
             if (!pawn.Alive) continue;
@@ -399,6 +481,7 @@ public sealed class GameWorld
         UpdatePickups(dt);
         UpdateFlags(dt);
         UpdateControlPoints(dt);
+        UpdateVehicles(dt);
 
         for (int i = KillFeed.Count - 1; i >= 0; i--)
         {
@@ -1450,6 +1533,202 @@ public sealed class GameWorld
                     GameTypes.TeamColor(team), 2.0f);
                 OnSound?.Invoke(SoundId.FlagTaken, pawn.Position, 1.2f);
             }
+        }
+    }
+
+    /// <summary>
+    /// Drives every vehicle from its driver's input, carries the crew, handles the special
+    /// states, and crushes anyone the heavy ones run into.
+    /// </summary>
+    private void UpdateVehicles(float dt)
+    {
+        foreach (var v in Vehicles)
+        {
+            if (!v.Alive)
+            {
+                v.RespawnTimer -= dt;
+                if (v.RespawnTimer <= 0f)
+                {
+                    v.Reset();
+                    Particles.EnergyBurst(v.Position + new Vector3(0, 1f, 0), new Vector3(0.6f, 0.85f, 1f), 1.4f);
+                }
+                continue;
+            }
+
+            var def = v.Def;
+            for (int s = 0; s < v.SeatCooldown.Length; s++)
+                v.SeatCooldown[s] = MathF.Max(0f, v.SeatCooldown[s] - dt);
+
+            // Evict anyone who died in their seat.
+            for (int s = 0; s < v.Occupants.Length; s++)
+            {
+                if (v.Occupants[s] < 0) continue;
+                var occupant = FindPawn(v.Occupants[s]);
+                if (occupant == null || !occupant.Alive)
+                {
+                    if (occupant != null) { occupant.VehicleId = -1; occupant.VehicleSeat = -1; }
+                    v.Occupants[s] = -1;
+                }
+            }
+
+            var driver = v.Driver >= 0 ? FindPawn(v.Driver) : null;
+            Vector2 drive = Vector2.Zero;
+            bool up = false, down = false;
+            if (driver != null)
+            {
+                drive = driver.VehicleDrive;
+                up = driver.VehicleUp;
+                down = driver.VehicleDown;
+                // A non-turret driver seat aims by steering: the hull is the weapon mount.
+                if (!def.Seats[0].Turret) v.SeatYaw[0] = v.Yaw;
+            }
+
+            // Deploy transition. It must finish before the heavy weapon is available, and the
+            // vehicle cannot move throughout — that window is the price of the firepower.
+            if (def.CanDeploy && v.Deploying)
+            {
+                v.Deploy = MathX.Saturate(v.Deploy + dt / MathF.Max(def.DeploySeconds, 0.1f));
+                if (v.Deploy >= 1f) v.Deploying = false;
+            }
+
+            if (def.CanCloak)
+                v.CloakBlend = MathX.Damp(v.CloakBlend, v.Velocity.LengthSquared() < 1f ? 1f : 0f, 3f, dt);
+
+            if (v.SelfDestructTimer > 0f)
+            {
+                v.SelfDestructTimer -= dt;
+                if (v.SelfDestructTimer <= 0f) DetonateVehicle(v);
+            }
+
+            v.Move(Level, drive, up, down, dt);
+
+            // Carry the crew.
+            for (int s = 0; s < v.Occupants.Length; s++)
+            {
+                if (v.Occupants[s] < 0) continue;
+                var rider = FindPawn(v.Occupants[s]);
+                if (rider == null) continue;
+                rider.Position = v.SeatWorld(s);
+                rider.Velocity = v.Velocity;
+                rider.OnGround = true;
+            }
+
+            // Crush anyone on foot the heavy ones run into.
+            if (def.Crushes && v.Velocity.LengthSquared() > 36f)
+            {
+                float reach = MathF.Max(def.HalfExtents.X, def.HalfExtents.Z) + Physics.PawnRadius;
+                foreach (var p in Pawns)
+                {
+                    if (!p.Alive || p.VehicleId >= 0) continue;
+                    if (Vector3.DistanceSquared(p.Position, v.Position) > reach * reach) continue;
+                    if (MathF.Abs(p.Position.Y - v.Position.Y) > def.HalfExtents.Y + 1.4f) continue;
+                    Damage(p, driver, 160f, DamageType.Explosion,
+                        MathX.SafeNormalize(v.Velocity, MathX.Forward), false);
+                }
+            }
+        }
+    }
+
+    /// <summary>
+    /// Firing from a seat. Turret seats aim where the occupant looks, independently of where
+    /// the hull points; the driver of a hull-mounted weapon aims by steering. Unarmed seats —
+    /// the Hellbender's driver, the hoverboard — simply cannot shoot, which is the point of them.
+    /// </summary>
+    private void HandleVehicleFire(Pawn pawn, in PawnInput input, float dt)
+    {
+        var v = FindVehicle(pawn.VehicleId);
+        if (v == null || !v.Alive) return;
+        int seat = pawn.VehicleSeat;
+        if (seat < 0 || seat >= v.Def.Seats.Length) return;
+        var seatDef = v.Def.Seats[seat];
+
+        if (seatDef.Turret) { v.SeatYaw[seat] = input.Yaw; v.SeatPitch[seat] = input.Pitch; }
+
+        // Special alt-fire behaviours that are states rather than shots.
+        var def = v.Def;
+        if (def.HasShield && seat == 0)
+        {
+            v.ShieldUp = input.AltFire;
+            if (v.ShieldUp && v.ShieldHealth <= 0f) v.ShieldHealth = 600f;
+            if (input.AltFire) return;
+        }
+        if (def.CanDeploy && seat == 0 && input.AltFire && !v.Deploying && v.Deploy <= 0f)
+        {
+            v.Deploying = true;
+            OnSound?.Invoke(SoundId.Respawn, v.Position, 0.9f);
+            return;
+        }
+        if (def.CanSelfDestruct && seat == 0 && input.AltFire && v.SelfDestructTimer < 0f)
+        {
+            v.SelfDestructTimer = 1.2f;
+            return;
+        }
+
+        if (!seatDef.Armed) return;
+        bool alt = input.AltFire;
+        FireDef fire = alt ? seatDef.Alt : seatDef.Primary;
+        if (fire.Interval <= 0f) return;
+        if (!(alt ? input.AltFire : input.Fire)) return;
+        if (v.SeatCooldown[seat] > 0f) return;
+
+        // A deployed Leviathan fires the Ion Cannon from the driver's seat instead.
+        if (def.CanDeploy && seat == 0 && v.Deploy >= 1f) fire = seatDef.Alt;
+
+        v.SeatCooldown[seat] = fire.Interval;
+        Vector3 origin = v.SeatWorld(seat) + new Vector3(0f, 0.4f, 0f);
+        Vector3 aim = seatDef.Turret
+            ? MathX.DirFromYawPitch(v.SeatYaw[seat], v.SeatPitch[seat])
+            : MathX.DirFromYawPitch(v.Yaw, v.SeatPitch[seat]);
+
+        switch (fire.Mode)
+        {
+            case FireMode.Hitscan:
+                HitscanShot(pawn, origin, aim, fire, 1f, def.Tint);
+                break;
+            case FireMode.Projectile:
+                SpawnProjectile(fire.Projectile, fire, origin, aim, pawn, 1f, def.Tint);
+                break;
+            case FireMode.Melee:
+                MeleeSwing(pawn, origin, aim, fire, 1f);
+                break;
+        }
+        pawn.ShotsFired++;
+        OnSound?.Invoke(WeaponSound(WeaponKind.RocketLauncher, alt), v.Position, 0.9f);
+    }
+
+    public void DamageVehicle(Vehicle v, Pawn attacker, float amount)
+    {
+        if (v == null || !v.Alive) return;
+        // The Paladin's shield absorbs before the hull takes anything.
+        if (v.ShieldUp && v.ShieldHealth > 0f)
+        {
+            float absorbed = MathF.Min(v.ShieldHealth, amount);
+            v.ShieldHealth -= absorbed;
+            amount -= absorbed;
+            if (amount <= 0f) return;
+        }
+        v.Health -= amount;
+        if (v.Health <= 0f) DetonateVehicle(v, attacker);
+    }
+
+    private void DetonateVehicle(Vehicle v, Pawn attacker = null)
+    {
+        var def = v.Def;
+        v.Alive = false;
+        v.RespawnTimer = 30f;
+        Particles.Explosion(v.Position, MathF.Max(2.5f, def.HalfExtents.Length()));
+        OnSound?.Invoke(SoundId.Explosion, v.Position, 1.3f);
+        // Everyone aboard goes up with it, and so does anyone standing too close.
+        float radius = def.HalfExtents.Length() + 5f;
+        var caught = new List<Pawn>(Pawns);
+        foreach (var p in caught)
+        {
+            if (!p.Alive) continue;
+            if (p.VehicleId == v.Id) { ExitVehicle(p); Kill(p, attacker, DamageType.Explosion); continue; }
+            float d = Vector3.Distance(p.Position, v.Position);
+            if (d > radius) continue;
+            Damage(p, attacker, 140f * (1f - d / radius), DamageType.Explosion,
+                MathX.SafeNormalize(p.Position - v.Position, MathX.Up), false);
         }
     }
 
