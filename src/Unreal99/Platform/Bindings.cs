@@ -230,6 +230,36 @@ public static class BindingNames
         return KeyName(binding.Key);
     }
 
+    /// <summary>Short form for the always-visible HUD weapon slots.</summary>
+    public static string CompactControl(InputBinding binding)
+    {
+        if (!binding.IsBound) return "";
+        if (binding.IsMouse) return $"M{binding.MouseButton + 1}";
+        Key key = binding.Key;
+        if (key >= Key.A && key <= Key.Z) return ((char)('A' + key - Key.A)).ToString();
+        if (key >= Key.Number0 && key <= Key.Number9)
+            return ((char)('0' + key - Key.Number0)).ToString();
+        if (key >= Key.Keypad0 && key <= Key.Keypad9)
+            return $"N{(char)('0' + key - Key.Keypad0)}";
+        if (key >= Key.F1 && key <= Key.F12) return $"F{key - Key.F1 + 1}";
+        return key switch
+        {
+            Key.PageUp => "Pg↑",
+            Key.PageDown => "Pg↓",
+            Key.Up => "↑",
+            Key.Down => "↓",
+            Key.Left => "←",
+            Key.Right => "→",
+            Key.Space => "Sp",
+            Key.Tab => "Tab",
+            Key.Delete => "Del",
+            Key.Insert => "Ins",
+            Key.Home => "Home",
+            Key.End => "End",
+            _ => Control(binding) is { Length: > 4 } full ? full[..4] : Control(binding),
+        };
+    }
+
     public static string KeyName(Key key) => key switch
     {
         Key.Unknown => "未指定",

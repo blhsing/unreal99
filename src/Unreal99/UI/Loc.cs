@@ -8,10 +8,10 @@ public static class Loc
 {
     // ---------------------------------------------------------------- application
     public const string GameTitle = "虛幻競技場 99";
-    public const string GameVersion = "1.0.0";
-    public const string GameVersionLabel = "版本 1.0.0";
+    public const string GameVersion = "1.0.1";
+    public const string GameVersionLabel = "版本 1.0.1";
     public const string GameSubtitle = "重製版 · C#/.NET 引擎";
-    public const string WindowTitle = "虛幻競技場 99 — 重製版 · 1.0.0";
+    public const string WindowTitle = "虛幻競技場 99 — 重製版 · 1.0.1";
     public const string Loading = "載入中";
     public const string GeneratingWorld = "產生場景中";
     public const string GeneratingTextures = "產生材質中";
@@ -262,7 +262,6 @@ public static class Loc
     public const string HudHasFlag = "持有旗幟";
     public const string HudFlagCaptured = "完成奪旗";
     public const string HudFlagAtBase = "旗幟在基地";
-
     // ---------------------------------------------------------------- scoreboard
     public const string ScoreboardTitle = "戰績排行";
     public const string ScoreName = "名稱";
@@ -416,6 +415,9 @@ public static class Loc
     public static string NeedWeapon(string weapon) => $"沒有 {weapon} 的彈藥";
     public static string FlagHeldBy(string player) => $"持旗：{player}";
     public static string YouHoldFlag(string team) => $"你持有{team}旗幟";
+    public static string FlagCarrierMarker(string team) => $"持有{team}旗幟";
+    public static string DamageDealtNumber(int amount) => $"造成 {amount}";
+    public static string DamageTakenNumber(int amount) => $"承受 {amount}";
 
     public static string TimeRemaining(float seconds)
     {

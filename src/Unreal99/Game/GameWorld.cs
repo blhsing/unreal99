@@ -30,6 +30,34 @@ public sealed class Feedback
     public bool HitMarkerLethal;
     public float DamageDirection;    // yaw-relative angle of the last hit, radians
     public float DamageDirectionTimer;
+    public readonly List<DamageNumberEvent> DamageNumbers = new(6);
+
+    /// <summary>
+    /// Adds one fading combat number. Very rapid ticks of the same kind are combined so beam and
+    /// minigun fire remain readable instead of filling the viewport with overlapping glyphs.
+    /// </summary>
+    public void DamageNumber(float amount, bool dealt)
+    {
+        if (amount <= 0.01f) return;
+        const float duration = 1.05f;
+        for (int i = DamageNumbers.Count - 1; i >= 0; i--)
+        {
+            DamageNumberEvent current = DamageNumbers[i];
+            if (current.Dealt != dealt || current.Timer < duration - 0.18f) continue;
+            current.Amount += amount;
+            current.Timer = duration;
+            DamageNumbers[i] = current;
+            return;
+        }
+        if (DamageNumbers.Count >= 6) DamageNumbers.RemoveAt(0);
+        DamageNumbers.Add(new DamageNumberEvent
+        {
+            Amount = amount,
+            Timer = duration,
+            Duration = duration,
+            Dealt = dealt,
+        });
+    }
 
     public void Big(string text, Vector3 color, float duration = 2.2f)
     {
@@ -53,7 +81,22 @@ public sealed class Feedback
         PickupTimer = MathF.Max(0f, PickupTimer - dt);
         HitMarkerTimer = MathF.Max(0f, HitMarkerTimer - dt);
         DamageDirectionTimer = MathF.Max(0f, DamageDirectionTimer - dt);
+        for (int i = DamageNumbers.Count - 1; i >= 0; i--)
+        {
+            DamageNumberEvent number = DamageNumbers[i];
+            number.Timer = MathF.Max(0f, number.Timer - dt);
+            if (number.Timer <= 0f) DamageNumbers.RemoveAt(i);
+            else DamageNumbers[i] = number;
+        }
     }
+}
+
+public struct DamageNumberEvent
+{
+    public float Amount;
+    public float Timer;
+    public float Duration;
+    public bool Dealt;
 }
 
 public struct KillFeedEntry
@@ -977,7 +1020,11 @@ public sealed class GameWorld
             if (amount <= 0.01f) return;
         }
 
+        float healthBefore = target.Health;
+        float armorBefore = target.Armor;
         target.ApplyDamage(amount, type);
+        float appliedDamage = MathF.Max(0f,
+            healthBefore - target.Health + armorBefore - target.Armor);
         target.LastDamageTime = Time;
         if (attacker != null && attacker != target) target.LastAttackerId = attacker.Id;
 
@@ -990,6 +1037,7 @@ public sealed class GameWorld
             fb.DamageDirection = MathF.Atan2(
                 Vector3.Dot(fromDir, target.RightFlat), Vector3.Dot(fromDir, target.ForwardFlat));
             fb.DamageDirectionTimer = 1.3f;
+            fb.DamageNumber(appliedDamage, dealt: false);
         }
 
         if (attacker != null && attacker != target && attacker.PlayerIndex >= 0)
@@ -997,6 +1045,7 @@ public sealed class GameWorld
             var fb = Feedbacks[attacker.Id];
             fb.HitMarkerTimer = 0.22f;
             fb.HitMarkerLethal = target.Health <= 0f;
+            fb.DamageNumber(appliedDamage, dealt: true);
             if (headshot) fb.Sub(Loc.AnnHeadshot, 1.1f);
         }
 

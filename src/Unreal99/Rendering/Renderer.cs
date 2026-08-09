@@ -2,6 +2,7 @@ using System.Numerics;
 using System.Runtime.InteropServices;
 using Silk.NET.OpenGL;
 using Unreal99.Core;
+using Unreal99.Game;
 
 namespace Unreal99.Rendering;
 
@@ -162,6 +163,7 @@ public sealed class Renderer : IDisposable
     private readonly Texture2D _flatNormal;
 
     private Framebuffer _shadowMap;
+    private Framebuffer _weaponHudAtlas;
     private Matrix4x4 _lightViewProj;
     private readonly ViewTargets[] _views = new ViewTargets[4];
 
@@ -173,6 +175,10 @@ public sealed class Renderer : IDisposable
     public int DrawCallCount { get; private set; }
     public int TriangleCount { get; private set; }
     public float Time { get; private set; }
+
+    public const int WeaponHudAtlasColumns = 4;
+    public const int WeaponHudAtlasRows = 3;
+    public Texture2D WeaponHudAtlas => _weaponHudAtlas?.Color[0];
 
     public Renderer(GL gl, RenderSettings settings)
     {
@@ -289,6 +295,92 @@ public sealed class Renderer : IDisposable
             _views[i]?.Dispose();
             _views[i] = null;
         }
+    }
+
+    /// <summary>
+    /// Renders the real pickup meshes and materials into a runtime-only HUD atlas. This keeps the
+    /// inventory faithful to the current models without shipping a second set of thumbnail images.
+    /// The atlas is built once after mesh generation; its transparent background lets the HUD own
+    /// selection, ownership, key-binding and ammo presentation independently.
+    /// </summary>
+    public void BuildWeaponHudAtlas(WeaponModels weaponModels)
+    {
+        const int cellWidth = 256;
+        const int cellHeight = 128;
+        _weaponHudAtlas?.Dispose();
+        _weaponHudAtlas = new Framebuffer(_gl,
+            cellWidth * WeaponHudAtlasColumns, cellHeight * WeaponHudAtlasRows,
+            [(InternalFormat.Rgba8, PixelFormat.Rgba, PixelType.UnsignedByte)],
+            depth: true, depthAsTexture: false, linear: true);
+
+        _weaponHudAtlas.Bind();
+        _gl.ClearColor(0f, 0f, 0f, 0f);
+        _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
+        _gl.Enable(EnableCap.DepthTest);
+        _gl.DepthFunc(DepthFunction.Less);
+        _gl.DepthMask(true);
+        _gl.Enable(EnableCap.CullFace);
+        _gl.CullFace(TriangleFace.Back);
+        _gl.Disable(EnableCap.Blend);
+
+        var scene = new RenderScene
+        {
+            SunDirection = Vector3.Normalize(new Vector3(-0.42f, -0.78f, -0.33f)),
+            SunColor = new Vector3(3.7f, 3.45f, 3.15f),
+            AmbientSky = new Vector3(0.24f, 0.29f, 0.41f),
+            AmbientGround = new Vector3(0.065f, 0.075f, 0.10f),
+            EnvIntensity = 0.82f,
+            FogDensity = 0f,
+        };
+        const float aspect = cellWidth / (float)cellHeight;
+        Vector3 center = new(0f, 0.55f, 0f);
+        var camera = Camera.Default;
+        camera.Position = center + new Vector3(2.15f, 1.35f, 1.90f);
+        MathX.YawPitchFromDir(center - camera.Position, out camera.Yaw, out camera.Pitch);
+        camera.FovY = MathX.VerticalFov(38f * MathX.Deg2Rad, aspect);
+        camera.Near = 0.03f;
+        camera.Far = 20f;
+        camera.Update(aspect);
+
+        for (int i = 0; i < (int)WeaponKind.Count; i++)
+        {
+            int column = i % WeaponHudAtlasColumns;
+            int row = i / WeaponHudAtlasColumns;
+            _gl.Viewport(column * cellWidth, row * cellHeight, cellWidth, cellHeight);
+
+            scene.Opaque.Clear();
+            scene.Transparent.Clear();
+            scene.Lights.Clear();
+            var weapon = (WeaponKind)i;
+            Matrix4x4 transform = Matrix4x4.CreateScale(1.65f)
+                * Matrix4x4.CreateTranslation(center);
+            scene.AddMesh(weaponModels.MeshFor(weapon), weaponModels.SectionsFor(weapon), Materials,
+                transform, center, 2.2f, castShadow: false);
+
+            Vector3 tint = Weapons.Get(weapon).Tint;
+            scene.AddLight(center + new Vector3(1.7f, 1.8f, 1.3f), 6f,
+                tint * 0.48f + new Vector3(0.52f), 4.2f, 2f);
+            scene.AddLight(center + new Vector3(-1.2f, 0.45f, -1.3f), 5f,
+                new Vector3(1f, 0.34f, 0.14f), 2.2f, 1.5f);
+
+            int nLights = scene.SelectLights(camera.Position, camera.Frustum, _lightPos, _lightColor,
+                Settings.LightBudget);
+            _world.Use();
+            SetupWorldUniforms(_world, camera, scene, nLights, receiveShadows: false);
+            foreach (var draw in scene.Opaque) DrawWorldItem(_world, scene, draw);
+
+            if (scene.Transparent.Count > 0)
+            {
+                _gl.Enable(EnableCap.Blend);
+                _gl.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
+                _gl.DepthMask(false);
+                foreach (var draw in scene.Transparent) DrawWorldItem(_world, scene, draw);
+                _gl.DepthMask(true);
+                _gl.Disable(EnableCap.Blend);
+            }
+        }
+
+        Framebuffer.BindDefault(_gl);
     }
 
     private ViewTargets GetTargets(int index, int width, int height)
@@ -517,7 +609,8 @@ public sealed class Renderer : IDisposable
             Vector3.DistanceSquared(b.Center, eye).CompareTo(Vector3.DistanceSquared(a.Center, eye)));
     }
 
-    private void SetupWorldUniforms(Shader sh, in Camera camera, RenderScene scene, int nLights)
+    private void SetupWorldUniforms(Shader sh, in Camera camera, RenderScene scene, int nLights,
+        bool receiveShadows = true)
     {
         sh.Set("uViewProj", camera.ViewProj);
         sh.Set("uView", camera.View);
@@ -529,7 +622,7 @@ public sealed class Renderer : IDisposable
         sh.Set("uAmbientGround", scene.AmbientGround);
         sh.Set("uEnvIntensity", scene.EnvIntensity);
         sh.Set("uShadowTexel", 1f / Settings.EffectiveShadowMapSize);
-        sh.Set("uShadowStrength", Settings.Shadows ? 1f : 0f);
+        sh.Set("uShadowStrength", receiveShadows && Settings.Shadows ? 1f : 0f);
         sh.Set("uNumLights", nLights);
         sh.SetArray("uLightPosRadius", _lightPos.AsSpan(0, Math.Max(1, nLights)));
         sh.SetArray("uLightColorIntensity", _lightColor.AsSpan(0, Math.Max(1, nLights)));
@@ -780,6 +873,7 @@ public sealed class Renderer : IDisposable
     {
         foreach (var v in _views) v?.Dispose();
         _shadowMap?.Dispose();
+        _weaponHudAtlas?.Dispose();
         _world.Dispose(); _worldSkinned.Dispose(); _shadow.Dispose(); _shadowSkinned.Dispose(); _sky.Dispose();
         _ssao.Dispose(); _blur.Dispose(); _boxBlur.Dispose(); _bright.Dispose(); _streak.Dispose();
         _godRay.Dispose(); _composite.Dispose(); _fxaa.Dispose(); _blit.Dispose();

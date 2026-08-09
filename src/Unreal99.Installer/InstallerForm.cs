@@ -16,7 +16,7 @@ internal sealed class InstallerForm : Form
 
     public InstallerForm()
     {
-        Text = "虛幻競技場 99 — 1.0.0 安裝程式";
+        Text = "虛幻競技場 99 — 1.0.1 安裝程式";
         ClientSize = new Size(720, 555);
         MinimumSize = new Size(680, 535);
         StartPosition = FormStartPosition.CenterScreen;
@@ -46,7 +46,7 @@ internal sealed class InstallerForm : Form
         });
         header.Controls.Add(new Label
         {
-            Text = "1.0.0 重製版安裝程式  ·  不需要系統管理員權限",
+            Text = "1.0.1 重製版安裝程式  ·  不需要系統管理員權限",
             ForeColor = Color.FromArgb(173, 202, 236),
             AutoSize = true,
             Location = new Point(194, 96),

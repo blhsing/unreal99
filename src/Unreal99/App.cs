@@ -1340,6 +1340,8 @@ public sealed class App : IDisposable
                 _weaponModels = new WeaponModels(_gl);
                 _projectileModels = new ProjectileModels(_gl);
                 _pickupModels = new PickupModels(_gl);
+                _renderer.BuildWeaponHudAtlas(_weaponModels);
+                _hud.WeaponThumbnailAtlas = _renderer.WeaponHudAtlas;
                 break;
             case 3:
                 _menuLevel = Maps.Build(_gl, MapId.Deck16);
@@ -1986,7 +1988,7 @@ public sealed class App : IDisposable
             var rect = viewports[Math.Min(i, viewports.Length - 1)];
             _gl.Viewport(rect.X, rect.Y, (uint)rect.Width, (uint)rect.Height);
             _ui.Begin(rect.Width, rect.Height);
-            _hud.Draw(_ui, _world, _players[i].Pawn, _players[i], rect.Width, rect.Height, dt,
+            _hud.Draw(_ui, _world, _players[i].Pawn, _players[i], _cameras[i], rect.Width, rect.Height, dt,
                 _showDebug && i == 0, BuildDebugText());
             _ui.End();
         }

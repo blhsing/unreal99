@@ -1,6 +1,7 @@
 using System.Numerics;
 using Unreal99.Core;
 using Unreal99.Game;
+using Unreal99.Platform;
 using Unreal99.Rendering;
 
 namespace Unreal99.UI;
@@ -13,6 +14,7 @@ public sealed class Hud
 {
     public int FaceRegular;
     public int FaceBold;
+    public Texture2D WeaponThumbnailAtlas;
 
     private static readonly uint White = UiRenderer.Rgba(1f, 1f, 1f);
     private static readonly uint Shadow = UiRenderer.Rgba(0f, 0f, 0f, 0.75f);
@@ -39,17 +41,20 @@ public sealed class Hud
     }
 
     public void Draw(UiRenderer ui, GameWorld world, Pawn pawn, PlayerController controller,
-        int width, int height, float dt, bool showDebug, string debugText)
+        in Camera camera, int width, int height, float dt, bool showDebug, string debugText)
     {
         float s = MathF.Max(height / 900f, 0.42f);      // uniform scale factor
         var mode = world.Mode;
         var feedback = world.FeedbackFor(pawn);
         Vector3 accent = mode.TeamBased ? GameTypes.TeamColor(pawn.Team) : pawn.AccentColor;
 
+        DrawPlayerLabels(ui, world, pawn, camera, width, height, s);
         DrawCrosshair(ui, world, pawn, width, height, s);
         DrawDamageIndicators(ui, feedback, width, height, s);
+        if (pawn.Alive) DrawCombatNumbers(ui, feedback, width, height, s);
         DrawHealthArmor(ui, pawn, width, height, s, accent);
         DrawAmmoWeapon(ui, pawn, width, height, s, accent);
+        DrawWeaponInventory(ui, pawn, controller.Device.Bindings, width, height, s, accent);
         DrawPowerups(ui, pawn, width, height, s);
         DrawMatchStatus(ui, world, pawn, width, height, s, accent);
         DrawKillFeed(ui, world, width, height, s);
@@ -62,6 +67,118 @@ public sealed class Hud
         if (controller is { WantsScoreboard: true } || mode.IsOver) DrawScoreboard(ui, world, pawn, width, height, s);
         if (showDebug) DrawDebug(ui, debugText, width, height, s);
         _ = dt;
+    }
+
+    // ---------------------------------------------------------------- player identification
+
+    private void DrawPlayerLabels(UiRenderer ui, GameWorld world, Pawn viewer, in Camera camera,
+        int width, int height, float s)
+    {
+        // The death overlay owns the centre of compact split-screen views; suppress world labels
+        // until respawn so names and health bars do not obscure the countdown and killer details.
+        if (!viewer.Alive) return;
+        const float labelHeight = 26f;
+        float font = LayoutFont(22f * s);
+        var occupied = new List<(float Left, float Top, float Right, float Bottom)>(world.Pawns.Count);
+        foreach (Pawn player in world.Pawns)
+        {
+            if (!player.Alive || player.Id == viewer.Id) continue;
+
+            Vector3 anchor = player.Position + new Vector3(0f, 2.35f, 0f);
+            if (!camera.WorldToScreen(anchor, out Vector2 uv)
+                || uv.X < 0.015f || uv.X > 0.985f || uv.Y < 0.015f || uv.Y > 0.985f)
+                continue;
+
+            // Keep normal labels honest: identify a player once their head is actually visible,
+            // but do not reveal enemies through arena geometry.
+            if (!world.Level.Collision.LineOfSight(camera.Position, anchor)) continue;
+
+            float distance = Vector3.Distance(camera.Position, anchor);
+            float alpha = 1f - MathX.Saturate((distance - 70f) / 45f) * 0.36f;
+            if (player.IsInvisible) alpha *= 0.42f;
+            Vector3 identity = world.Mode.TeamBased
+                ? GameTypes.TeamColor(player.Team)
+                : player.AccentColor;
+            float centerX = uv.X * width;
+            float headY = (1f - uv.Y) * height;
+            bool flagCarrier = world.Mode.Kind == GameModeKind.CaptureTheFlag && player.HasFlag;
+            float maximumNameWidth = MathF.Min(220f, width - 20f);
+            string name = FitText(ui, FaceBold, font, player.Name, maximumNameWidth - 20f);
+            float nameWidth = MathX.Clamp(ui.MeasureText(FaceBold, font, name) + 22f,
+                92f, maximumNameWidth);
+            float tagWidth = MathF.Max(nameWidth, 170f);
+            float tagHeight = flagCarrier ? 87f : 56f;
+            bool compact = CompactLayout(width, height);
+            float safeTop = compact ? 72f : MathF.Max(82f, 96f * s);
+            float safeBottom = compact ? height - 220f : height - MathF.Max(174f, 194f * s);
+            float maximumTop = MathF.Max(safeTop, safeBottom - tagHeight);
+            centerX = MathX.Clamp(centerX, tagWidth * 0.5f + 4f,
+                width - tagWidth * 0.5f - 4f);
+            float tagTop = MathX.Clamp(headY - tagHeight - 8f, safeTop, maximumTop);
+
+            // Players can line up almost perfectly in a corridor. Stack their labels vertically
+            // instead of drawing names and HP values on top of one another. Labels also stay out
+            // of the match header above and the objective/inventory panels below.
+            for (int attempt = 0; attempt < 6; attempt++)
+            {
+                float left = centerX - tagWidth * 0.5f;
+                float right = centerX + tagWidth * 0.5f;
+                bool intersects = occupied.Any(r => left < r.Right && right > r.Left
+                    && tagTop < r.Bottom && tagTop + tagHeight > r.Top);
+                if (!intersects) break;
+                float upward = tagTop - tagHeight - 5f;
+                tagTop = upward >= safeTop
+                    ? upward
+                    : MathF.Min(maximumTop, tagTop + tagHeight + 5f);
+            }
+            occupied.Add((centerX - tagWidth * 0.5f, tagTop,
+                centerX + tagWidth * 0.5f, tagTop + tagHeight));
+            float nameY = tagTop + (flagCarrier ? labelHeight + 5f : 0f);
+
+            if (flagCarrier)
+            {
+                string flagText = Loc.FlagCarrierMarker(GameTypes.TeamName(player.CarriedFlag));
+                float flagWidth = MathF.Min(width - 16f,
+                    ui.MeasureText(FaceBold, font, flagText) + 20f);
+                float flagY = tagTop;
+                Vector3 flagColor = GameTypes.TeamColor(player.CarriedFlag);
+                ui.ChamferRect(centerX - flagWidth * 0.5f, flagY, flagWidth, labelHeight, 5f,
+                    UiRenderer.Rgba(flagColor * 0.20f, 0.88f * alpha));
+                ui.TextOutline(FaceBold, font, centerX, flagY, flagText,
+                    UiRenderer.Rgba(flagColor * 1.35f, alpha), Shadow, 2f,
+                    TextAlign.Center);
+            }
+
+            ui.ChamferRect(centerX - nameWidth * 0.5f, nameY, nameWidth, labelHeight, 5f,
+                UiRenderer.Rgba(0.015f, 0.025f, 0.05f, 0.78f * alpha));
+            ui.Line(new Vector2(centerX - nameWidth * 0.5f + 5f, nameY),
+                new Vector2(centerX + nameWidth * 0.5f - 5f, nameY), 2f,
+                UiRenderer.Rgba(identity * 1.25f, alpha));
+            ui.TextOutline(FaceBold, font, centerX, nameY, name,
+                UiRenderer.Rgba(identity * 1.25f + new Vector3(0.18f), alpha),
+                Shadow, 2f, TextAlign.Center);
+
+            float health = MathF.Max(0f, player.Health);
+            float healthFraction = MathX.Saturate(health / MathF.Max(1f, player.MaxHealth));
+            Vector3 healthColor = healthFraction > 0.5f ? new Vector3(0.25f, 1f, 0.46f)
+                : healthFraction > 0.25f ? new Vector3(1f, 0.82f, 0.20f)
+                : new Vector3(1f, 0.20f, 0.16f);
+            string hp = MathF.Ceiling(health).ToString("0");
+            float hpWidth = ui.MeasureText(FaceBold, font, hp);
+            const float barWidth = 104f;
+            const float barHeight = 9f;
+            float rowWidth = barWidth + 8f + hpWidth;
+            float barX = centerX - rowWidth * 0.5f;
+            float barY = nameY + labelHeight + 5f;
+            ui.Rect(barX - 2f, barY - 2f, barWidth + 4f, barHeight + 4f,
+                UiRenderer.Rgba(0f, 0f, 0f, 0.82f * alpha));
+            ui.Rect(barX, barY, barWidth, barHeight,
+                UiRenderer.Rgba(0.09f, 0.10f, 0.13f, 0.94f * alpha));
+            ui.Rect(barX, barY, barWidth * healthFraction, barHeight,
+                UiRenderer.Rgba(healthColor, 0.98f * alpha));
+            ui.TextOutline(FaceBold, font, barX + barWidth + 8f, barY - 8f, hp,
+                UiRenderer.Rgba(healthColor, alpha), Shadow, 2f);
+        }
     }
 
     // ---------------------------------------------------------------- crosshair
@@ -168,6 +285,32 @@ public sealed class Hud
         ui.Triangle(tip + dir * 22f * s, tip - side * 20f * s, tip + side * 20f * s, col);
     }
 
+    private void DrawCombatNumbers(UiRenderer ui, Feedback feedback, int width, int height, float s)
+    {
+        int dealtLane = 0;
+        int takenLane = 0;
+        float font = LayoutFont(27f * s);
+        foreach (DamageNumberEvent number in feedback.DamageNumbers)
+        {
+            if (number.Timer <= 0f || number.Duration <= 0f) continue;
+            float progress = 1f - number.Timer / number.Duration;
+            float alpha = MathX.Saturate(number.Timer / 0.32f);
+            int lane = number.Dealt ? dealtLane++ : takenLane++;
+            float x = width * 0.5f + (number.Dealt ? 92f : -92f) * MathF.Max(s, 0.72f);
+            float y = height * 0.5f + (number.Dealt ? -62f : 34f) * MathF.Max(s, 0.72f)
+                - progress * 54f - lane * 25f;
+            int amount = Math.Max(1, (int)MathF.Round(number.Amount));
+            string text = number.Dealt
+                ? Loc.DamageDealtNumber(amount)
+                : Loc.DamageTakenNumber(amount);
+            Vector3 color = number.Dealt
+                ? new Vector3(1f, 0.76f, 0.16f)
+                : new Vector3(1f, 0.20f, 0.16f);
+            ui.TextOutline(FaceBold, font, x, y, text, UiRenderer.Rgba(color, alpha),
+                UiRenderer.Rgba(0f, 0f, 0f, 0.88f * alpha), 2.5f, TextAlign.Center);
+        }
+    }
+
     // ---------------------------------------------------------------- status panels
 
     private void DrawHealthArmor(UiRenderer ui, Pawn pawn, int width, int height, float s, Vector3 accent)
@@ -186,6 +329,9 @@ public sealed class Hud
 
         ui.ChamferRect(x, y, panelW, panelH, 12f * s, PanelBg);
         ui.Line(new Vector2(x + 12f * s, y), new Vector2(x + panelW - 12f * s, y), 1.6f * s, PanelEdge);
+        string ownName = FitText(ui, FaceBold, LayoutFont(22f * s), pawn.Name, panelW - 12f * s);
+        ui.TextOutline(FaceBold, LayoutFont(22f * s), x + 8f * s, y - 31f * s, ownName,
+            UiRenderer.Rgba(accent * 1.2f + new Vector3(0.15f)), Shadow, 2f * s);
 
         // Health
         float health = MathF.Max(0f, pawn.Health);
@@ -210,24 +356,27 @@ public sealed class Hud
         float barY = y + panelH - 9f * s;
         float barH = 4.5f * s;
         ui.Rect(x + 16f * s, barY, 100f * s, barH, UiRenderer.Rgba(0.08f, 0.09f, 0.12f, 0.8f));
-        ui.Rect(x + 16f * s, barY, 100f * s * MathX.Saturate(health / 199f), barH, UiRenderer.Rgba(healthColor, 0.95f));
+        ui.Rect(x + 16f * s, barY, 100f * s * MathX.Saturate(health / MathF.Max(1f, pawn.MaxHealth)), barH,
+            UiRenderer.Rgba(healthColor, 0.95f));
         ui.Rect(x + 132f * s, barY, 100f * s, barH, UiRenderer.Rgba(0.08f, 0.09f, 0.12f, 0.8f));
         ui.Rect(x + 132f * s, barY, 100f * s * MathX.Saturate(pawn.Armor / 150f), barH,
             UiRenderer.Rgba(armorColor, 0.95f));
 
-        _ = accent;
     }
 
     private void DrawCompactHealthArmor(UiRenderer ui, Pawn pawn, int width, int height, Vector3 accent)
     {
         const float pad = 10f;
         float panelW = MathF.Min(242f, width * 0.43f);
-        const float panelH = 40f;
+        const float panelH = 66f;
         float x = pad;
         float y = height - pad - panelH;
         float font = LayoutFont(22f);
         ui.ChamferRect(x, y, panelW, panelH, 7f, PanelBg);
         ui.Line(new Vector2(x + 7f, y), new Vector2(x + panelW - 7f, y), 1.5f, PanelEdge);
+        string ownName = FitText(ui, FaceBold, font, pawn.Name, panelW - 18f);
+        ui.Text(FaceBold, font, x + 9f, y + 3f, ownName,
+            UiRenderer.Rgba(accent * 1.2f + new Vector3(0.15f), 0.98f));
 
         float health = MathF.Max(0f, pawn.Health);
         Vector3 healthColor = health > 100f ? new Vector3(0.35f, 1f, 0.85f)
@@ -237,19 +386,26 @@ public sealed class Hud
         Vector3 armorColor = pawn.HasShieldBelt ? new Vector3(1f, 0.45f, 1f)
             : new Vector3(1f, 0.72f, 0.25f);
         float split = x + panelW * 0.52f;
-        ui.Text(FaceRegular, font, x + 9f, y + 5f, Loc.HudHealth,
+        ui.Text(FaceRegular, font, x + 9f, y + 30f, Loc.HudHealth,
             UiRenderer.Rgba(0.75f, 0.82f, 0.92f, 0.95f));
-        ui.Text(FaceBold, font, split - 9f, y + 5f, ((int)health).ToString(),
+        ui.Text(FaceBold, font, split - 9f, y + 30f, ((int)health).ToString(),
             UiRenderer.Rgba(healthColor), TextAlign.Right);
-        ui.Text(FaceRegular, font, split + 6f, y + 5f, Loc.HudArmor,
+        ui.Text(FaceRegular, font, split + 6f, y + 30f, Loc.HudArmor,
             UiRenderer.Rgba(0.75f, 0.82f, 0.92f, 0.95f));
-        ui.Text(FaceBold, font, x + panelW - 9f, y + 5f, ((int)pawn.Armor).ToString(),
+        ui.Text(FaceBold, font, x + panelW - 9f, y + 30f, ((int)pawn.Armor).ToString(),
             UiRenderer.Rgba(armorColor), TextAlign.Right);
-        ui.Rect(x + 9f, y + panelH - 4f, panelW * 0.43f, 2.5f,
+        float healthBarWidth = panelW * 0.43f;
+        float armorBarWidth = panelW * 0.40f;
+        ui.Rect(x + 9f, y + panelH - 5f, healthBarWidth, 3f,
+            UiRenderer.Rgba(0.08f, 0.09f, 0.12f, 0.85f));
+        ui.Rect(x + 9f, y + panelH - 5f,
+            healthBarWidth * MathX.Saturate(health / MathF.Max(1f, pawn.MaxHealth)), 3f,
             UiRenderer.Rgba(healthColor, 0.95f));
-        ui.Rect(split + 6f, y + panelH - 4f, panelW * 0.40f, 2.5f,
+        ui.Rect(split + 6f, y + panelH - 5f, armorBarWidth, 3f,
+            UiRenderer.Rgba(0.08f, 0.09f, 0.12f, 0.85f));
+        ui.Rect(split + 6f, y + panelH - 5f,
+            armorBarWidth * MathX.Saturate(pawn.Armor / 150f), 3f,
             UiRenderer.Rgba(armorColor, 0.95f));
-        _ = accent;
     }
 
     private void DrawAmmoWeapon(UiRenderer ui, Pawn pawn, int width, int height, float s, Vector3 accent)
@@ -294,27 +450,6 @@ public sealed class Hud
                 UiRenderer.Rgba(ammoColor, 0.95f));
         }
 
-        // Weapon slot strip: which weapons are carried, current one highlighted.
-        float slotSize = 15f * s;
-        float slotGap = 4f * s;
-        var order = Weapons.CycleOrder;
-        float totalW = order.Length * slotSize + (order.Length - 1) * slotGap;
-        float sx = x + panelW - 16f * s - totalW;
-        float sy = y - 16f * s;
-        for (int i = 0; i < order.Length; i++)
-        {
-            var w = order[i];
-            bool have = pawn.HasWeapon[(int)w];
-            bool current = w == pawn.Weapon;
-            uint col = current ? UiRenderer.Rgba(accent, 0.98f)
-                     : have ? UiRenderer.Rgba(0.72f, 0.78f, 0.88f, 0.62f)
-                     : UiRenderer.Rgba(0.25f, 0.27f, 0.32f, 0.42f);
-            float h = current ? slotSize * 1.35f : slotSize;
-            ui.Rect(sx + i * (slotSize + slotGap), sy + (slotSize - h) * 0.5f, slotSize, h, col);
-        }
-
-        // Pickup notification.
-        if (pawn.PlayerIndex >= 0) { }
     }
 
     private void DrawCompactAmmoWeapon(UiRenderer ui, Pawn pawn, int width, int height, Vector3 accent)
@@ -342,6 +477,103 @@ public sealed class Hud
             ui.Rect(x + 9f, y + panelH - 4f, (panelW - 18f) * MathX.Saturate(fraction), 2.5f,
                 UiRenderer.Rgba(accent, 0.96f));
         }
+    }
+
+    /// <summary>
+    /// Original-style persistent weapon inventory. Every slot uses the actual in-engine pickup
+    /// model and communicates ownership, remaining ammo and that player's direct-select binding;
+    /// the selected weapon gets a strong outline.
+    /// </summary>
+    private void DrawWeaponInventory(UiRenderer ui, Pawn pawn, BindingProfile bindings,
+        int width, int height, float s, Vector3 accent)
+    {
+        bool compact = CompactLayout(width, height);
+        WeaponKind[] order = Weapons.CycleOrder;
+        float gap = compact ? 3f : 4f * s;
+        float available = compact
+            ? width - 16f
+            : width - MathF.Min(width * 0.38f, 560f * s);
+        float cardWidth = MathX.Clamp(
+            (available - gap * (order.Length - 1)) / order.Length,
+            compact ? 48f : 58f, compact ? 70f : 84f * s);
+        float cardHeight = compact ? 64f : MathF.Max(70f, 70f * s);
+        float totalWidth = order.Length * cardWidth + (order.Length - 1) * gap;
+        float startX = width * 0.5f - totalWidth * 0.5f;
+        float y = compact ? height - 151f : height - cardHeight - 10f * s;
+        float font = LayoutFont(compact ? 22f : 18f * s);
+
+        for (int i = 0; i < order.Length; i++)
+        {
+            WeaponKind weapon = order[i];
+            WeaponDef def = Weapons.Get(weapon);
+            bool owned = pawn.HasWeapon[(int)weapon];
+            bool selected = weapon == pawn.Weapon;
+            int ammo = def.Ammo == AmmoKind.None ? 999 : pawn.AmmoFor(weapon);
+            bool usable = owned && (def.Ammo == AmmoKind.None || ammo > 0);
+            float x = startX + i * (cardWidth + gap);
+            Vector3 weaponColor = def.Tint * 0.72f + accent * 0.28f;
+            float panelAlpha = selected ? 0.96f : owned ? 0.88f : 0.64f;
+            ui.ChamferRect(x, y, cardWidth, cardHeight, 5f,
+                UiRenderer.Rgba(weaponColor * (selected ? 0.34f : 0.14f), panelAlpha));
+
+            if (WeaponThumbnailAtlas != null)
+            {
+                const float inset = 0.002f;
+                int column = (int)weapon % Renderer.WeaponHudAtlasColumns;
+                int row = (int)weapon / Renderer.WeaponHudAtlasColumns;
+                // Framebuffer textures are bottom-up relative to the HUD's top-left coordinates.
+                Vector2 uv0 = new(
+                    column / (float)Renderer.WeaponHudAtlasColumns + inset,
+                    (row + 1f) / Renderer.WeaponHudAtlasRows - inset);
+                Vector2 uv1 = new(
+                    (column + 1f) / Renderer.WeaponHudAtlasColumns - inset,
+                    row / (float)Renderer.WeaponHudAtlasRows + inset);
+                float imageAlpha = owned ? 1f : 0.42f;
+                ui.Texture(WeaponThumbnailAtlas, x + 2f, y + 2f, cardWidth - 4f, cardHeight - 4f,
+                    UiRenderer.Rgba(1f, 1f, 1f, imageAlpha), uv0, uv1);
+                if (!owned)
+                    ui.Rect(x + 2f, y + 2f, cardWidth - 4f, cardHeight - 4f,
+                        UiRenderer.Rgba(0.02f, 0.025f, 0.04f, 0.30f));
+            }
+
+            ui.RectOutline(x, y, cardWidth, cardHeight, selected ? 3f : 1.3f,
+                selected ? UiRenderer.Rgba(weaponColor * 1.35f, 1f)
+                : UiRenderer.Rgba(owned ? weaponColor : new Vector3(0.3f), 0.66f));
+
+            GameAction? action = DirectWeaponAction(weapon);
+            string key = action.HasValue ? BindingNames.CompactControl(bindings[action.Value]) : "";
+            if (!string.IsNullOrEmpty(key))
+            {
+                key = FitText(ui, FaceBold, font, key, cardWidth - 8f);
+                float keyWidth = MathF.Min(cardWidth - 4f,
+                    ui.MeasureText(FaceBold, font, key) + 8f);
+                ui.ChamferRect(x + 2f, y + 2f, keyWidth, font + 4f, 3f,
+                    UiRenderer.Rgba(0.01f, 0.015f, 0.025f, 0.78f));
+                ui.Text(FaceBold, font, x + 6f, y + 2f, key,
+                    UiRenderer.Rgba(owned ? new Vector3(0.92f, 0.97f, 1f) : new Vector3(0.46f),
+                        owned ? 1f : 0.62f));
+            }
+
+            string ammoText = !owned ? "—" : def.Ammo == AmmoKind.None ? "∞" : ammo.ToString();
+            Vector3 ammoColor = !usable ? new Vector3(1f, 0.22f, 0.18f)
+                : def.Ammo != AmmoKind.None && ammo <= Math.Max(2, def.MaxAmmo / 8)
+                    ? new Vector3(1f, 0.78f, 0.18f)
+                    : new Vector3(0.90f, 0.96f, 1f);
+            float ammoWidth = MathF.Min(cardWidth - 4f,
+                ui.MeasureText(FaceBold, font, ammoText) + 8f);
+            ui.ChamferRect(x + cardWidth - ammoWidth - 2f, y + cardHeight - font - 6f,
+                ammoWidth, font + 4f, 3f, UiRenderer.Rgba(0.01f, 0.015f, 0.025f, 0.80f));
+            ui.Text(FaceBold, font, x + cardWidth - 6f, y + cardHeight - font - 6f, ammoText,
+                UiRenderer.Rgba(ammoColor, owned ? 1f : 0.50f), TextAlign.Right);
+        }
+    }
+
+    private static GameAction? DirectWeaponAction(WeaponKind weapon)
+    {
+        int slot = (int)weapon;
+        if (slot <= (int)WeaponKind.RocketLauncher) return GameAction.Weapon1 + slot;
+        if (weapon == WeaponKind.Redeemer) return GameAction.Weapon10;
+        return null; // Sniper rifle has no fixed slot in the original 1–9/0 scheme.
     }
 
     private void DrawPowerups(UiRenderer ui, Pawn pawn, int width, int height, float s)
@@ -602,7 +834,7 @@ public sealed class Hud
         float total = points.Count * cardWidth + (points.Count - 1) * gap;
         float x = width * 0.5f - total * 0.5f;
         float cardHeight = MathF.Max(52f, 48f * s);
-        float y = compact ? height - 132f : height - 152f * s;
+        float y = compact ? height - 216f : height - 152f * s;
 
         for (int i = 0; i < points.Count; i++)
         {
@@ -652,7 +884,7 @@ public sealed class Hud
             : 180f * s;
         float cardHeight = MathF.Max(54f, 48f * s);
         float x = width * 0.5f - (cardWidth * 2f + gap) * 0.5f;
-        float y = compact ? height - 132f : height - 152f * s;
+        float y = compact ? height - 216f : height - 152f * s;
         foreach (Team team in FlagTeams)
         {
             if (!world.FlagHome.TryGetValue(team, out Vector3 flagHome)) continue;

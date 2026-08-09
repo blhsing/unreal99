@@ -1,7 +1,7 @@
 param(
     [string]$OutputDirectory = (Join-Path $PSScriptRoot "artifacts\installer"),
     [string]$ReleaseDirectory = (Join-Path $PSScriptRoot "artifacts\release"),
-    [string]$Version = "1.0.0"
+    [string]$Version = "1.0.1"
 )
 
 $ErrorActionPreference = "Stop"
@@ -42,4 +42,4 @@ $checksums = @($portableArchive, $installerArchive) | ForEach-Object {
 $checksums | Set-Content -LiteralPath (Join-Path $releaseRoot "SHA256SUMS.txt") -Encoding utf8NoBOM
 
 Write-Host "安裝套件已建立：$packageRoot"
-Write-Host "1.0.0 發行下載已建立：$releaseRoot"
+Write-Host "$Version 發行下載已建立：$releaseRoot"
