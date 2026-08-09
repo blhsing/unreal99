@@ -141,7 +141,9 @@ artifacts\installer\Unreal99Installer.exe --help
 所有控制點都會是中立灰，等於沒拍到重點。擷取流程與各圖的鏡頭參數見
 [docs/capture-arenas.ps1](docs/capture-arenas.ps1)。
 
-| `--map` | 名稱 | 致敬對象 | 特色 |
+下表的編號即 `--map` 參數要傳入的值：
+
+| 編號 | 名稱 | 致敬對象 | 特色 |
 | --- | --- | --- | --- |
 | 0 | DM-莫比亞斯 | *Morbias ][* | 八角雙層巨蛋，南北升降梯是唯一上下通道；全圖只有四把火箭與一具救世主 |
 | 1 | DM-磚牆競技場 | *Stalwart* | 紅磚大廳、看台走道與兩側側室 |
