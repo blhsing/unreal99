@@ -31,6 +31,66 @@ SniperRifle。
 | DOM-Olden | 生化1、破片1、狙擊1、燃燒2、火箭1、震盪1（機槍只有彈藥） | 身體護甲1、護盾帶1、藥瓶 ×10、醫療包 ×4、大血桶 ×1 | 「奧登含水層」，山中古代神殿，4–6 人 |
 | DOM-Cinder | 未列出 | 未列出 | 「灰燼鑄造廠」，關閉後被 Liandri 標下的鑄造廠；單人模式得分上限 125 |
 
+## 攻堅模式（Onslaught，UT2004）規則
+
+- 每隊有一座**電力核心**（5000 HP，ONS-Dria 為 9000），核心無法治療，延長賽期間會自行流失。
+- 地圖上散布數個**電力節點**（多數 2000 HP）。節點與核心構成一張**連結圖**。
+- **連結鏈規則**：要佔領中立節點或攻擊敵方節點，該節點必須連結到**己方核心**或**己方已持有的節點**。
+  因此無法跳過中間節點直取遠方目標。
+- **核心只有在與它相連的節點被敵方持有時才能被攻擊**。這是整個模式的核心規則。
+- 節點可用連結槍次要射擊**治療與加速建造**。
+- 摧毀敵方核心即獲勝：正規時間內得 2 分，驟死延長賽得 1 分。
+- 載具是此模式的核心組成。
+
+規則依據：[The Liandri Archives — Onslaught](https://unrealarchive.org/wikis/the-liandri-archives/Onslaught.html)
+
+## 突擊模式（Assault）規則
+
+- 一隊進攻、一隊防守，攻方須**依固定順序**逐一完成目標。
+- 回合結束條件：攻方在時限內完成最後一個目標（進入第二回合），或時間耗盡（攻方失敗）。
+- 第二回合攻守交換。**新攻方若以更短時間完成最後目標則獲勝**，否則落敗。
+- 攻方每完成一個目標，通常可獲得**更靠近下一個目標的重生點**。
+
+原作地圖：UT99 為 AS-Frigate、AS-Guardia、AS-HiSpeed、AS-Mazon、AS-OceanFloor、AS-Overlord、
+AS-Rook；UT2004 為 AS-Convoy、AS-FallenCity、AS-Glacier、AS-Junkyard、AS-Mothership、
+AS-RobotFactory。
+
+規則依據：[The Liandri Archives — Assault](https://unrealarchive.org/wikis/the-liandri-archives/Assault.html)
+
+## 載具一覽
+
+UT2004（Editor's Choice 追加者標註 EC）：
+
+| 載具 | 類型 | 座位 | 主要 | 次要 |
+| --- | --- | ---: | --- | --- |
+| Scorpion | 輪型快車 | 1 | 可蓄力的能量束帶（纏繞後爆炸） | 兩側反步兵刀刃 |
+| Hellbender | 輪型三人車 | 3 | 駕駛無武器（僅喇叭）／側砲為天雷連鎖震盪／後砲為雙束雷射 | 後砲可變焦 |
+| Goliath | 主戰車 | 2 | 主砲 | 第二席機槍塔（可變焦） |
+| Leviathan | 移動要塞 | 5 | 連續追蹤飛彈 | 展開為離子砲（約 5–6 秒，展開後不可移動） |
+| Paladin (EC) | 防禦戰車 | 1 | 緩速能量球 | 能量護盾（可無限維持，開火會產生環形爆震） |
+| SPMA (EC) | 長程砲兵 | 2 | 拋物線砲擊 | 發射浮空偵察相機後以其視野導引砲擊 |
+| Manta | 氣墊 | 1 | 雙電漿砲 | 俯衝輾壓（可跳躍） |
+| Raptor | 戰機 | 1 | 雙電漿 | 追蹤飛彈 |
+| Cicada (EC) | 武裝直升機 | 2 | 飛彈齊射 | 第二席砲塔 |
+| Ion Tank | 戰車（僅 AS-Glacier） | 1 | 離子砲 | — |
+| Space Fighter（人類／Skaarj） | 太空戰機 | 1 | — | — |
+
+UT3 沿用上述 Axon 系列（SPMA 更名 Hellfire SPMA），並新增 Necris 系列與滑板：
+
+| 載具 | 類型 | 座位 | 特徵 |
+| --- | --- | ---: | --- |
+| Viper | 懸浮機車 | 1 | 極快；可展開滯空，並以自爆撞擊目標 |
+| Scavenger | 三足能量球 | 1 | 可收合為滾動砲彈輾壓沿路目標 |
+| Nemesis | 三段變形戰車 | 1 | 可切換高低姿態，改變機動與防護 |
+| Nightshade | 潛行佈置車 | 1 | 可隱形；佈設地雷、力場與滯滯場 |
+| Fury | 飛行載具 | 1 | 雷射砲塔與後燃器 |
+| Darkwalker | 三足步行機 | 2 | 掃射式雙束雷射，威力極大 |
+| Hoverboard | 個人滑板 | 1 | 無武裝；可勾附友方載具拖行 |
+
+資料來源：[Vehicles in UT2004](https://academickids.com/encyclopedia/index.php/Vehicles_in_Unreal_Tournament_2004)、
+[UT3 載具](https://www.gamepressure.com/unrealtournamentiii/vehicles/z510c1)、
+[Unreal Wiki — UT3](https://unreal.fandom.com/wiki/Unreal_Tournament_3)
+
 ## 統治模式規則
 
 原作規則：踩上控制點即完成佔領，沒有讀條也不需持續站立。原版 `ControlPoint` 在易主後以
