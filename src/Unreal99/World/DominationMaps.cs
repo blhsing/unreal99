@@ -209,16 +209,42 @@ public static partial class Maps
         env.FogDensity = 0.024f;
 
         const float CeilY = 15f;
+        // Chambers on the axes so all three corridors run straight. A first version placed them
+        // on a triangle and approximated the diagonal corridors with axis-aligned boxes, which
+        // did not line up with anything — and because a full open floor was laid underneath,
+        // those corridors shaped nothing at all. The map played as three alcoves round one hall.
         var chambers = new[]
         {
-            (pos: new Vector3(0f, 0f, -30f), name: "North Tomb"),
-            (pos: new Vector3(-28f, 0f, 20f), name: "West Tomb"),
-            (pos: new Vector3(28f, 0f, 20f), name: "East Tomb"),
+            (pos: new Vector3(0f, 0f, -32f), name: "North Tomb"),
+            (pos: new Vector3(-32f, 0f, 0f), name: "West Tomb"),
+            (pos: new Vector3(32f, 0f, 0f), name: "East Tomb"),
         };
 
         b.Solid(new Vector3(-48f, -1.6f, -48f), new Vector3(48f, 0f, 48f), MatId.Concrete, true, 0.7f);
         b.Room(new Vector3(-48f, -1.6f, -48f), new Vector3(48f, CeilY, 48f), 2f,
             MatId.Concrete, MatId.Rock, MatId.TechPanelDark, withCeiling: true, withFloor: false);
+
+        // Carve the plan by filling in everything that is not hall, corridor or chamber. Working
+        // subtractively keeps the floor continuous — no pits for anyone to fall into — while
+        // still giving the tomb real corridors rather than one open room.
+        static bool Walkable(float x, float z)
+        {
+            float ax = MathF.Abs(x), az = MathF.Abs(z);
+            if (ax <= 10f && az <= 10f) return true;                       // central hall
+            if (ax <= 5f && z <= -10f && z >= -19f) return true;           // north corridor
+            if (az <= 5f && x <= -10f && x >= -19f) return true;           // west corridor
+            if (az <= 5f && x >= 10f && x <= 19f) return true;             // east corridor
+            if (ax <= 13f && z <= -19f && z >= -45f) return true;          // north chamber
+            if (az <= 13f && x <= -19f && x >= -45f) return true;          // west chamber
+            if (az <= 13f && x >= 19f && x <= 45f) return true;            // east chamber
+            return false;
+        }
+        const float Cell = 4f;
+        for (float cx = -48f; cx < 48f; cx += Cell)
+            for (float cz = -48f; cz < 48f; cz += Cell)
+                if (!Walkable(cx + Cell * 0.5f, cz + Cell * 0.5f))
+                    b.Solid(new Vector3(cx, 0f, cz), new Vector3(cx + Cell, CeilY, cz + Cell),
+                        MatId.Rock, true, 0.7f);
 
         // --- central hall the three corridors meet in ---
         b.Prism(new Vector3(0f, 0f, 0f), 5f, 4.2f, 8, MatId.Rock);
@@ -228,21 +254,13 @@ public static partial class Maps
         var rng = new Rng(0x5E5A);
         foreach (var (pos, name) in chambers)
         {
-            // Chamber: a pillared room with the point on a low dais at its centre.
-            b.Room(pos + new Vector3(-13f, -1.6f, -13f), pos + new Vector3(13f, CeilY, 13f), 1.8f,
-                MatId.Concrete, MatId.Rock, MatId.TechPanelDark, withCeiling: true, withFloor: false);
+            // Chamber: pillars for cover and the point on a low dais at its centre. The walls
+            // come from the fill above, so nothing is built here that would seal the doorway.
             foreach (var (px, pz) in new[] { (-8f, -8f), (8f, -8f), (-8f, 8f), (8f, 8f) })
                 b.Prism(pos + new Vector3(px, 0f, pz), 1.5f, 9f, 8, MatId.Rock);
             b.Solid(pos + new Vector3(-4f, 0f, -4f), pos + new Vector3(4f, 0.8f, 4f), MatId.Trim, true, 0.9f);
             b.AddControlPoint(pos + new Vector3(0f, 0.8f, 0f), name);
             b.CeilingLamp(pos + new Vector3(0f, CeilY - 1.6f, 0f), new Vector3(1f, 0.82f, 0.5f), 26f, 7f, 1.4f);
-
-            // Corridor back to the middle: short, so losing a point is answerable at once.
-            Vector3 dir = MathX.SafeNormalize(-pos.FlatXZ(), MathX.Forward);
-            Vector3 mid = pos * 0.5f;
-            bool alongZ = MathF.Abs(dir.Z) > MathF.Abs(dir.X);
-            Vector3 half = alongZ ? new Vector3(3.5f, 0f, pos.Length() * 0.5f) : new Vector3(pos.Length() * 0.5f, 0f, 3.5f);
-            b.Solid(mid - half - new Vector3(0f, 1.6f, 0f), mid + half + new Vector3(0f, 0f, 0f), MatId.Concrete, true, 0.8f);
 
             for (int i = 0; i < 4; i++)
             {
@@ -254,39 +272,35 @@ public static partial class Maps
         }
 
         // --- the original's lopsided armoury: 6 rockets, 4 miniguns, 3 pulse, 2 shock ---
-        for (int i = 0; i < 6; i++)
+        // Placed against the carved plan rather than on rings round the origin, which after the
+        // corridors went in would have buried half of them inside rock.
+        foreach (var (pos, _) in chambers)
         {
-            float a = i / 6f * MathX.TwoPi;
-            b.Weapon(new Vector3(MathF.Cos(a) * 17f, 0.9f, MathF.Sin(a) * 17f), WeaponKind.RocketLauncher);
-            b.Ammo(new Vector3(MathF.Cos(a) * 19f, 0.7f, MathF.Sin(a) * 19f), AmmoKind.Rockets);
+            b.Weapon(pos + new Vector3(-6f, 0.9f, -6f), WeaponKind.RocketLauncher);
+            b.Weapon(pos + new Vector3(6f, 0.9f, 6f), WeaponKind.RocketLauncher);
+            b.Ammo(pos + new Vector3(-6f, 0.7f, 6f), AmmoKind.Rockets);
+            b.Ammo(pos + new Vector3(6f, 0.7f, -6f), AmmoKind.Rockets);
+            b.Weapon(pos + new Vector3(0f, 0.9f, -9f), WeaponKind.Minigun);
+            b.Ammo(pos + new Vector3(3f, 0.7f, -9f), AmmoKind.MinigunBullets);
+            for (int h = 0; h < 4; h++)
+                b.Item(pos + new Vector3(-9f + h * 6f, 0.7f, 9f), PickupKind.HealthPack);
+            for (int v = 0; v < 8; v++)
+                b.Item(pos + new Vector3(-10.5f + v * 3f, 0.6f, -11f), PickupKind.HealthVial);
         }
-        for (int i = 0; i < 4; i++)
-        {
-            float a = i / 4f * MathX.TwoPi + 0.5f;
-            b.Weapon(new Vector3(MathF.Cos(a) * 26f, 0.9f, MathF.Sin(a) * 26f), WeaponKind.Minigun);
-            b.Ammo(new Vector3(MathF.Cos(a) * 28f, 0.7f, MathF.Sin(a) * 28f), AmmoKind.MinigunBullets);
-        }
-        for (int i = 0; i < 3; i++)
-        {
-            float a = i / 3f * MathX.TwoPi + 1.1f;
-            b.Weapon(new Vector3(MathF.Cos(a) * 11f, 0.9f, MathF.Sin(a) * 11f), WeaponKind.PulseGun);
-        }
-        b.Weapon(new Vector3(-9f, 0.9f, 0f), WeaponKind.ShockRifle);
-        b.Weapon(new Vector3(9f, 0.9f, 0f), WeaponKind.ShockRifle);
+        b.Weapon(new Vector3(0f, 0.9f, -14f), WeaponKind.PulseGun);
+        b.Weapon(new Vector3(-14f, 0.9f, 0f), WeaponKind.PulseGun);
+        b.Weapon(new Vector3(14f, 0.9f, 0f), WeaponKind.PulseGun);
+        b.Weapon(new Vector3(0f, 0.9f, 8f), WeaponKind.Minigun);
+        b.Weapon(new Vector3(-8f, 0.9f, 8f), WeaponKind.ShockRifle);
+        b.Weapon(new Vector3(8f, 0.9f, 8f), WeaponKind.ShockRifle);
+        b.Ammo(new Vector3(-8f, 0.7f, 5f), AmmoKind.ShockCore);
+        b.Ammo(new Vector3(8f, 0.7f, 5f), AmmoKind.ShockCore);
+        b.Ammo(new Vector3(0f, 0.7f, 5f), AmmoKind.MinigunBullets);
 
-        b.Item(new Vector3(0f, 5.1f, 0f), PickupKind.SuperHealth);
-        b.Item(new Vector3(0f, 0.8f, 12f), PickupKind.ShieldBelt);
-        for (int i = 0; i < 12; i++)
-        {
-            float a = i / 12f * MathX.TwoPi;
-            b.Item(new Vector3(MathF.Cos(a) * 22f, 0.7f, MathF.Sin(a) * 22f), PickupKind.HealthPack);
-        }
-        for (int i = 0; i < 34; i++)
-        {
-            float a = i / 34f * MathX.TwoPi * 3f;
-            float r = 8f + (i % 5) * 6.5f;
-            b.Item(new Vector3(MathF.Cos(a) * r, 0.6f, MathF.Sin(a) * r), PickupKind.HealthVial);
-        }
+        b.Item(new Vector3(0f, 0.8f, -8f), PickupKind.SuperHealth);
+        b.Item(new Vector3(-8f, 0.8f, -8f), PickupKind.ShieldBelt);
+        for (int i = 0; i < 10; i++)
+            b.Item(new Vector3(-9f + (i % 5) * 4.5f, 0.6f, i < 5 ? -4f : 4f), PickupKind.HealthVial);
         return b.Build(gl);
     }
 
