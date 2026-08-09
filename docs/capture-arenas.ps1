@@ -36,7 +36,9 @@ $authored = @{
     17 = '40 11 200 2'      # Leadworks    — across a lead pool at the tower island
     # Dead on the north axis: off it, the carved rock between chamber and corridor fills the shot.
     18 = '30 6 270 2'       # Sesmar       — from a tomb chamber down the corridor to the hall
-    19 = '26 12 210 0'      # Olden        — across the moat at the spring island
+    # Aimed at colonnade height, not at the floor. Looking at y=0 from 12m up pointed the shot
+    # down into open sand and wasted the bottom third of the frame on nothing.
+    19 = '20 11 200 8'      # Olden        — across the moat, colonnade ringing it, shrine above
     20 = '38 20 200 3'      # Cinder       — the casting channel with the furnace beyond
 }
 
