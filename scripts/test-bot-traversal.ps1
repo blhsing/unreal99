@@ -28,7 +28,7 @@ Skips the Release build. Use only for focused reruns against a known-current bui
 #>
 param(
     [int]$Frames = 3600,
-    [int[]]$MapIds = (0..16),
+    [int[]]$MapIds = (0..20),
     [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\artifacts\bot-traversal'),
     [switch]$NoBuild
 )
@@ -41,7 +41,7 @@ $outputRoot = [System.IO.Path]::GetFullPath($OutputDirectory)
 
 if ($Frames -lt 600) { throw 'Frames must be at least 600 (10 active-play seconds).' }
 foreach ($mapId in $MapIds) {
-    if ($mapId -lt 0 -or $mapId -gt 16) { throw "Map id is outside 0..16: $mapId" }
+    if ($mapId -lt 0 -or $mapId -gt 20) { throw "Map id is outside 0..20: $mapId" }
 }
 
 if (-not $NoBuild) {
@@ -54,7 +54,8 @@ if (-not (Test-Path -LiteralPath $game)) { throw "Game build not found: $game" }
 $mapNames = @(
     'morbias', 'stalwart', 'curse', 'grinder', 'codex', 'gothic', 'deck16',
     'turbine', 'phobos', 'peak', 'liandri', 'morpheus', 'hyperblast',
-    'coret', 'november', 'facing-worlds', 'lava-giant'
+    'coret', 'november', 'facing-worlds', 'lava-giant',
+    'leadworks', 'sesmar', 'olden', 'cinder'
 )
 
 $results = [System.Collections.Generic.List[object]]::new()
@@ -66,7 +67,7 @@ $env:UNREAL99_NAV_DEBUG = '1'
 try {
     foreach ($mapId in $MapIds) {
         $name = $mapNames[$mapId]
-        $mode = if ($mapId -ge 13) { 2 } else { 0 }
+        $mode = if ($mapId -ge 17) { 5 } elseif ($mapId -ge 13) { 2 } else { 0 }
         $screenshot = Join-Path $outputRoot ('{0:D2}-{1}.png' -f $mapId, $name)
         $log = Join-Path $outputRoot ('{0:D2}-{1}.log' -f $mapId, $name)
         Write-Host ("[{0}/{1}] {2}: {3} active-play frames ({4:N1} s), mode {5}" -f `
@@ -86,7 +87,11 @@ try {
             $result = [pscustomobject]@{
                 MapId = $mapId
                 Map = $name
-                Mode = if ($mode -eq 2) { 'CaptureTheFlag' } else { 'Deathmatch' }
+                Mode = switch ($mode) {
+                    2 { 'CaptureTheFlag' }
+                    5 { 'Domination' }
+                    default { 'Deathmatch' }
+                }
                 Passed = $false
                 Failures = @('missing-result')
                 ProcessExit = $processExit
@@ -122,10 +127,14 @@ $csvPath = Join-Path $outputRoot 'summary.csv'
     [System.Text.UTF8Encoding]::new($false))
 $results | Select-Object MapId, Map, Mode, Passed, ActiveSeconds, TravelMeters,
     RequiredTravelMeters, VisitedCells, RequiredCells, LongestStallSeconds,
-    LongestOscillationSeconds, OscillationEpisodes, WorstWindowPathMeters,
-    WorstWindowNetMeters, WorstWindowExtentMeters, WorstWindowReversals,
+    LongestOscillationSeconds, LongestSteepDownSeconds, OscillationEpisodes,
+    WorstWindowPathMeters,
+    WorstWindowNetMeters, WorstWindowExtentMeters, WorstWindowVerticalExtentMeters,
+    WorstWindowReversals,
     WorstState, WorstGoalNode, WorstPathCursor, WorstPathCount, MainSkill,
     MaxOpponentSkill, WeaponPickupGoals, AmmoPickupGoals, VoidDeaths, FallDeaths, LavaDeaths,
+    ControlPointsCaptured, ControlPointCount, ControlPointCaptures, DominationScoreRed,
+    DominationScoreBlue,
     @{ Name = 'Failures'; Expression = { @($_.Failures) -join ';' } }, Screenshot, Log |
     Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding utf8
 

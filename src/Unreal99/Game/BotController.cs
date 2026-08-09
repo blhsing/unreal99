@@ -46,6 +46,8 @@ public sealed class BotController : Controller
     private bool _objectiveGoal;
     private int _ctfHoldStep;
     private int _ctfRearmAttempts;
+    private int _dominationPatrolStep;
+    private int _dominationRearmAttempts;
     private bool _hasGoalPosition;
     private bool _pathFound;
     private Vector3 _goalPosition;
@@ -85,6 +87,7 @@ public sealed class BotController : Controller
     private int _pickupDebugReports;
     private bool _jumpPadFlight;
     private float _jumpPadFlightTimer;
+    private float _airbornePeakY;
     private bool _hasSafeGroundPosition;
     private Vector3 _safeGroundPosition;
     private float _edgeRecoveryTimer;
@@ -141,6 +144,8 @@ public sealed class BotController : Controller
         _objectiveGoal = false;
         _ctfHoldStep = 0;
         _ctfRearmAttempts = 0;
+        _dominationPatrolStep = 0;
+        _dominationRearmAttempts = 0;
         _hasGoalPosition = false;
         _pathFound = false;
         _path.Clear();
@@ -162,6 +167,7 @@ public sealed class BotController : Controller
         _firePauseTimer = 0f;
         _jumpPadFlight = false;
         _jumpPadFlightTimer = 0f;
+        _airbornePeakY = Pawn.Position.Y;
         _hasSafeGroundPosition = false;
         _edgeRecoveryTimer = 0f;
         _edgeRecoveryTarget = Vector3.Zero;
@@ -206,6 +212,9 @@ public sealed class BotController : Controller
         if (!pawn.Alive) return input;
 
         TickTimers(dt);
+
+        if (Pawn.OnGround) _airbornePeakY = Pawn.Position.Y;
+        else _airbornePeakY = MathF.Max(_airbornePeakY, Pawn.Position.Y);
 
         // Air control can correct an ordinary edge mistake, but a large explosion may throw a
         // pawn farther than the remaining fall time allows. Once a bot has fallen well below
@@ -259,8 +268,30 @@ public sealed class BotController : Controller
     private bool RecoverFromFatalFall(GameWorld world)
     {
         if (Pawn.OnGround || _jumpPadFlight) return false;
-        if (Pawn.LastGroundPosition.Y - Pawn.Position.Y < 7f) return false;
-        if (HasGroundAt(world, Pawn.Position, 12f)) return false;
+        float descentOrigin = MathF.Max(Pawn.LastGroundPosition.Y, _airbornePeakY);
+        if (descentOrigin - Pawn.Position.Y < 4f) return false;
+
+        // A real floor below does not automatically make a fall safe. Vertical arenas can put
+        // another gallery ten metres beneath an exposed ledge; a bot knocked from the upper
+        // route used to accept that floor, land for lethal damage, and repeat the same mistake.
+        // Estimate the eventual impact and rescue only a fatal landing. Ordinary shortcuts and
+        // survivable tactical drops retain their original risk and movement.
+        const float landingProbe = 28f;
+        Vector3 probeStart = Pawn.Position + new Vector3(0f, 0.2f, 0f);
+        var landing = world.Level.Collision.Raycast(probeStart,
+            probeStart - new Vector3(0f, landingProbe, 0f));
+        bool hasPlayableLanding = landing.Hit && landing.Kind != BrushKind.Lava
+            && landing.Normal.Y >= world.Level.Collision.MaxWalkableY;
+        bool fatalLanding = false;
+        if (hasPlayableLanding && Pawn.Velocity.Y < 0f)
+        {
+            float remainingDrop = MathF.Max(0f, Pawn.Position.Y - landing.Point.Y);
+            float downwardSpeed = -Pawn.Velocity.Y;
+            float impactSpeed = MathF.Sqrt(downwardSpeed * downwardSpeed
+                + 2f * Physics.Gravity * world.Level.GravityScale * remainingDrop);
+            fatalLanding = Physics.FallDamage(impactSpeed) + 0.5f >= Pawn.Health;
+        }
+        if (hasPlayableLanding && !fatalLanding) return false;
 
         Vector3 fallenPosition = Pawn.Position;
         Vector3 anchor = _hasSafeGroundPosition ? _safeGroundPosition : Pawn.LastGroundPosition;
@@ -281,7 +312,8 @@ public sealed class BotController : Controller
         _edgeRecoveryTarget = anchor;
         if (Environment.GetEnvironmentVariable("UNREAL99_NAV_DEBUG") == "1"
             && Pawn.PlayerIndex >= 0 && _movementDebugReports++ < 48)
-            Console.WriteLine($"邊緣救援: 玩家 {Pawn.PlayerIndex + 1} · 從 {fallenPosition} 回到 {anchor}");
+            Console.WriteLine($"邊緣救援: 玩家 {Pawn.PlayerIndex + 1} · 從 {fallenPosition} 回到 {anchor} · " +
+                $"原因 {(fatalLanding ? "致命摔落" : "無落腳處")}");
         return true;
     }
 
@@ -352,11 +384,13 @@ public sealed class BotController : Controller
         int reversals = 0;
         Vector3 previousDirection = Vector3.Zero;
         float minX = float.MaxValue, maxX = float.MinValue;
+        float minY = float.MaxValue, maxY = float.MinValue;
         float minZ = float.MaxValue, maxZ = float.MinValue;
         for (int i = 0; i < points.Length; i++)
         {
             Vector3 position = points[i].Position;
             minX = MathF.Min(minX, position.X); maxX = MathF.Max(maxX, position.X);
+            minY = MathF.Min(minY, position.Y); maxY = MathF.Max(maxY, position.Y);
             minZ = MathF.Min(minZ, position.Z); maxZ = MathF.Max(maxZ, position.Z);
             if (i == 0) continue;
             Vector3 segment = (position - points[i - 1].Position).FlatXZ();
@@ -370,8 +404,14 @@ public sealed class BotController : Controller
         }
 
         float net = (points[^1].Position - points[0].Position).FlatXZ().Length();
-        float extent = new Vector2(maxX - minX, maxZ - minZ).Length();
-        if (path < 7f || net > 3.8f || extent > 7f || reversals < 2) return;
+        float horizontalExtent = new Vector2(maxX - minX, maxZ - minZ).Length();
+        float verticalExtent = maxY - minY;
+        float spatialExtent = MathF.Sqrt(horizontalExtent * horizontalExtent
+            + verticalExtent * verticalExtent);
+        // Riding a launcher between distinct floors can return to the same X/Z footprint while
+        // making real vertical progress. Count confinement in three dimensions so that route is
+        // not mistaken for shaking in place.
+        if (path < 7f || net > 3.8f || spatialExtent > 7f || reversals < 2) return;
 
         PickupEntity rejectedItem = _itemGoal;
         int recovery = BeginRouteRecovery(world, rejectedItem);
@@ -622,8 +662,16 @@ public sealed class BotController : Controller
         // hide the bot's actual re-arm intent. Face the pickup route instead so aim and movement
         // agree until a usable weapon has been collected.
         bool rearming = _state == BotState.SeekItem && !HasUsableRangedWeapon(Pawn);
+        // A flag/control-point route can legitimately put an enemy several floors below the
+        // bot. Tracking that pawn through an atrium made demo players stare almost vertically
+        // into the floor while their real objective was elsewhere. Keep route awareness unless
+        // the target is on a tactically relevant level; ordinary combat remains unrestricted.
+        bool targetBelowObjective = _objectiveGoal && target != null
+            && target.Position.Y + target.CurrentHeight < Pawn.Position.Y - 5f;
+        bool useTargetAim = !rearming && !targetBelowObjective && target != null
+            && (visible || world.Time - _lastSeenTargetTime < 1.6f);
 
-        if (!rearming && target != null && (visible || world.Time - _lastSeenTargetTime < 1.6f))
+        if (useTargetAim)
         {
             Vector3 aimAt = visible
                 ? target.Position + new Vector3(0, target.CurrentHeight * 0.62f, 0)
@@ -672,6 +720,8 @@ public sealed class BotController : Controller
 
         Vector3 dir = MathX.SafeNormalize(desired - Pawn.EyePosition, Pawn.ViewDirection);
         MathX.YawPitchFromDir(dir, out float wantYaw, out float wantPitch);
+        if (!useTargetAim && (_objectiveGoal || rearming))
+            wantPitch = MathF.Max(wantPitch, -0.65f);
 
         float speed = AimSpeed * (visible ? 1f : 0.5f);
         _aimYaw = MathX.WrapAngle(_aimYaw + MathX.WrapAngle(wantYaw - _aimYaw)
@@ -759,6 +809,7 @@ public sealed class BotController : Controller
 
         // --- follow the path ---
         Vector3 steer = Vector3.Zero;
+        bool pathTraversesSlope = false;
         if (_path.Count > 0 && _pathCursor < _path.Count)
         {
             int waypointIndex = _path[_pathCursor];
@@ -840,7 +891,9 @@ public sealed class BotController : Controller
                     (lift.BaseMax.Z - lift.BaseMin.Z) * 0.5f - 0.55f);
                 bool pawnAboard = MathF.Abs(Pawn.Position.X - currentSurface.X) <= interiorX
                     && MathF.Abs(Pawn.Position.Z - currentSurface.Z) <= interiorZ
-                    && MathF.Abs(Pawn.Position.Y - currentSurface.Y) < 1.35f;
+                    // Feet on the adjacent floor can be less than a metre below a thin lift.
+                    // That is not aboard: require the capsule's feet to be on its live surface.
+                    && MathF.Abs(Pawn.Position.Y - currentSurface.Y) < 0.32f;
                 bool platformAtDestination = Vector3.DistanceSquared(currentSurface,
                     _activeLiftDestination) < 0.65f * 0.65f;
                 Vector3 destinationDelta = Pawn.Position - _activeLiftDestination;
@@ -924,6 +977,7 @@ public sealed class BotController : Controller
                     heightDelta = node.Y - Pawn.Position.Y;
                 }
             }
+            pathTraversesSlope = MathF.Abs(heightDelta) > 0.45f;
             steer = MathX.SafeNormalize(flat, Vector3.Zero);
 
             // Jump when the next waypoint is meaningfully above us or the link needs it.
@@ -961,6 +1015,7 @@ public sealed class BotController : Controller
         // --- combat strafing ---
         Vector3 strafe = Vector3.Zero;
         if (visible && target != null && _state == BotState.Attack && !_objectiveGoal
+            && !pathTraversesSlope
             && !_specialTraversalLock
             && _routeRecoveryTimer <= 0f)
         {
@@ -997,7 +1052,8 @@ public sealed class BotController : Controller
         }
 
         // Reflex dodge queued by OnDamaged.
-        if (_dodgeTimer > 0f && _dodgeTimer < 0.05f && Pawn.OnGround)
+        if (_dodgeTimer > 0f && _dodgeTimer < 0.05f && Pawn.OnGround
+            && !pathTraversesSlope && !_specialTraversalLock)
         {
             input.Dodge = new Vector2(_rng.Chance(0.5f) ? 1f : -1f, 0f);
             _dodgeTimer = _rng.Range(0.7f, 1.6f);
@@ -1350,45 +1406,92 @@ public sealed class BotController : Controller
         var points = world.Level.ControlPoints;
         if (points.Count == 0) return false;
 
+        // Objective code runs before the ordinary SeekItem state, so Domination needs the same
+        // explicit re-arm diversion as CTF. Two attempts keep a bot from shopping forever while
+        // still preventing the common empty-pistol run straight into a defended control point.
+        bool noRangedAmmo = !HasUsableRangedWeapon(Pawn);
+        bool needsSupply = noRangedAmmo || !HasUsefulWeaponUpgrade(Pawn)
+            || NeedsCombatResupply(Pawn);
+        if (!needsSupply) _dominationRearmAttempts = 0;
+        if (needsSupply && _dominationRearmAttempts < 2
+            && TryChoosePickupGoal(world, noRangedAmmo ? 100f : 45f, combatOnly: true))
+        {
+            _dominationRearmAttempts++;
+            return true;
+        }
+
         Team enemy = Pawn.Team == Team.Red ? Team.Blue : Team.Red;
         int ours = world.ControlPointsHeldBy(Pawn.Team);
         int theirs = world.ControlPointsHeldBy(enemy);
 
-        // Number bots within their own team so roles are spread. Without this the whole squad
-        // converges on the single nearest point and leaves the rest of the map uncontested.
+        // Number AI-driven teammates within their own team so both ordinary bots and the local
+        // demo autopilot receive stable, distributed roles. Counting only Pawn.IsBot made the
+        // showcased Godlike player overlap the first bot's assignment.
         int teamBotSlot = 0;
         foreach (Pawn mate in world.Pawns)
-            if (mate.IsBot && mate.Team == Pawn.Team && mate.Id < Pawn.Id) teamBotSlot++;
+            if (mate.Team == Pawn.Team && mate.Id < Pawn.Id && IsAiDriven(world, mate)) teamBotSlot++;
 
         // Only spare someone for defence while ahead and holding more than one point. Behind or
         // level, every body attacks — sitting on a losing position just loses more slowly.
         bool defend = ours > theirs && ours >= 2 && teamBotSlot % 3 == 0;
-
-        int best = -1;
-        float bestScore = float.MaxValue;
+        var candidates = new List<int>(points.Count);
         for (int i = 0; i < points.Count && i < world.ControlPointOwners.Count; i++)
         {
             Team owner = world.ControlPointOwners[i];
             bool mine = owner == Pawn.Team;
             // Defenders want ours; attackers want everything that is not.
-            if (defend != mine) continue;
-
-            float dist = (points[i].Position - Pawn.Position).FlatXZ().Length();
-            // A neutral pad is a cheaper gain than prising one out of enemy hands, so it wins
-            // ties at a longer distance. Enemy-held points are still taken when they are close.
-            float weight = owner == Team.None ? 0.7f : 1f;
-            float score = dist * weight;
-            if (score < bestScore) { bestScore = score; best = i; }
+            if (defend == mine) candidates.Add(i);
         }
 
+        if (candidates.Count == 0) return false;
+
+        // Stable slot assignment is what actually spreads a squad. The old implementation only
+        // used the slot to decide who defended, then every attacker independently chose the same
+        // nearest point despite the documentation claiming otherwise.
+        int assigned = candidates[teamBotSlot % candidates.Count];
+
+        if (defend) return TryChooseDominationPatrolGoal(nav, points[assigned].Position);
+
+        // Attackers commit to entering the point's actual touch radius. Stopping at 0.9 m forced
+        // the camera into the decorative marker and created artificial stalls after a capture.
+        float captureRadius = MathF.Max(0.75f, points[assigned].Radius * 0.72f);
+        return SetPreciseGoal(nav, points[assigned].Position, objective: true,
+            radius: captureRadius, refresh: 1.2f);
+    }
+
+    private static bool IsAiDriven(GameWorld world, Pawn pawn)
+    {
+        Controller controller = world.ControllerFor(pawn);
+        return controller is BotController || controller is PlayerController { AutoPilot: not null };
+    }
+
+    /// <summary>
+    /// Moves a defender between reachable navigation nodes around its assigned point. A precise
+    /// goal placed directly on an already-owned marker completed every frame and left the bot
+    /// motionless long enough to fail the traversal gate.
+    /// </summary>
+    private bool TryChooseDominationPatrolGoal(NavGraph nav, Vector3 point)
+    {
+        _navScratch.Clear();
+        nav.QueryRadius(point, 9f, _navScratch);
+        if (_navScratch.Count == 0) return false;
+
+        float angle = _dominationPatrolStep++ * 2.3999632f + Pawn.Id * 0.71f;
+        Vector3 desired = point + new Vector3(MathF.Cos(angle) * 6f, 0f, MathF.Sin(angle) * 6f);
+        int best = -1;
+        float bestScore = float.MaxValue;
+        foreach (int nodeIndex in _navScratch)
+        {
+            NavNode node = nav.Nodes[nodeIndex];
+            float fromPoint = (node.Position - point).FlatXZ().Length();
+            if (fromPoint < 2.5f || fromPoint > 8.5f) continue;
+            float score = (node.Position - desired).FlatXZ().Length() + node.Openness * 1.2f;
+            if (score < bestScore) { bestScore = score; best = nodeIndex; }
+        }
         if (best < 0) return false;
 
-        // An attacker must actually reach the pad, so it commits to the route as an objective.
-        // A defender holds a loose perimeter with ordinary combat behaviour instead, otherwise
-        // it stands on the pad being shot at while refusing to strafe.
-        return defend
-            ? SetPreciseGoal(nav, points[best].Position, objective: false, radius: 4.5f, refresh: 2.2f)
-            : SetPreciseGoal(nav, points[best].Position, objective: true, radius: 0.9f, refresh: 1.2f);
+        return SetPreciseGoal(nav, nav.Nodes[best].Position, objective: false,
+            radius: 1.0f, refresh: 3.0f);
     }
 
     private bool TryChooseFlagHoldGoal(GameWorld world, Vector3 home)

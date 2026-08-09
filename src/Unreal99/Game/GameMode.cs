@@ -21,11 +21,19 @@ public sealed class GameMode
     public int CaptureLimit = 5;
     public int DominationLimit = 100;
     /// <summary>
-    /// Seconds a team must hold a control point to bank one point for it. The original scores
-    /// every held point once per five seconds, so holding two ticks twice as fast as holding one.
+    /// A captured point takes two seconds to become score-ready in the original game, then adds
+    /// 0.2 points per second: one visible point every five seconds at the normal rate.
     /// </summary>
-    public const float DominationTickSeconds = 5f;
-    private readonly float[] _dominationTick = new float[2];
+    public const float DominationReadySeconds = 2f;
+    public const float DominationScoreInterval = 1f;
+    public const float DominationScorePerPoint = 0.2f;
+    /// <summary>
+    /// Exact fractional team score. <see cref="TeamScores"/> is the integer HUD value, matching
+    /// the original scoreboard while preserving partial progress between ownership changes.
+    /// </summary>
+    public readonly float[] DominationScores = new float[2];
+    private float _dominationScoreTimer;
+    public float DominationScoreTimer => _dominationScoreTimer;
     public float TimeLimit = 600f;       // seconds; 0 = unlimited
     public int LivesPerPlayer = 3;       // last man standing
 
@@ -45,21 +53,20 @@ public sealed class GameMode
     private float _announceTimer;
     private int _lastCountdownSecond = -1;
 
-    public static GameMode Create(GameModeKind kind, int fragLimit, float timeLimitMinutes, int captureLimit)
+    public static GameMode Create(GameModeKind kind, int fragLimit, float timeLimitMinutes,
+        int captureLimit, int dominationLimit = 100)
     {
         var mode = new GameMode
         {
             Kind = kind,
             FragLimit = fragLimit,
             CaptureLimit = captureLimit,
+            DominationLimit = dominationLimit,
             TimeLimit = timeLimitMinutes * 60f,
             TeamBased = kind is GameModeKind.TeamDeathmatch or GameModeKind.CaptureTheFlag
                 or GameModeKind.Domination,
         };
         mode.TimeRemaining = mode.TimeLimit;
-        // Domination scores in ticks rather than kills, so it needs its own limit: the stock
-        // maps run to 100-125, which takes a few minutes of holding two of three points.
-        if (kind == GameModeKind.Domination) mode.DominationLimit = 100;
         if (kind == GameModeKind.LastManStanding) mode.RespawnDelay = 2.4f;
         if (kind == GameModeKind.Instagib) mode.RespawnDelay = 1.2f;
         return mode;
@@ -71,10 +78,8 @@ public sealed class GameMode
     public int ScoreOf(Pawn p) => Kind switch
     {
         GameModeKind.CaptureTheFlag => p.Frags + p.Captures * 7 + p.FlagCarrierKills * 3,
-        // Captures here are control points touched. Weighted well above a frag so the
-        // scoreboard rewards the player who actually runs the points rather than the one who
-        // camped a corridor with a minigun.
-        GameModeKind.Domination => p.Frags + p.Captures * 5,
+        // The original credits a point's ongoing score to the player who captured it.
+        GameModeKind.Domination => p.Frags + (int)MathF.Floor(p.DominationScore + 0.0001f),
         _ => p.Frags,
     };
 
@@ -122,21 +127,35 @@ public sealed class GameMode
             case MatchState.InProgress:
             case MatchState.Overtime:
                 {
-                    if (TimeLimit > 0f && State == MatchState.InProgress)
+                    bool regulationClock = TimeLimit > 0f && State == MatchState.InProgress;
+                    if (regulationClock)
                     {
-                        TimeRemaining -= dt;
-                        if (TimeRemaining <= 0f)
-                        {
-                            TimeRemaining = 0f;
-                            if (IsTied(world))
-                            {
-                                State = MatchState.Overtime;
-                                world.Broadcast(Loc.AnnOvertime, new Vector3(1f, 0.4f, 0.2f), 2.5f);
-                            }
-                            else Finish(world);
-                        }
+                        TimeRemaining = MathF.Max(0f, TimeRemaining - dt);
                     }
+
+                    // Score the final slice of regulation before deciding the timed winner. In
+                    // overtime this call also performs the sudden-death win check as soon as an
+                    // integer team score breaks the tie.
                     if (Kind == GameModeKind.Domination) TickDomination(world, dt);
+                    if (State == MatchState.Finished) break;
+
+                    if (regulationClock && TimeRemaining <= 0f)
+                    {
+                        // Domination overrides the ordinary team-game ending in UT99: displayed
+                        // whole scores decide first, then the number of points currently held.
+                        // Only a complete tie is a draw; it does not enter frag-style overtime.
+                        if (Kind == GameModeKind.Domination)
+                        {
+                            WinningTeam = ResolveDominationTimedWinner(world);
+                            Finish(world);
+                        }
+                        else if (IsTied(world))
+                        {
+                            State = MatchState.Overtime;
+                            world.Broadcast(Loc.AnnOvertime, new Vector3(1f, 0.4f, 0.2f), 2.5f);
+                        }
+                        else Finish(world);
+                    }
 
                     _announceTimer -= dt;
                     if (_announceTimer <= 0f)
@@ -155,29 +174,66 @@ public sealed class GameMode
     }
 
     /// <summary>
-    /// Banks a point for every control point a team holds, once per tick. Each point keeps its
-    /// own share of the clock through a single per-team accumulator: holding two points fills it
-    /// twice as fast, which is the whole economy of the mode.
+    /// Applies the original Domination score clock. Each point has its own two-second readiness
+    /// delay, then contributes a discrete 0.2-point slice once per second to both its team and
+    /// the player who captured it.
+    /// Timed matches double the rate in the final quarter and quadruple it in the final tenth.
     /// </summary>
     private void TickDomination(GameWorld world, float dt)
     {
+        _dominationScoreTimer += dt;
+        while (_dominationScoreTimer >= DominationScoreInterval)
+        {
+            _dominationScoreTimer -= DominationScoreInterval;
+            ScoreDominationInterval(world);
+            if (State == MatchState.Finished) return;
+        }
+    }
+
+    private void ScoreDominationInterval(GameWorld world)
+    {
+        float rate = 1f;
+        if (TimeLimit > 0f)
+        {
+            if (TimeRemaining < TimeLimit * 0.10f) rate = 4f;
+            else if (TimeRemaining < TimeLimit * 0.25f) rate = 2f;
+        }
+
+        float delta = DominationScorePerPoint * rate;
+        int count = Math.Min(world.Level.ControlPoints.Count, world.ControlPointOwners.Count);
+        for (int i = 0; i < count; i++)
+        {
+            Team owner = world.ControlPointOwners[i];
+            if (owner == Team.None || world.ControlPointSince[i] < DominationReadySeconds) continue;
+
+            int team = (int)owner;
+            DominationScores[team] += delta;
+            int controllerId = i < world.ControlPointControllers.Count
+                ? world.ControlPointControllers[i] : -1;
+            Pawn controller = world.FindPawn(controllerId);
+            if (controller != null && controller.Team == owner) controller.DominationScore += delta;
+        }
+
         for (int t = 0; t < 2; t++)
         {
-            int held = world.ControlPointsHeldBy((Team)t);
-            if (held <= 0) continue;
-            _dominationTick[t] += dt * held;
-            while (_dominationTick[t] >= DominationTickSeconds)
-            {
-                _dominationTick[t] -= DominationTickSeconds;
-                TeamScores[t]++;
-                if (DominationLimit > 0 && TeamScores[t] >= DominationLimit)
-                {
-                    WinningTeam = (Team)t;
-                    Finish(world);
-                    return;
-                }
-            }
+            int score = (int)MathF.Floor(DominationScores[t] + 0.0001f);
+            if (score == TeamScores[t]) continue;
+            TeamScores[t] = score;
         }
+
+        // The original limit comparison uses the fractional score, even though the compact HUD
+        // displays whole points.
+        CheckWinCondition(world);
+    }
+
+    /// <summary>Restores the exact score behind the integer HUD value.</summary>
+    public void RestoreDominationScores(float red, float blue, float scoreTimer = 0f)
+    {
+        DominationScores[0] = MathF.Max(0f, red);
+        DominationScores[1] = MathF.Max(0f, blue);
+        _dominationScoreTimer = MathX.Clamp(scoreTimer, 0f, DominationScoreInterval);
+        TeamScores[0] = (int)MathF.Floor(DominationScores[0] + 0.0001f);
+        TeamScores[1] = (int)MathF.Floor(DominationScores[1] + 0.0001f);
     }
 
     private bool IsTied(GameWorld world)
@@ -296,7 +352,9 @@ public sealed class GameMode
 
             for (int t = 0; t < 2; t++)
             {
-                if (LimitValue > 0 && TeamScores[t] >= LimitValue)
+                float score = Kind == GameModeKind.Domination
+                    ? DominationScores[t] : TeamScores[t];
+                if (LimitValue > 0 && score >= LimitValue)
                 {
                     WinningTeam = (Team)t;
                     Finish(world);
@@ -324,8 +382,12 @@ public sealed class GameMode
         PostMatchTimer = 0f;
 
         if (TeamBased && WinningTeam == Team.None)
-            WinningTeam = TeamScores[0] > TeamScores[1] ? Team.Red
-                        : TeamScores[1] > TeamScores[0] ? Team.Blue : Team.None;
+        {
+            WinningTeam = Kind == GameModeKind.Domination
+                ? ResolveDominationTimedWinner(world)
+                : TeamScores[0] > TeamScores[1] ? Team.Red
+                : TeamScores[1] > TeamScores[0] ? Team.Blue : Team.None;
+        }
 
         if (!TeamBased && Winner == null)
         {
@@ -343,6 +405,16 @@ public sealed class GameMode
             : Loc.AnnMatchOver;
         world.Broadcast(text, new Vector3(1f, 0.85f, 0.35f), 5f);
         world.OnSound?.Invoke(SoundId.AnnounceMajor, Vector3.Zero, 1.4f);
+    }
+
+    private Team ResolveDominationTimedWinner(GameWorld world)
+    {
+        if (TeamScores[0] != TeamScores[1])
+            return TeamScores[0] > TeamScores[1] ? Team.Red : Team.Blue;
+
+        int redHeld = world.ControlPointsHeldBy(Team.Red);
+        int blueHeld = world.ControlPointsHeldBy(Team.Blue);
+        return redHeld > blueHeld ? Team.Red : blueHeld > redHeld ? Team.Blue : Team.None;
     }
 
     /// <summary>Players ordered for the scoreboard: score first, then fewer deaths.</summary>

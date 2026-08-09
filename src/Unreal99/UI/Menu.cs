@@ -84,6 +84,7 @@ public sealed class Menu
     public int FragLimit = 20;
     public int TimeLimitMinutes = 10;
     public int CaptureLimit = 5;
+    public int DominationLimit = 100;
     /// <summary>Hands the local players to an autopilot so the match plays itself.</summary>
     public bool DemoMode;
     /// <summary>Skill of the autopilot driving the local players, independent of the opponents'.</summary>
@@ -628,6 +629,11 @@ public sealed class Menu
         if (ModeKind == GameModeKind.CaptureTheFlag)
             AddChoice(Loc.OptCaptureLimit, () => CaptureLimit > 0 ? CaptureLimit.ToString() : Loc.OptNoLimit,
                 d => CaptureLimit = MathX.Clamp(CaptureLimit + d, 0, 20), "率先達成的隊伍獲勝。");
+        else if (ModeKind == GameModeKind.Domination)
+            AddChoice(Loc.DomScoreLimit,
+                () => DominationLimit > 0 ? DominationLimit.ToString() : Loc.OptNoLimit,
+                d => DominationLimit = MathX.Clamp(DominationLimit + d * 5, 0, 200),
+                "率先累積到此分數的隊伍獲勝。");
         else
             AddChoice(Loc.OptFragLimit, () => FragLimit > 0 ? Loc.Frags(FragLimit) : Loc.OptNoLimit,
                 d => FragLimit = MathX.Clamp(FragLimit + d * 5, 0, 100), "率先達成的玩家獲勝。");
@@ -685,7 +691,7 @@ public sealed class Menu
                 OnSettingsChanged?.Invoke();
                 Open(MenuScreen.Setup);
             },
-                compatible ? World.Maps.Description(id) : Loc.MapCtfUnavailable,
+                compatible ? World.Maps.Description(id) : Loc.MapModeUnavailable,
                 () => compatible);
         }
     }
@@ -1200,7 +1206,7 @@ public sealed class Menu
             }
             if (!enabled)
                 ui.Text(FaceBold, 14f * s, x + cardW * 0.5f, y + cardH * 0.45f,
-                    Loc.MapCtfUnavailable, UiRenderer.Rgba(1f, 0.48f, 0.38f), TextAlign.Center);
+                    Loc.MapModeUnavailable, UiRenderer.Rgba(1f, 0.48f, 0.38f), TextAlign.Center);
         }
 
         string description = Current?.Hint ?? "";
@@ -1315,9 +1321,14 @@ public sealed class Menu
             ui.Text(FaceBold, 15f * s, imgX, ty, Loc.SaveConfigTitle, UiRenderer.Rgba(0.55f, 0.85f, 1f));
             ty += 24f * s;
 
-            string limit = d.ModeKind == (int)GameModeKind.CaptureTheFlag
-                ? (d.CaptureLimit > 0 ? $"{Loc.OptCaptureLimit} {d.CaptureLimit}" : Loc.OptNoLimit)
-                : (d.FragLimit > 0 ? $"{Loc.OptFragLimit} {d.FragLimit}" : Loc.OptNoLimit);
+            string limit = d.ModeKind switch
+            {
+                (int)GameModeKind.CaptureTheFlag => d.CaptureLimit > 0
+                    ? $"{Loc.OptCaptureLimit} {d.CaptureLimit}" : Loc.OptNoLimit,
+                (int)GameModeKind.Domination => d.DominationLimit > 0
+                    ? $"{Loc.DomScoreLimit} {d.DominationLimit}" : Loc.OptNoLimit,
+                _ => d.FragLimit > 0 ? $"{Loc.OptFragLimit} {d.FragLimit}" : Loc.OptNoLimit,
+            };
             string timeLimit = d.TimeLimit > 0f ? Loc.Minutes((int)MathF.Round(d.TimeLimit / 60f)) : Loc.OptNoLimit;
             string skill = Loc.SkillNames[MathX.Clamp(d.BotSkill, 0, Loc.SkillNames.Length - 1)];
 

@@ -111,11 +111,17 @@ public sealed class GameWorld
     private readonly Dictionary<int, Matrix4x4[]> _boneSkin = new();
     private readonly List<Vector3> _spawnAvoid = new(16);
 
-    // CTF state
+    // Domination state
     /// <summary>Who holds each control point, indexed alongside <see cref="Level.ControlPoints"/>.</summary>
     public readonly List<Team> ControlPointOwners = new();
     /// <summary>Seconds since each point last changed hands, for the capture flash on the HUD.</summary>
     public readonly List<float> ControlPointSince = new();
+    /// <summary>Pawn currently receiving the personal hold score for each point.</summary>
+    public readonly List<int> ControlPointControllers = new();
+    /// <summary>QA telemetry: number of real touch captures made at each point this match.</summary>
+    public readonly List<int> ControlPointCaptures = new();
+    private HashSet<long> _controlPointContacts = new();
+    private HashSet<long> _nextControlPointContacts = new();
 
     public int ControlPointsHeldBy(Team team)
     {
@@ -190,7 +196,17 @@ public sealed class GameWorld
 
         ControlPointOwners.Clear();
         ControlPointSince.Clear();
-        foreach (var _ in level.ControlPoints) { ControlPointOwners.Add(Team.None); ControlPointSince.Add(99f); }
+        ControlPointControllers.Clear();
+        ControlPointCaptures.Clear();
+        _controlPointContacts.Clear();
+        _nextControlPointContacts.Clear();
+        foreach (var _ in level.ControlPoints)
+        {
+            ControlPointOwners.Add(Team.None);
+            ControlPointSince.Add(99f);
+            ControlPointControllers.Add(-1);
+            ControlPointCaptures.Add(0);
+        }
 
         FlagHome.Clear(); FlagPosition.Clear(); FlagCarrier.Clear(); FlagDroppedTimer.Clear();
         foreach (var fb in level.FlagBases)
@@ -1389,14 +1405,15 @@ public sealed class GameWorld
     }
 
     /// <summary>
-    /// Domination capture. Touching a point takes it — there is no channel, no timer and no
-    /// requirement to stand and hold. A point already yours is a no-op, so walking over your own
-    /// does not re-announce it.
+    /// Domination capture. Entering a point takes it — there is no channel, no timer and no
+    /// requirement to stand and hold. This deliberately models an edge-triggered Touch event:
+    /// players who remain inside do not trade the same point every frame when both teams overlap.
     /// </summary>
     private void UpdateControlPoints(float dt)
     {
         if (Mode.Kind != GameModeKind.Domination) return;
         var points = Level.ControlPoints;
+        _nextControlPointContacts.Clear();
 
         for (int i = 0; i < points.Count && i < ControlPointOwners.Count; i++)
         {
@@ -1405,16 +1422,23 @@ public sealed class GameWorld
 
             foreach (var pawn in Pawns)
             {
-                if (!pawn.Alive || pawn.Team == Team.None || pawn.Team == ControlPointOwners[i]) continue;
+                if (!pawn.Alive || pawn.Team == Team.None) continue;
                 // Generous vertically so standing on the dais counts, tight horizontally so you
                 // cannot take a point by brushing past it in a corridor.
                 Vector3 d = pawn.Position - point.Position;
                 if (MathF.Abs(d.Y) > 2.6f) continue;
                 if (new Vector2(d.X, d.Z).LengthSquared() > point.Radius * point.Radius) continue;
 
+                long contact = ControlPointContactKey(i, pawn.Id);
+                _nextControlPointContacts.Add(contact);
+                bool entered = !_controlPointContacts.Contains(contact);
+                if (!entered || pawn.Team == ControlPointOwners[i]) continue;
+
                 Team previous = ControlPointOwners[i];
                 ControlPointOwners[i] = pawn.Team;
                 ControlPointSince[i] = 0f;
+                ControlPointControllers[i] = pawn.Id;
+                ControlPointCaptures[i]++;
                 pawn.Captures++;
 
                 AddKillFeed(Loc.DomCaptured(pawn.Name, point.Name), GameTypes.TeamColor(pawn.Team));
@@ -1427,7 +1451,33 @@ public sealed class GameWorld
                     else if (viewer.Team == previous)
                         FeedbackFor(viewer).Sub($"{Loc.AnnDomLost}：{point.Name}", 1.6f);
                 }
-                break;
+            }
+        }
+
+        (_controlPointContacts, _nextControlPointContacts) =
+            (_nextControlPointContacts, _controlPointContacts);
+    }
+
+    private static long ControlPointContactKey(int pointIndex, int pawnId)
+        => ((long)pointIndex << 32) | (uint)pawnId;
+
+    /// <summary>
+    /// Marks every pawn currently inside a control point as an existing contact. Save restoration
+    /// calls this after replacing pawn positions so resuming does not manufacture a new capture.
+    /// </summary>
+    public void SynchronizeControlPointContacts()
+    {
+        _controlPointContacts.Clear();
+        for (int i = 0; i < Level.ControlPoints.Count; i++)
+        {
+            ControlPoint point = Level.ControlPoints[i];
+            foreach (Pawn pawn in Pawns)
+            {
+                if (!pawn.Alive || pawn.Team == Team.None) continue;
+                Vector3 d = pawn.Position - point.Position;
+                if (MathF.Abs(d.Y) <= 2.6f
+                    && new Vector2(d.X, d.Z).LengthSquared() <= point.Radius * point.Radius)
+                    _controlPointContacts.Add(ControlPointContactKey(i, pawn.Id));
             }
         }
     }

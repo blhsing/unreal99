@@ -62,6 +62,7 @@ public static class Loc
     public const string OptNoLimit = "無限制";
     public const string MapGalleryTitle = "競技場圖庫";
     public const string MapCtfUnavailable = "此競技場不支援奪旗大戰";
+    public const string MapModeUnavailable = "此競技場不支援目前的遊戲模式";
     public const string MapGalleryHint = "選擇一座競技場以檢視並套用";
     public const string MapIntroduction = "競技場介紹";
     public const string MapSelected = "已選擇";
@@ -172,6 +173,21 @@ public static class Loc
     public const string MapOldenDesc = "山中古代神殿的含水層，小巧而垂直，四到六人最合適。";
     public const string MapCinderDesc = "停工後被標下的鑄造廠，熔爐、吊車與澆鑄平台各鎮守一點。";
 
+    // Domination control-point names. Keep these out of map builders so every HUD, capture
+    // message and save/load presentation uses the same localized label.
+    public const string DomPointTower = "高塔";
+    public const string DomPointBridge = "橋樑";
+    public const string DomPointStorage = "儲藏庫";
+    public const string DomPointNorthTomb = "北墓室";
+    public const string DomPointWestTomb = "西墓室";
+    public const string DomPointEastTomb = "東墓室";
+    public const string DomPointSpring = "泉眼";
+    public const string DomPointColonnade = "柱廊";
+    public const string DomPointShrine = "神殿";
+    public const string DomPointFurnace = "熔爐";
+    public const string DomPointCasting = "鑄造場";
+    public const string DomPointCrane = "起重機";
+
     public const string MapFacingWorlds = "CTF-對峙世界";
     public const string MapMorpheus = "DM-摩菲斯之塔";
     public const string MapHyperBlast = "DM-超載星艦";
@@ -248,10 +264,12 @@ public static class Loc
     public const string ScoreboardTitle = "戰績排行";
     public const string ScoreName = "名稱";
     public const string ScoreFrags = "擊殺";
+    public const string ScorePoints = "得分";
     public const string ScoreDeaths = "陣亡";
     public const string ScoreRatio = "比率";
     public const string ScorePing = "延遲";
     public const string ScoreCaptures = "奪旗";
+    public const string ScoreDomCaptures = "佔點";
     public const string ScoreAccuracy = "命中率";
 
     // ---------------------------------------------------------------- announcer

@@ -360,8 +360,11 @@ public static partial class Maps
             float a = i / 4f * MathX.TwoPi + MathX.Pi / 4f;
             Vector3 d = new(MathF.Cos(a), 0f, MathF.Sin(a));
             Vector3 c = d * 18f;
-            b.Solid(c - new Vector3(5.5f, 0f, 0.9f), c + new Vector3(5.5f, 6.5f, 0.9f), MatId.RustMetal, true, 0.9f);
-            b.Solid(c - new Vector3(0.9f, 0f, 5.5f), c + new Vector3(0.9f, 6.5f, 5.5f), MatId.RustMetal, true, 0.9f);
+            // Meet the balcony underside instead of leaving a disconnected, walkable top. A
+            // pawn knocked down from the balcony could otherwise survive on the narrow 6.5 m
+            // bookcase cap and spend the match reversing across its three-node nav island.
+            b.Solid(c - new Vector3(5.5f, 0f, 0.9f), c + new Vector3(5.5f, Balcony, 0.9f), MatId.RustMetal, true, 0.9f);
+            b.Solid(c - new Vector3(0.9f, 0f, 5.5f), c + new Vector3(0.9f, Balcony, 5.5f), MatId.RustMetal, true, 0.9f);
         }
         for (int i = 0; i < 4; i++)
         {
@@ -530,8 +533,12 @@ public static partial class Maps
             // Anti-grav boots, a pair of them, which is how the original expects you to reach
             // the upper deck and the roof.
             b.Item(new Vector3(i * 26f, 4.0f, 0f), PickupKind.JumpBoots);
-            b.AddJumpPad(new Vector3(i * 26f, 3.3f, 8f), new Vector3(i * 14f, Upper + 2f, BlockZ - 14f),
-                new Vector3(0.4f, 0.85f, 1f));
+            // The exterior route crosses the habitat's full-height outer wall. The default arc
+            // clips that wall and drops a rider back onto the regolith; clear the roof before
+            // descending onto the authored upper walkway.
+            b.AddJumpPad(new Vector3(i * 26f, 3.3f, 8f),
+                new Vector3(i * 14f, Upper + 2f, BlockZ - 14f),
+                new Vector3(0.4f, 0.85f, 1f), peakClearance: 8.5f);
         }
 
         b.Weapon(new Vector3(0f, 0.9f, 0f), WeaponKind.BioRifle);

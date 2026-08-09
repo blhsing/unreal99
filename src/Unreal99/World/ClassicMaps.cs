@@ -574,8 +574,12 @@ public static partial class Maps
         }
 
         // --- the spine: a narrow corridor connecting both rooms, flanked by open drops ---
-        b.Solid(new Vector3(-6f, Lower, -19f), new Vector3(-4.6f, Mid, 19f), MatId.TechWall, true, 0.7f);
-        b.Solid(new Vector3(4.6f, Lower, -19f), new Vector3(6f, Mid, 19f), MatId.TechWall, true, 0.7f);
+        // Carry the spine walls up to the upper catwalk. Their old seven-metre caps were
+        // walkable but disconnected navigation islands: a knocked bot could land there and
+        // stand forever because no route left the 1.4-metre strip. At upper-deck height these
+        // structural walls meet the catwalk and every sampled top surface has a way home.
+        b.Solid(new Vector3(-6f, Lower, -19f), new Vector3(-4.6f, Upper, 19f), MatId.TechWall, true, 0.7f);
+        b.Solid(new Vector3(4.6f, Lower, -19f), new Vector3(6f, Upper, 19f), MatId.TechWall, true, 0.7f);
 
         // --- upper deck: a catwalk spanning the whole ship, the sniper's road ---
         b.Solid(new Vector3(-4.5f, Upper - 0.5f, -34f), new Vector3(4.5f, Upper, 34f), MatId.MetalGrate, true, 1.0f);

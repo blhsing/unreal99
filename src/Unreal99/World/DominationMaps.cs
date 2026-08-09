@@ -95,7 +95,7 @@ public static partial class Maps
             RailRun(b, new Vector3(tower.X - 3f, Walk, s * 9f), new Vector3(tower.X - 3f, Walk, s * PoolZ));
             RailRun(b, new Vector3(tower.X + 3f, Walk, s * 9f), new Vector3(tower.X + 3f, Walk, s * PoolZ));
         }
-        b.AddControlPoint(tower + new Vector3(6.5f, 0f, 0f), "Tower");
+        b.AddControlPoint(tower + new Vector3(6.5f, 0f, 0f), Loc.DomPointTower);
 
         // --- Bridge: a span across the middle pool, point dead centre ---
         Vector3 bridge = new(0f, 2.5f, 0f);
@@ -117,7 +117,7 @@ public static partial class Maps
         foreach (int s in new[] { -1, 1 })
             b.Ramp(new Vector3(-3.5f, 0f, MathF.Min(s * 22f, s * 32f)),
                    new Vector3(3.5f, 2.5f, MathF.Max(s * 22f, s * 32f)), s < 0 ? 2 : 3, MatId.Concrete);
-        b.AddControlPoint(bridge, "Bridge");
+        b.AddControlPoint(bridge, Loc.DomPointBridge);
 
         // --- Storage: an island in molten iron, behind a door ---
         Vector3 storage = new(28f, 1.2f, 0f);
@@ -141,7 +141,7 @@ public static partial class Maps
             b.Ramp(new Vector3(storage.X - 3f, 0f, MathF.Min(s * 15f, s * 20f)),
                    new Vector3(storage.X + 3f, 1.2f, MathF.Max(s * 15f, s * 20f)), s < 0 ? 2 : 3, MatId.Concrete);
         }
-        b.AddControlPoint(storage, "Storage");
+        b.AddControlPoint(storage, Loc.DomPointStorage);
 
         for (int i = -1; i <= 1; i++)
             for (int s = -1; s <= 1; s += 2)
@@ -215,9 +215,9 @@ public static partial class Maps
         // those corridors shaped nothing at all. The map played as three alcoves round one hall.
         var chambers = new[]
         {
-            (pos: new Vector3(0f, 0f, -32f), name: "North Tomb"),
-            (pos: new Vector3(-32f, 0f, 0f), name: "West Tomb"),
-            (pos: new Vector3(32f, 0f, 0f), name: "East Tomb"),
+            (pos: new Vector3(0f, 0f, -32f), name: Loc.DomPointNorthTomb),
+            (pos: new Vector3(-32f, 0f, 0f), name: Loc.DomPointWestTomb),
+            (pos: new Vector3(32f, 0f, 0f), name: Loc.DomPointEastTomb),
         };
 
         b.Solid(new Vector3(-48f, -1.6f, -48f), new Vector3(48f, 0f, 48f), MatId.Concrete, true, 0.7f);
@@ -350,10 +350,18 @@ public static partial class Maps
             Vector3 hi = Vector3.Max(a, c) + new Vector3(MathF.Abs(dz) * 2.5f, 0f, MathF.Abs(dx) * 2.5f);
             b.Solid(new Vector3(lo.X, Floor - 0.6f, lo.Z), new Vector3(hi.X, Floor, hi.Z), MatId.Concrete, true, 0.8f);
         }
-        b.AddControlPoint(new Vector3(0f, Floor, 0f), "Spring");
+        b.AddControlPoint(new Vector3(0f, Floor, 0f), Loc.DomPointSpring);
 
         // --- colonnade ring, second point on its north side ---
         b.Annulus(Vector3.Zero, Colonnade - 0.6f, Colonnade, 12f, H, MatId.Concrete, slabs: 24, collide: true, uvScale: 0.8f);
+        // The ring used to be a one-way destination: bots could ride a jump pad up, but the
+        // shortest generated route back to the arena floor was a lethal step over either edge.
+        // Low, substantial parapets keep ordinary movement on the walkway, while the return
+        // teleporters below give both players and navigation an intentional route down.
+        b.Annulus(Vector3.Zero, Colonnade, Colonnade + 1.35f, 11.35f, 12.15f,
+            MatId.Trim, slabs: 24, collide: true, uvScale: 0.7f);
+        b.Annulus(Vector3.Zero, Colonnade, Colonnade + 1.35f, 25.2f, H,
+            MatId.Trim, slabs: 24, collide: true, uvScale: 0.7f);
         RingPosts(b, Colonnade, 12.4f, 18);
         for (int i = 0; i < 10; i++)
         {
@@ -365,19 +373,31 @@ public static partial class Maps
         // Leadworks — the graph will not commit to a pad-only approach, and bots that did make
         // the jump took fall damage coming back down. The colonnade above is still worth holding
         // as a firing position; it just is not the thing you have to stand on.
-        b.AddControlPoint(new Vector3(0f, Floor, -20f), "Colonnade");
+        b.AddControlPoint(new Vector3(0f, Floor, -20f), Loc.DomPointColonnade);
         foreach (int s in new[] { -1, 1 })
+        {
             b.AddJumpPad(new Vector3(s * 16f, -3.0f, 0f), new Vector3(s * 19f, Colonnade + 2f, 0f),
                 new Vector3(0.5f, 0.85f, 1f));
+            b.AddTeleporter(new Vector3(s * 19f, Colonnade + 0.2f, 6f),
+                new Vector3(s * 19f, Floor + 0.2f, 8f), s < 0 ? 90f : -90f,
+                new Vector3(0.45f, 0.8f, 1f));
+        }
 
         // --- shrine on top, third point, reachable only by pad ---
         b.Solid(new Vector3(-8f, Shrine - 0.8f, -8f), new Vector3(8f, Shrine, 8f), MatId.Concrete, true, 0.8f);
+        const float ShrineRail = 1.35f;
+        b.Solid(new Vector3(-8f, Shrine, -8f), new Vector3(8f, Shrine + ShrineRail, -7.35f), MatId.Trim, true, 0.7f);
+        b.Solid(new Vector3(-8f, Shrine, 7.35f), new Vector3(8f, Shrine + ShrineRail, 8f), MatId.Trim, true, 0.7f);
+        b.Solid(new Vector3(-8f, Shrine, -7.35f), new Vector3(-7.35f, Shrine + ShrineRail, 7.35f), MatId.Trim, true, 0.7f);
+        b.Solid(new Vector3(7.35f, Shrine, -7.35f), new Vector3(8f, Shrine + ShrineRail, 7.35f), MatId.Trim, true, 0.7f);
         foreach (var (px, pz) in new[] { (-6.4f, -6.4f), (6.4f, -6.4f), (-6.4f, 6.4f), (6.4f, 6.4f) })
             b.Prism(new Vector3(px, Shrine, pz), 1.0f, 6f, 8, MatId.Concrete);
-        b.AddControlPoint(new Vector3(0f, Floor, 20f), "Shrine");
+        b.AddControlPoint(new Vector3(0f, Floor, 20f), Loc.DomPointShrine);
         foreach (int s in new[] { -1, 1 })
             b.AddJumpPad(new Vector3(0f, Colonnade + 0.1f, s * 19f), new Vector3(0f, Shrine + 2.4f, s * 5f),
                 new Vector3(0.5f, 0.85f, 1f));
+        b.AddTeleporter(new Vector3(6f, Shrine + 0.2f, 0f),
+            new Vector3(0f, Floor + 0.2f, 18f), 180f, new Vector3(1f, 0.75f, 0.35f));
         b.AddLight(new Vector3(0f, Shrine + 5f, 0f), new Vector3(1f, 0.85f, 0.55f), 24f, 6f);
 
         for (int i = 0; i < 4; i++)
@@ -464,7 +484,7 @@ public static partial class Maps
                     furnace + d * 6.7f + new Vector3(0.5f, 7.5f, 0.5f), MatId.EnergyPanel, 0.5f);
         }
         b.AddLight(furnace + new Vector3(0f, 6f, 0f), new Vector3(1f, 0.42f, 0.10f), 30f, 8f, 2.2f, 0.26f);
-        b.AddControlPoint(furnace + new Vector3(9.5f, 0f, 0f), "Furnace");
+        b.AddControlPoint(furnace + new Vector3(9.5f, 0f, 0f), Loc.DomPointFurnace);
 
         // --- Casting floor: a lava channel with the point on the island between the moulds ---
         b.Solid(new Vector3(-6f, -6f, -HZ), new Vector3(6f, -1.6f, HZ), MatId.Concrete, true, 0.8f);
@@ -472,7 +492,7 @@ public static partial class Maps
         foreach (int s in new[] { -1, 1 })
             b.Solid(new Vector3(-6f, -1.6f, s * 7f), new Vector3(6f, 0f, s * 13f), MatId.MetalGrate, true, 0.9f);
         b.Solid(new Vector3(-6f, -1.6f, -4f), new Vector3(6f, 0f, 4f), MatId.MetalGrate, true, 0.9f);
-        b.AddControlPoint(new Vector3(0f, 0f, 0f), "Casting");
+        b.AddControlPoint(new Vector3(0f, 0f, 0f), Loc.DomPointCasting);
 
         // --- Crane: a gantry over the far end, point on its deck ---
         b.Solid(new Vector3(14f, Gantry - 0.6f, -HZ + 4f), new Vector3(HX - 2f, Gantry, HZ - 4f),
@@ -481,7 +501,7 @@ public static partial class Maps
         b.Solid(new Vector3(20f, Gantry, -3f), new Vector3(32f, Gantry + 5f, 3f), MatId.RustMetal, true, 0.9f);
         // On the floor under the gantry, for the same reason as Olden's upper points: a pad-only
         // approach leaves the point uncontested all match.
-        b.AddControlPoint(new Vector3(26f, 0f, 0f), "Crane");
+        b.AddControlPoint(new Vector3(26f, 0f, 0f), Loc.DomPointCrane);
         foreach (int s in new[] { -1, 1 })
             b.AddJumpPad(new Vector3(20f, 0.1f, s * (HZ - 6f)), new Vector3(20f, Gantry + 2.4f, s * (HZ - 8f)),
                 new Vector3(0.45f, 0.85f, 1f));

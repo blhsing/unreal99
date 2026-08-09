@@ -1,62 +1,18 @@
 using System.Runtime.InteropServices;
-using System.Text;
+using System.Reflection;
 
 namespace Unreal99.Platform;
 
 /// <summary>
 /// Creates the Start Menu entry.
 ///
-/// Windows shortcuts are a COM-only format. Late-bound WScript.Shell automation silently drops
-/// property writes under .NET's IDispatch binder — it produces a file whose target is empty —
-/// so this talks to <c>IShellLinkW</c> and <c>IPersistFile</c> through their vtables instead.
-/// That is fully Unicode, which matters because the link is named in Traditional Chinese.
+/// Windows shortcuts are a COM-only format. Use WScript.Shell through explicit IDispatch
+/// reflection: the native IShellLink vtable declaration previously used here produced a file
+/// containing the target bytes, but Windows' independent shortcut readers could not resolve it.
+/// The automation object creates the same interoperable Unicode link as Explorer.
 /// </summary>
 public static class Shortcut
 {
-    private static readonly Guid ClsidShellLink = new("00021401-0000-0000-C000-000000000046");
-
-    [ComImport]
-    [Guid("000214F9-0000-0000-C000-000000000046")]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface IShellLinkW
-    {
-        // The declaration order defines the vtable layout, so every method must be present
-        // even though only the setters are used here.
-        void GetPath([MarshalAs(UnmanagedType.LPWStr)] StringBuilder file, int maxPath, nint findData,
-            uint flags);
-        void GetIDList(out nint idList);
-        void SetIDList(nint idList);
-        void GetDescription([MarshalAs(UnmanagedType.LPWStr)] StringBuilder name, int maxName);
-        void SetDescription([MarshalAs(UnmanagedType.LPWStr)] string name);
-        void GetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] StringBuilder dir, int maxPath);
-        void SetWorkingDirectory([MarshalAs(UnmanagedType.LPWStr)] string dir);
-        void GetArguments([MarshalAs(UnmanagedType.LPWStr)] StringBuilder args, int maxArgs);
-        void SetArguments([MarshalAs(UnmanagedType.LPWStr)] string args);
-        void GetHotkey(out short hotkey);
-        void SetHotkey(short hotkey);
-        void GetShowCmd(out int showCmd);
-        void SetShowCmd(int showCmd);
-        void GetIconLocation([MarshalAs(UnmanagedType.LPWStr)] StringBuilder iconPath, int maxPath,
-            out int iconIndex);
-        void SetIconLocation([MarshalAs(UnmanagedType.LPWStr)] string iconPath, int iconIndex);
-        void SetRelativePath([MarshalAs(UnmanagedType.LPWStr)] string relativePath, uint reserved);
-        void Resolve(nint window, uint flags);
-        void SetPath([MarshalAs(UnmanagedType.LPWStr)] string path);
-    }
-
-    [ComImport]
-    [Guid("0000010B-0000-0000-C000-000000000046")]
-    [InterfaceType(ComInterfaceType.InterfaceIsIUnknown)]
-    private interface IPersistFile
-    {
-        void GetClassID(out Guid classId);
-        [PreserveSig] int IsDirty();
-        void Load([MarshalAs(UnmanagedType.LPWStr)] string fileName, uint mode);
-        void Save([MarshalAs(UnmanagedType.LPWStr)] string fileName, [MarshalAs(UnmanagedType.Bool)] bool remember);
-        void SaveCompleted([MarshalAs(UnmanagedType.LPWStr)] string fileName);
-        void GetCurFile([MarshalAs(UnmanagedType.LPWStr)] out string fileName);
-    }
-
     [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
     private static extern void SHChangeNotify(int eventId, uint flags, nint item1, nint item2);
 
@@ -105,44 +61,72 @@ public static class Shortcut
     {
         if (!OperatingSystem.IsWindows()) { LastError = "僅支援 Windows"; return null; }
 
-        object instance = null;
+        object shell = null;
+        object shortcut = null;
+        string step = "初始化";
+        string temporaryPath = null;
         try
         {
             Directory.CreateDirectory(StartMenuFolder);
             string linkPath = DefaultPath(name);
             string workingDirectory = Path.GetDirectoryName(targetPath) ?? "";
+            // WScript.Shell writes a standards-compliant shortcut but its Save method still
+            // converts the filename through the active ANSI code page. Create under a unique
+            // ASCII name, verify it there, then rename the already-complete file to our Unicode
+            // Traditional-Chinese Start-menu name.
+            temporaryPath = Path.Combine(StartMenuFolder,
+                $"Unreal99-shortcut-{Guid.NewGuid():N}.lnk");
 
-            // A stale or malformed file at this path would make IPersistFile.Save fail.
-            if (File.Exists(linkPath)) File.Delete(linkPath);
+            if (File.Exists(temporaryPath)) File.Delete(temporaryPath);
 
-            Type type = Type.GetTypeFromCLSID(ClsidShellLink);
-            if (type == null) { LastError = "無法取得 ShellLink 類別"; return null; }
-            instance = Activator.CreateInstance(type);
-            if (instance is not IShellLinkW link) { LastError = "無法取得 IShellLinkW 介面"; return null; }
+            step = "取得 WScript.Shell";
+            Type shellType = Type.GetTypeFromProgID("WScript.Shell");
+            if (shellType == null) { LastError = "無法取得 WScript.Shell 類別"; return null; }
+            shell = Activator.CreateInstance(shellType);
+            if (shell == null) { LastError = "無法啟動 WScript.Shell"; return null; }
+            step = "建立捷徑物件";
+            shortcut = Invoke(shellType, shell, "CreateShortcut", temporaryPath);
+            if (shortcut == null) { LastError = "無法建立捷徑物件"; return null; }
 
-            link.SetPath(targetPath);
-            link.SetWorkingDirectory(workingDirectory);
-            link.SetArguments(arguments ?? "");
-            link.SetDescription(Truncate(description ?? "", 260));
-            link.SetShowCmd(1);   // SW_SHOWNORMAL
-            if (!string.IsNullOrEmpty(iconPath) && File.Exists(iconPath)) link.SetIconLocation(iconPath, 0);
+            Type shortcutType = shortcut.GetType();
+            step = "設定目標";
+            Set(shortcutType, shortcut, "TargetPath", targetPath);
+            step = "設定工作目錄";
+            Set(shortcutType, shortcut, "WorkingDirectory", workingDirectory);
+            step = "設定參數";
+            Set(shortcutType, shortcut, "Arguments", arguments ?? "");
+            step = "設定說明";
+            Set(shortcutType, shortcut, "Description", Truncate(description ?? "", 260));
+            step = "設定視窗樣式";
+            Set(shortcutType, shortcut, "WindowStyle", 1);   // SW_SHOWNORMAL
+            if (!string.IsNullOrEmpty(iconPath) && File.Exists(iconPath))
+            {
+                step = "設定圖示";
+                Set(shortcutType, shortcut, "IconLocation", $"{iconPath},0");
+            }
+            step = "儲存捷徑";
+            Invoke(shortcutType, shortcut, "Save");
 
-            ((IPersistFile)link).Save(linkPath, true);
-
-            if (!File.Exists(linkPath)) { LastError = "捷徑檔案未建立"; return null; }
-            if (!Verify(linkPath, targetPath)) { LastError = "捷徑目標驗證失敗"; return null; }
+            if (!File.Exists(temporaryPath)) { LastError = "捷徑檔案未建立"; return null; }
+            if (!Verify(temporaryPath, targetPath)) { LastError = "捷徑目標驗證失敗"; return null; }
+            File.Move(temporaryPath, linkPath, true);
+            temporaryPath = null;
 
             NotifyShell(linkPath, StartMenuFolder);
             return linkPath;
         }
         catch (Exception ex)
         {
-            LastError = $"{ex.GetType().Name}: {ex.Message}";
+            Exception detail = ex is TargetInvocationException { InnerException: not null } tie
+                ? tie.InnerException : ex;
+            LastError = $"{step}: {detail.GetType().Name}: {detail.Message}";
             return null;
         }
         finally
         {
-            if (instance != null && Marshal.IsComObject(instance)) Marshal.FinalReleaseComObject(instance);
+            Release(shortcut);
+            Release(shell);
+            if (temporaryPath != null && File.Exists(temporaryPath)) File.Delete(temporaryPath);
         }
     }
 
@@ -150,27 +134,50 @@ public static class Shortcut
     public static bool Verify(string linkPath, string expectedTarget)
     {
         if (!File.Exists(linkPath)) return false;
-        object instance = null;
+        object shell = null;
+        object shortcut = null;
+        string probePath = null;
         try
         {
-            Type type = Type.GetTypeFromCLSID(ClsidShellLink);
-            if (type == null) return true;   // cannot check; trust the write
-            instance = Activator.CreateInstance(type);
-            if (instance is not IShellLinkW link) return true;
-
-            ((IPersistFile)link).Load(linkPath, 0);
-            var buffer = new StringBuilder(520);
-            link.GetPath(buffer, buffer.Capacity, 0, 0);
-            return string.Equals(buffer.ToString(), expectedTarget, StringComparison.OrdinalIgnoreCase);
+            // See Create(): WScript cannot open a Unicode shortcut filename either. The shortcut
+            // payload is path-independent, so verify an exact temporary copy under an ASCII name.
+            probePath = Path.Combine(StartMenuFolder,
+                $"Unreal99-verify-{Guid.NewGuid():N}.lnk");
+            File.Copy(linkPath, probePath, true);
+            Type shellType = Type.GetTypeFromProgID("WScript.Shell");
+            if (shellType == null) return false;
+            shell = Activator.CreateInstance(shellType);
+            if (shell == null) return false;
+            shortcut = Invoke(shellType, shell, "CreateShortcut", probePath);
+            if (shortcut == null) return false;
+            object target = Get(shortcut.GetType(), shortcut, "TargetPath");
+            return target is string path
+                && string.Equals(path, expectedTarget, StringComparison.OrdinalIgnoreCase);
         }
         catch (Exception)
         {
-            return true;   // verification unavailable; do not fail the install over it
+            return false;
         }
         finally
         {
-            if (instance != null && Marshal.IsComObject(instance)) Marshal.FinalReleaseComObject(instance);
+            Release(shortcut);
+            Release(shell);
+            if (probePath != null && File.Exists(probePath)) File.Delete(probePath);
         }
+    }
+
+    private static object Invoke(Type type, object instance, string member, params object[] args)
+        => type.InvokeMember(member, BindingFlags.InvokeMethod, null, instance, args);
+
+    private static void Set(Type type, object instance, string member, object value)
+        => type.InvokeMember(member, BindingFlags.SetProperty, null, instance, [value]);
+
+    private static object Get(Type type, object instance, string member)
+        => type.InvokeMember(member, BindingFlags.GetProperty, null, instance, null);
+
+    private static void Release(object instance)
+    {
+        if (instance != null && Marshal.IsComObject(instance)) Marshal.FinalReleaseComObject(instance);
     }
 
     private static string Truncate(string value, int max)

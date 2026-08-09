@@ -16,7 +16,7 @@ namespace Unreal99.Game;
 /// </summary>
 public sealed class SaveGame
 {
-    public int Version = 1;
+    public int Version = 2;
     /// <summary>Round-trip timestamp, so the picker can sort and display without a locale guess.</summary>
     public string SavedAtUtc = "";
     public string Label = "";
@@ -26,6 +26,7 @@ public sealed class SaveGame
     public int ModeKind;
     public int FragLimit;
     public int CaptureLimit;
+    public int DominationLimit = 100;
     public float TimeLimit;
     public int LocalPlayers = 1;
     public int BotCount;
@@ -39,11 +40,15 @@ public sealed class SaveGame
     public bool FirstBloodPending;
     public int TeamScore0;
     public int TeamScore1;
+    public float DominationScore0;
+    public float DominationScore1;
+    public float DominationScoreTimer;
     public int NextPawnId = 1;
 
     public List<PawnSave> Pawns = new();
     public List<PickupSave> Pickups = new();
     public List<FlagSave> Flags = new();
+    public List<ControlPointSave> ControlPoints = new();
     public List<LivesSave> Lives = new();
 
     /// <summary>Summary line for the picker, so it need not reconstruct a world to describe one.</summary>
@@ -87,6 +92,7 @@ public sealed class PawnSave
     public bool HasShieldBelt;
 
     public int Frags, Deaths, Suicides, Captures, FlagCarrierKills, Streak;
+    public float DominationScore;
     public int ShotsFired, ShotsHit;
     public bool HasFlag;
     public int CarriedFlag = -1;
@@ -104,6 +110,13 @@ public sealed class FlagSave
     public float X, Y, Z;
     public int Carrier = -1;
     public float DroppedTimer;
+}
+
+public sealed class ControlPointSave
+{
+    public int Owner = -1;
+    public int Controller = -1;
+    public float Since;
 }
 
 public sealed class LivesSave
@@ -182,6 +195,7 @@ public static class SaveStore
             ModeKind = (int)mode.Kind,
             FragLimit = mode.FragLimit,
             CaptureLimit = mode.CaptureLimit,
+            DominationLimit = mode.DominationLimit,
             TimeLimit = mode.TimeLimit,
             LocalPlayers = localPlayers,
             BotCount = botCount,
@@ -193,6 +207,9 @@ public static class SaveStore
             FirstBloodPending = mode.FirstBloodPending,
             TeamScore0 = mode.TeamScores[0],
             TeamScore1 = mode.TeamScores[1],
+            DominationScore0 = mode.DominationScores[0],
+            DominationScore1 = mode.DominationScores[1],
+            DominationScoreTimer = mode.DominationScoreTimer,
             NextPawnId = world.NextPawnId,
         };
 
@@ -223,7 +240,8 @@ public static class SaveStore
                 JumpBootCharges = p.JumpBootCharges,
                 HasShieldBelt = p.HasShieldBelt,
                 Frags = p.Frags, Deaths = p.Deaths, Suicides = p.Suicides,
-                Captures = p.Captures, FlagCarrierKills = p.FlagCarrierKills, Streak = p.Streak,
+                Captures = p.Captures, DominationScore = p.DominationScore,
+                FlagCarrierKills = p.FlagCarrierKills, Streak = p.Streak,
                 ShotsFired = p.ShotsFired, ShotsHit = p.ShotsHit,
                 HasFlag = p.HasFlag,
                 CarriedFlag = (int)p.CarriedFlag,
@@ -253,6 +271,17 @@ public static class SaveStore
             });
         }
 
+        for (int i = 0; i < world.ControlPointOwners.Count; i++)
+        {
+            save.ControlPoints.Add(new ControlPointSave
+            {
+                Owner = (int)world.ControlPointOwners[i],
+                Controller = i < world.ControlPointControllers.Count
+                    ? world.ControlPointControllers[i] : -1,
+                Since = i < world.ControlPointSince.Count ? world.ControlPointSince[i] : 0f,
+            });
+        }
+
         foreach (var kv in mode.LivesLeft)
             save.Lives.Add(new LivesSave { PawnId = kv.Key, Remaining = kv.Value });
 
@@ -275,7 +304,7 @@ public static class SaveStore
         Func<int, Controller> makePlayerController, List<Controller> playersOut, List<int> viewPawnIds)
     {
         var mode = GameMode.Create((GameModeKind)save.ModeKind, save.FragLimit,
-            save.TimeLimit / 60f, save.CaptureLimit);
+            save.TimeLimit / 60f, save.CaptureLimit, save.DominationLimit);
         world.LoadLevel(level, mode);
         playersOut.Clear();
         viewPawnIds.Clear();
@@ -314,7 +343,8 @@ public static class SaveStore
             pawn.JumpBootCharges = ps.JumpBootCharges;
             pawn.HasShieldBelt = ps.HasShieldBelt;
             pawn.Frags = ps.Frags; pawn.Deaths = ps.Deaths; pawn.Suicides = ps.Suicides;
-            pawn.Captures = ps.Captures; pawn.FlagCarrierKills = ps.FlagCarrierKills;
+            pawn.Captures = ps.Captures; pawn.DominationScore = ps.DominationScore;
+            pawn.FlagCarrierKills = ps.FlagCarrierKills;
             pawn.Streak = ps.Streak;
             pawn.ShotsFired = ps.ShotsFired; pawn.ShotsHit = ps.ShotsHit;
             pawn.HasFlag = ps.HasFlag;
@@ -350,6 +380,17 @@ public static class SaveStore
             world.FlagDroppedTimer[team] = f.DroppedTimer;
         }
 
+        for (int i = 0; i < world.ControlPointOwners.Count && i < save.ControlPoints.Count; i++)
+        {
+            ControlPointSave point = save.ControlPoints[i];
+            Team owner = point.Owner is 0 or 1 ? (Team)point.Owner : Team.None;
+            world.ControlPointOwners[i] = owner;
+            world.ControlPointControllers[i] = world.FindPawn(point.Controller)?.Team == owner
+                ? point.Controller : -1;
+            world.ControlPointSince[i] = MathF.Max(0f, point.Since);
+        }
+        world.SynchronizeControlPointContacts();
+
         // Flag dictionaries are authoritative. Reconstruct pawn ownership as well so old saves,
         // which stored HasFlag but not CarriedFlag, cannot produce a carrier with Team.None.
         foreach (Pawn pawn in world.Pawns)
@@ -376,8 +417,20 @@ public static class SaveStore
         mode.WarmupRemaining = save.WarmupRemaining;
         mode.TimeRemaining = save.TimeRemaining;
         mode.FirstBloodPending = save.FirstBloodPending;
-        mode.TeamScores[0] = save.TeamScore0;
-        mode.TeamScores[1] = save.TeamScore1;
+        if (mode.Kind == GameModeKind.Domination)
+        {
+            // Version-one saves predate fractional Domination state. Their exact fields default
+            // to zero, so retain the visible integer score as the migration baseline.
+            float red = save.Version >= 2 ? save.DominationScore0 : save.TeamScore0;
+            float blue = save.Version >= 2 ? save.DominationScore1 : save.TeamScore1;
+            mode.RestoreDominationScores(red, blue,
+                save.Version >= 2 ? save.DominationScoreTimer : 0f);
+        }
+        else
+        {
+            mode.TeamScores[0] = save.TeamScore0;
+            mode.TeamScores[1] = save.TeamScore1;
+        }
         mode.LivesLeft.Clear();
         foreach (var l in save.Lives) mode.LivesLeft[l.PawnId] = l.Remaining;
     }

@@ -668,12 +668,15 @@ public sealed class LevelBuilder
         AddLight((min + max) * 0.5f + offset * 0.5f + MathX.Up, new Vector3(0.3f, 0.7f, 1f), 8f, 1.6f);
     }
 
-    public void AddJumpPad(Vector3 position, Vector3 destination, Vector3 color)
+    public void AddJumpPad(Vector3 position, Vector3 destination, Vector3 color,
+        float peakClearance = 3.2f)
     {
-        // Ballistic solve: pick a flight time from the height difference and derive the launch velocity.
+        // Ballistic solve: pick a flight time from the height difference and derive the launch
+        // velocity. Maps may request extra clearance when the route must pass over a wall before
+        // descending to a lower landing; the default preserves the compact ordinary arc.
         Vector3 delta = destination - position;
         float gravity = Physics.Gravity * _level.GravityScale;
-        float peak = MathF.Max(delta.Y + 3.2f, 3.2f);
+        float peak = MathF.Max(delta.Y + peakClearance, peakClearance);
         float vy = MathF.Sqrt(2f * gravity * peak);
         float tUp = vy / gravity;
         float tDown = MathF.Sqrt(2f * MathF.Max(peak - delta.Y, 0.1f) / gravity);

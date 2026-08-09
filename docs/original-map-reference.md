@@ -1,6 +1,6 @@
 # 原作地圖對照表
 
-本檔記錄十七座競技場所依據的原作資料，來源為 The Liandri Archives
+本檔記錄二十一座競技場所依據的原作資料，來源為 The Liandri Archives
 （<https://unrealarchive.org/wikis/the-liandri-archives/>）。每次調整佈局或道具配置前先看這裡，
 不要憑印象——先前憑印象重建對峙世界，塔樓結構與上下樓方式兩件事都弄錯了。
 
@@ -33,6 +33,16 @@ SniperRifle。
 
 ## 統治模式規則
 
-原作規則：踩上控制點即完成佔領，沒有讀條也不需持續站立。**每持有一個控制點，每五秒得一分**，
-因此持有兩點的得分速度是一點的兩倍。先達得分上限或時間結束時分數最高的隊伍獲勝。原作地圖
-一律是三個控制點。
+原作規則：踩上控制點即完成佔領，沒有讀條也不需持續站立。原版 `ControlPoint` 在易主後以
+`ScoreTime = 2` 等待兩秒才進入可得分狀態；原版 `Domination.Timer()` 之後每秒、每個可得分點跳加
+0.2 分，所以正常速率下等同**每持有一個控制點，每五秒得一分**。有時間上限時，最後四分之一改為
+每秒 0.4 分、最後十分之一為 0.8 分。先達得分上限或時間結束時分數最高的隊伍獲勝。原作
+`Domination.SetEndCams()` 在時間到時先比較整數顯示分數，同分再比較當下持有的控制點數；本作在兩項
+仍相同時判定和局，而不沿用原作會偏向第一隊的次序副作用。原作地圖一律是三個控制點。
+
+規則依據：
+
+- [Unreal Tournament GOTY 原版手冊](https://www.mogelpower.de/manuals/Unreal_Tournament_Game_of_the_Year_Edition_Manual_Englisch.pdf)（兩隊、觸碰即佔領、持續得分）
+- [原版 `ControlPoint.uc`](https://project-archives.etc.cmu.edu/2001/fall/coyote210/Docs/undox/Botpack.ControlPoint.html)（觸碰事件與兩秒啟用期）
+- [原版 `Domination.uc`](https://project-archives.etc.cmu.edu/2001/fall/coyote210/Docs/undox/Botpack.Domination.html)（得分速率、上限與電腦目標）
+- [原版 UnrealEd 電腦導航說明](https://unrealarchive.org/unreal-tournament/documents/reference/unrealed/unreal-tournament-ai/index.html)（控制點必須位於地面導航點）

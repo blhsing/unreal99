@@ -585,11 +585,18 @@ public sealed class Hud
         float ry = y + headerH;
         uint headerCol = UiRenderer.Rgba(0.55f, 0.65f, 0.8f, 0.85f);
         ui.Text(FaceRegular, 14f * s, colName, ry, Loc.ScoreName, headerCol);
-        ui.Text(FaceRegular, 14f * s, colFrags, ry, Loc.ScoreFrags, headerCol, TextAlign.Right);
+        ui.Text(FaceRegular, 14f * s, colFrags, ry,
+            mode.Kind == GameModeKind.Domination ? Loc.ScorePoints : Loc.ScoreFrags,
+            headerCol, TextAlign.Right);
         ui.Text(FaceRegular, 14f * s, colDeaths, ry, Loc.ScoreDeaths, headerCol, TextAlign.Right);
         ui.Text(FaceRegular, 14f * s, colAcc, ry, Loc.ScoreAccuracy, headerCol, TextAlign.Right);
         ui.Text(FaceRegular, 14f * s, colExtra, ry,
-            mode.Kind == GameModeKind.CaptureTheFlag ? Loc.ScoreCaptures : Loc.ScoreRatio,
+            mode.Kind switch
+            {
+                GameModeKind.CaptureTheFlag => Loc.ScoreCaptures,
+                GameModeKind.Domination => Loc.ScoreDomCaptures,
+                _ => Loc.ScoreRatio,
+            },
             headerCol, TextAlign.Right);
         ry += rowH;
 
@@ -618,7 +625,7 @@ public sealed class Hud
             ui.Text(FaceRegular, 17f * s, colAcc, ry + 1f * s, $"{p.Accuracy * 100f:0}%",
                 UiRenderer.Rgba(0.75f, 0.85f, 0.95f), TextAlign.Right);
 
-            string extra = mode.Kind == GameModeKind.CaptureTheFlag
+            string extra = mode.Kind is GameModeKind.CaptureTheFlag or GameModeKind.Domination
                 ? p.Captures.ToString()
                 : $"{(p.Deaths > 0 ? p.Frags / (float)p.Deaths : p.Frags):0.0}";
             ui.Text(FaceRegular, 17f * s, colExtra, ry + 1f * s, extra,

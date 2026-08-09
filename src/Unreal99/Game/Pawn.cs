@@ -99,6 +99,8 @@ public sealed class Pawn
     public int Deaths;
     public int Suicides;
     public int Captures;
+    /// <summary>Fractional personal score earned by control points this pawn captured.</summary>
+    public float DominationScore;
     public int FlagCarrierKills;
     public int Streak;
     public int MultiKillCount;

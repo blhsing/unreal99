@@ -109,6 +109,9 @@ public sealed class App : IDisposable
         public float WorstWindowPath;
         public float WorstWindowNet;
         public float WorstWindowExtent;
+        public float WorstWindowVerticalExtent;
+        public float CurrentSteepDown;
+        public float LongestSteepDown;
         public int MaxWindowReversals;
         public int OscillationEpisodes;
         public bool WasOscillating;
@@ -218,10 +221,12 @@ public sealed class App : IDisposable
                     _menu.DemoSkill = 5;
                     _menu.FragLimit = 0;
                     _menu.CaptureLimit = 0;
+                    _menu.DominationLimit = 0;
                     _menu.TimeLimitMinutes = 0;
                     _renderSettings.Apply(QualityLevel.Low);
                     _cliOverrides.UnionWith(["players", "bots", "skill", "demoskill", "frags",
-                        "captures", "time", "quality", "participantteams", "botskilloverrides"]);
+                        "captures", "domination", "time", "quality", "participantteams",
+                        "botskilloverrides"]);
                     i += 2;
                     break;
                 case "--startmatch":
@@ -388,6 +393,12 @@ public sealed class App : IDisposable
                     _cliOverrides.Add("captures");
                     i++;
                     break;
+                case "--domination" when i + 1 < args.Length:
+                    if (int.TryParse(args[i + 1], out int dl))
+                        _menu.DominationLimit = MathX.Clamp(dl, 0, 200);
+                    _cliOverrides.Add("domination");
+                    i++;
+                    break;
                 case "--time" when i + 1 < args.Length:
                     if (int.TryParse(args[i + 1], out int tl)) _menu.TimeLimitMinutes = MathX.Clamp(tl, 0, 60);
                     _cliOverrides.Add("time");
@@ -525,6 +536,7 @@ public sealed class App : IDisposable
         BotSkill = _menu.BotSkill,
         FragLimit = _menu.FragLimit,
         CaptureLimit = _menu.CaptureLimit,
+        DominationLimit = _menu.DominationLimit,
         TimeLimitMinutes = _menu.TimeLimitMinutes,
         PlayerTeams = [.. _menu.PlayerTeams],
         BotTeams = [.. _menu.BotTeams],
@@ -554,6 +566,7 @@ public sealed class App : IDisposable
         if (!_cliOverrides.Contains("skill")) _menu.BotSkill = setup.BotSkill;
         if (!_cliOverrides.Contains("frags")) _menu.FragLimit = setup.FragLimit;
         if (!_cliOverrides.Contains("captures")) _menu.CaptureLimit = setup.CaptureLimit;
+        if (!_cliOverrides.Contains("domination")) _menu.DominationLimit = setup.DominationLimit;
         if (!_cliOverrides.Contains("time")) _menu.TimeLimitMinutes = setup.TimeLimitMinutes;
         if (!_cliOverrides.Contains("participantteams"))
         {
@@ -1519,7 +1532,8 @@ public sealed class App : IDisposable
 
     private void SpawnMatch()
     {
-        var mode = GameMode.Create(_menu.ModeKind, _menu.FragLimit, _menu.TimeLimitMinutes, _menu.CaptureLimit);
+        var mode = GameMode.Create(_menu.ModeKind, _menu.FragLimit, _menu.TimeLimitMinutes,
+            _menu.CaptureLimit, _menu.DominationLimit);
         // A map without flag bases cannot host CTF; fall back to team deathmatch.
         if (mode.Kind == GameModeKind.CaptureTheFlag && _level.FlagBases.Count < 2)
         {
@@ -2241,8 +2255,25 @@ public sealed class App : IDisposable
             _menu.BotSkillOverrides[1] = 0;
             _menu.DemoMode = true;
             _menu.DemoSkill = 4;
+            _menu.DominationLimit = 125;
             _menu.VerticalSplit = true;
             SaveUserSettings();
+
+            // Give a Domination save non-default fractional and point-ownership state. A
+            // round-trip of zeroes would not prove the mode-specific fields survived.
+            if (_world.Mode.Kind == GameModeKind.Domination
+                && _world.Level.ControlPoints.Count > 0 && _world.Pawns.Count > 0)
+            {
+                Pawn controller = _world.Pawns[0];
+                controller.Team = Team.Red;
+                controller.DominationScore = 9.4f;
+                _world.ControlPointOwners[0] = Team.Red;
+                _world.ControlPointControllers[0] = controller.Id;
+                _world.ControlPointSince[0] = 3.25f;
+                _world.Mode.DominationLimit = 125;
+                _world.Mode.RestoreDominationScores(12.6f, 7.4f, 0.55f);
+                _world.SynchronizeControlPointContacts();
+            }
 
             SaveToSlot(0);
             _saveTestExpected = SaveStore.Read(0);
@@ -2268,6 +2299,7 @@ public sealed class App : IDisposable
             && settings.BotSkillOverrides.Count >= 2
             && settings.BotSkillOverrides[0] == 5 && settings.BotSkillOverrides[1] == 0
             && settings.DemoMode && settings.DemoSkill == 4
+            && settings.DominationLimit == 125
             && settings.VerticalSplit;
         Console.WriteLine($"  設定檔: {(File.Exists(UserData.SettingsPath) ? "已寫入" : "缺少")}　" +
                           $"控制/隊伍/個別難度/展示模式還原: {(settingsOk ? "通過" : "失敗")}");
@@ -2278,7 +2310,12 @@ public sealed class App : IDisposable
             && reread.MapId == expected.MapId
             && reread.Pawns.Count == expected.Pawns.Count
             && reread.Pickups.Count == expected.Pickups.Count
-            && MathF.Abs(reread.WorldTime - expected.WorldTime) < 0.001f;
+            && MathF.Abs(reread.WorldTime - expected.WorldTime) < 0.001f
+            && reread.DominationLimit == expected.DominationLimit
+            && MathF.Abs(reread.DominationScore0 - expected.DominationScore0) < 0.001f
+            && MathF.Abs(reread.DominationScore1 - expected.DominationScore1) < 0.001f
+            && MathF.Abs(reread.DominationScoreTimer - expected.DominationScoreTimer) < 0.001f
+            && reread.ControlPoints.Count == expected.ControlPoints.Count;
         Console.WriteLine($"  存檔位 0: {(reread != null ? "已寫入" : "缺少")}　" +
                           $"角色 {reread?.Pawns.Count ?? 0} 個　道具 {reread?.Pickups.Count ?? 0} 個　" +
                           $"往返一致: {(saveOk ? "通過" : "失敗")}");
@@ -2320,14 +2357,26 @@ public sealed class App : IDisposable
                 worstDrift = MathF.Max(worstDrift, drift);
                 bool same = pawn.Name == ps.Name && pawn.Frags == ps.Frags
                     && MathF.Abs(pawn.Health - ps.Health) < 0.01f
-                    && pawn.Weapon == (WeaponKind)ps.Weapon;
+                    && pawn.Weapon == (WeaponKind)ps.Weapon
+                    && MathF.Abs(pawn.DominationScore - ps.DominationScore) < 0.001f;
                 if (same) matched++;
             }
 
         int activePickups = _world.Pickups.Count(p => p.Active);
         int expectedActive = expected?.Pickups.Count(p => p.Active) ?? -1;
+        bool dominationOk = expected == null || expected.ModeKind != (int)GameModeKind.Domination
+            || (MathF.Abs(_world.Mode.DominationScores[0] - expected.DominationScore0) < 0.001f
+                && MathF.Abs(_world.Mode.DominationScores[1] - expected.DominationScore1) < 0.001f
+                && MathF.Abs(_world.Mode.DominationScoreTimer - expected.DominationScoreTimer) < 0.001f
+                && _world.ControlPointOwners.Count == expected.ControlPoints.Count
+                && (expected.ControlPoints.Count == 0
+                    || (_world.ControlPointOwners[0] == (Team)expected.ControlPoints[0].Owner
+                        && _world.ControlPointControllers[0] == expected.ControlPoints[0].Controller
+                        && MathF.Abs(_world.ControlPointSince[0]
+                            - expected.ControlPoints[0].Since) < 0.001f)));
         bool restoreOk = rosterOk && matched == expected.Pawns.Count
-                         && activePickups == expectedActive && worstDrift < 0.01f;
+                         && activePickups == expectedActive && worstDrift < 0.01f
+                         && dominationOk;
 
         Console.WriteLine($"  載入還原: 角色 {matched}/{expected?.Pawns.Count ?? 0} 相符　" +
                           $"位置最大誤差 {worstDrift:0.000} m　" +
@@ -2386,6 +2435,7 @@ public sealed class App : IDisposable
                     deadMetrics.Samples.Clear();
                     deadMetrics.CurrentOscillation = 0f;
                     deadMetrics.WasOscillating = false;
+                    deadMetrics.CurrentSteepDown = 0f;
                 }
                 continue;
             }
@@ -2429,6 +2479,10 @@ public sealed class App : IDisposable
         }
 
         metrics.Elapsed += dt;
+        metrics.CurrentSteepDown = pawn.Pitch < -1.05f
+            ? metrics.CurrentSteepDown + dt : 0f;
+        metrics.LongestSteepDown = MathF.Max(metrics.LongestSteepDown,
+            metrics.CurrentSteepDown);
         metrics.VisitedCells.Add(((int)MathF.Floor(pawn.Position.X / 4f),
             (int)MathF.Floor(pawn.Position.Z / 4f)));
         metrics.SampleAccumulator += dt;
@@ -2447,11 +2501,13 @@ public sealed class App : IDisposable
         int reversals = 0;
         Vector3 previousDirection = Vector3.Zero;
         float minX = float.MaxValue, maxX = float.MinValue;
+        float minY = float.MaxValue, maxY = float.MinValue;
         float minZ = float.MaxValue, maxZ = float.MinValue;
         for (int i = 0; i < points.Length; i++)
         {
             Vector3 p = points[i].Position;
             minX = MathF.Min(minX, p.X); maxX = MathF.Max(maxX, p.X);
+            minY = MathF.Min(minY, p.Y); maxY = MathF.Max(maxY, p.Y);
             minZ = MathF.Min(minZ, p.Z); maxZ = MathF.Max(maxZ, p.Z);
             if (i == 0) continue;
             Vector3 segment = (p - points[i - 1].Position).FlatXZ();
@@ -2465,10 +2521,18 @@ public sealed class App : IDisposable
         }
 
         float net = (points[^1].Position - points[0].Position).FlatXZ().Length();
-        float extent = new Vector2(maxX - minX, maxZ - minZ).Length();
+        float horizontalExtent = new Vector2(maxX - minX, maxZ - minZ).Length();
+        float verticalExtent = maxY - minY;
+        float spatialExtent = MathF.Sqrt(horizontalExtent * horizontalExtent
+            + verticalExtent * verticalExtent);
         float duration = points[^1].Time - points[0].Time;
-        bool oscillating = duration >= 5f && path >= 9f && net <= 2.5f &&
-                           extent <= 6.5f && reversals >= 3;
+        // Lift boarding/riding is already guarded by its own timeout, stall and environmental-
+        // death gates. A six-second rolling window can include the run to the car plus part of
+        // its return cycle and resemble an X/Z reversal even though vertical traversal is live.
+        bool activeLiftRoute = (_world.ControllerFor(pawn) as PlayerController)?.AutoPilot
+            ?.DiagnosticActiveLiftBrush >= 0;
+        bool oscillating = !activeLiftRoute && duration >= 5f && path >= 9f && net <= 2.5f &&
+                           spatialExtent <= 6.5f && reversals >= 3;
 
         if (oscillating)
         {
@@ -2480,7 +2544,8 @@ public sealed class App : IDisposable
                 metrics.LongestOscillation = metrics.CurrentOscillation;
                 metrics.WorstWindowPath = path;
                 metrics.WorstWindowNet = net;
-                metrics.WorstWindowExtent = extent;
+                metrics.WorstWindowExtent = horizontalExtent;
+                metrics.WorstWindowVerticalExtent = verticalExtent;
                 metrics.MaxWindowReversals = reversals;
                 metrics.WorstPosition = pawn.Position;
                 if (_world.ControllerFor(pawn) is PlayerController { AutoPilot: { } bot })
@@ -2649,6 +2714,22 @@ public sealed class App : IDisposable
             // reversals with little net displacement. Do not hide a visibly bad episode behind
             // an additional grace period; the production bot should recover before this window.
             if (metrics.OscillationEpisodes > 0) failures.Add("oscillation-episode");
+            if (metrics.LongestSteepDown > 3f) failures.Add("steep-down>3s");
+            // A traversal bot is expected to use the authored routes, not sacrifice itself to
+            // escape a disconnected perch. Treat all environmental deaths as map/navigation
+            // regressions so a green headline cannot conceal a lethal drop or missed jump pad.
+            if (_world.VoidDeaths > 0) failures.Add("void-death");
+            if (_world.FallDeaths > 0) failures.Add("fall-death");
+            if (_world.LavaDeaths > 0) failures.Add("lava-death");
+            int controlPointCount = _world.Level.ControlPoints.Count;
+            int controlPointsCaptured = _world.ControlPointCaptures.Count(c => c > 0);
+            if (_world.Mode.Kind == GameModeKind.Domination)
+            {
+                if (controlPointsCaptured < controlPointCount)
+                    failures.Add($"control-points<{controlPointCount}");
+                if (_world.Mode.DominationScores[0] + _world.Mode.DominationScores[1] <= 0.01f)
+                    failures.Add("domination-score=0");
+            }
             bool passed = failures.Count == 0;
             allPassed &= passed;
 
@@ -2666,10 +2747,12 @@ public sealed class App : IDisposable
                 RequiredCells = minimumCells,
                 LongestStallSeconds = MathF.Round(longestStall, 2),
                 LongestOscillationSeconds = MathF.Round(metrics.LongestOscillation, 2),
+                LongestSteepDownSeconds = MathF.Round(metrics.LongestSteepDown, 2),
                 OscillationEpisodes = metrics.OscillationEpisodes,
                 WorstWindowPathMeters = MathF.Round(metrics.WorstWindowPath, 2),
                 WorstWindowNetMeters = MathF.Round(metrics.WorstWindowNet, 2),
                 WorstWindowExtentMeters = MathF.Round(metrics.WorstWindowExtent, 2),
+                WorstWindowVerticalExtentMeters = MathF.Round(metrics.WorstWindowVerticalExtent, 2),
                 WorstWindowReversals = metrics.MaxWindowReversals,
                 WorstPosition = new
                 {
@@ -2696,6 +2779,11 @@ public sealed class App : IDisposable
                 VoidDeaths = _world.VoidDeaths,
                 FallDeaths = _world.FallDeaths,
                 LavaDeaths = _world.LavaDeaths,
+                ControlPointsCaptured = controlPointsCaptured,
+                ControlPointCount = controlPointCount,
+                ControlPointCaptures = _world.ControlPointCaptures.ToArray(),
+                DominationScoreRed = MathF.Round(_world.Mode.DominationScores[0], 2),
+                DominationScoreBlue = MathF.Round(_world.Mode.DominationScores[1], 2),
             };
             Console.WriteLine("TRAVERSAL_RESULT " + JsonSerializer.Serialize(result));
         }
@@ -2735,6 +2823,20 @@ public sealed class App : IDisposable
 
         if (_world.Mode.Kind == GameModeKind.CaptureTheFlag)
             Console.WriteLine($"奪旗比分: 紅 {_world.Mode.TeamScore(Team.Red)} · 藍 {_world.Mode.TeamScore(Team.Blue)}");
+        if (_world.Mode.Kind == GameModeKind.Domination)
+        {
+            Console.WriteLine($"支配比分: 紅 {_world.Mode.DominationScores[0]:0.0} · " +
+                              $"藍 {_world.Mode.DominationScores[1]:0.0}");
+            for (int i = 0; i < _world.Level.ControlPoints.Count; i++)
+            {
+                Team owner = i < _world.ControlPointOwners.Count
+                    ? _world.ControlPointOwners[i] : Team.None;
+                int captures = i < _world.ControlPointCaptures.Count
+                    ? _world.ControlPointCaptures[i] : 0;
+                Console.WriteLine($"控制點診斷: {_world.Level.ControlPoints[i].Name} · " +
+                                  $"{GameTypes.TeamName(owner)} · 易主 {captures} 次");
+            }
+        }
 
         foreach (Team team in new[] { Team.Red, Team.Blue })
         {
