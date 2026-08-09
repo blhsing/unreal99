@@ -56,6 +56,7 @@ public static class Loc
     public const string OptBotSkill = "電腦難度";
     public const string OptFragLimit = "擊殺上限";
     public const string OptTimeLimit = "時間上限";
+    public const string OptRespawnDelay = "重生等待時間";
     public const string OptCaptureLimit = "奪旗上限";
     public const string OptDemoMode = "示範模式";
     public const string OptDemoSkill = "代打電腦程度";

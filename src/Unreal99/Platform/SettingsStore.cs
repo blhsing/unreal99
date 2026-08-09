@@ -11,7 +11,7 @@ namespace Unreal99.Platform;
 /// </summary>
 public sealed class UserSettings
 {
-    public int Version = 5;
+    public int Version = 6;
 
     // --- video ---
     public int Quality = (int)QualityLevel.High;
@@ -47,6 +47,7 @@ public sealed class UserSettings
     public int CaptureLimit = 5;
     public int DominationLimit = 100;
     public int TimeLimitMinutes = 10;
+    public int RespawnDelaySeconds = 3;
     public bool DemoMode;
     public int DemoSkill = 3;
 
@@ -132,6 +133,7 @@ public static class SettingsStore
             CaptureLimit = setup.CaptureLimit,
             DominationLimit = setup.DominationLimit,
             TimeLimitMinutes = setup.TimeLimitMinutes,
+            RespawnDelaySeconds = setup.RespawnDelaySeconds,
             PlayerTeams = [.. setup.PlayerTeams],
             BotTeams = [.. setup.BotTeams],
             BotSkillOverrides = [.. setup.BotSkillOverrides],
@@ -192,6 +194,7 @@ public static class SettingsStore
         setup.CaptureLimit = Math.Clamp(s.CaptureLimit, 0, 20);
         setup.DominationLimit = Math.Clamp(s.DominationLimit, 0, 200);
         setup.TimeLimitMinutes = Math.Clamp(s.TimeLimitMinutes, 0, 60);
+        setup.RespawnDelaySeconds = Math.Clamp(s.RespawnDelaySeconds, 0, 9);
         for (int i = 0; i < setup.PlayerTeams.Length && i < s.PlayerTeams.Count; i++)
             setup.PlayerTeams[i] = Math.Clamp(s.PlayerTeams[i], -1, 1);
         for (int i = 0; i < setup.BotTeams.Length && i < s.BotTeams.Count; i++)
@@ -295,6 +298,7 @@ public sealed class MatchSetup
     public int CaptureLimit = 5;
     public int DominationLimit = 100;
     public int TimeLimitMinutes = 10;
+    public int RespawnDelaySeconds = 3;
     public int[] PlayerTeams = [-1, -1, -1, -1];
     public int[] BotTeams = [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1];
     public int[] BotSkillOverrides = [-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1];

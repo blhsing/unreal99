@@ -16,7 +16,7 @@ namespace Unreal99.Game;
 /// </summary>
 public sealed class SaveGame
 {
-    public int Version = 2;
+    public int Version = 3;
     /// <summary>Round-trip timestamp, so the picker can sort and display without a locale guess.</summary>
     public string SavedAtUtc = "";
     public string Label = "";
@@ -28,6 +28,7 @@ public sealed class SaveGame
     public int CaptureLimit;
     public int DominationLimit = 100;
     public float TimeLimit;
+    public float RespawnDelay = 3f;
     public int LocalPlayers = 1;
     public int BotCount;
     public int BotSkill;
@@ -197,6 +198,7 @@ public static class SaveStore
             CaptureLimit = mode.CaptureLimit,
             DominationLimit = mode.DominationLimit,
             TimeLimit = mode.TimeLimit,
+            RespawnDelay = mode.RespawnDelay,
             LocalPlayers = localPlayers,
             BotCount = botCount,
             BotSkill = botSkill,
@@ -304,7 +306,7 @@ public static class SaveStore
         Func<int, Controller> makePlayerController, List<Controller> playersOut, List<int> viewPawnIds)
     {
         var mode = GameMode.Create((GameModeKind)save.ModeKind, save.FragLimit,
-            save.TimeLimit / 60f, save.CaptureLimit, save.DominationLimit);
+            save.TimeLimit / 60f, save.CaptureLimit, save.DominationLimit, save.RespawnDelay);
         world.LoadLevel(level, mode);
         playersOut.Clear();
         viewPawnIds.Clear();

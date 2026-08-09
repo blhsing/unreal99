@@ -15,7 +15,7 @@ public sealed class GameMode
     public GameModeKind Kind = GameModeKind.Deathmatch;
     public bool TeamBased;
     public float FriendlyFire = 0.25f;
-    public float RespawnDelay = 1.7f;
+    public float RespawnDelay = 3f;
 
     public int FragLimit = 20;
     public int CaptureLimit = 5;
@@ -54,7 +54,7 @@ public sealed class GameMode
     private int _lastCountdownSecond = -1;
 
     public static GameMode Create(GameModeKind kind, int fragLimit, float timeLimitMinutes,
-        int captureLimit, int dominationLimit = 100)
+        int captureLimit, int dominationLimit = 100, float respawnDelaySeconds = 3f)
     {
         var mode = new GameMode
         {
@@ -62,13 +62,12 @@ public sealed class GameMode
             FragLimit = fragLimit,
             CaptureLimit = captureLimit,
             DominationLimit = dominationLimit,
+            RespawnDelay = Math.Clamp(respawnDelaySeconds, 0f, 9f),
             TimeLimit = timeLimitMinutes * 60f,
             TeamBased = kind is GameModeKind.TeamDeathmatch or GameModeKind.CaptureTheFlag
                 or GameModeKind.Domination,
         };
         mode.TimeRemaining = mode.TimeLimit;
-        if (kind == GameModeKind.LastManStanding) mode.RespawnDelay = 2.4f;
-        if (kind == GameModeKind.Instagib) mode.RespawnDelay = 1.2f;
         return mode;
     }
 

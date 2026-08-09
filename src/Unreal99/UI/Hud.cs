@@ -717,18 +717,20 @@ public sealed class Hud
         {
             // Scores alone do not say which side this viewport belongs to—particularly in demo
             // mode and split screen. Keep a localized, team-coloured identity pill permanently
-            // below the map/mode line, independent of transient flag and control-point notices.
+            // in the upper-right safe area, independent of transient objective notices.
             string teamLabel = $"{Loc.HudYourTeam}：{GameTypes.TeamName(pawn.Team)}";
             float fontSize = MathF.Max(18f * s, 12f);
             float teamH = MathF.Max(27f * s, 20f);
             float teamW = ui.MeasureText(FaceBold, fontSize, teamLabel) + MathF.Max(34f * s, 24f);
-            float teamY = y + pillH + MathF.Max(24f * s, 18f);
+            float teamX = width - 22f * s - teamW;
+            float teamY = y;
             uint teamColor = UiRenderer.Rgba(accent * 1.18f, 1f);
-            ui.ChamferRect(cx - teamW * 0.5f, teamY, teamW, teamH, 7f * s,
+            ui.ChamferRect(teamX, teamY, teamW, teamH, 7f * s,
                 UiRenderer.Rgba(accent * 0.27f, 0.76f));
-            ui.Rect(cx - teamW * 0.5f, teamY + 4f * s, MathF.Max(4f * s, 3f),
+            ui.Rect(teamX, teamY + 4f * s, MathF.Max(4f * s, 3f),
                 teamH - 8f * s, teamColor);
-            ui.TextShadow(FaceBold, fontSize, cx, teamY + MathF.Max(2f * s, 1f), teamLabel,
+            ui.TextShadow(FaceBold, fontSize, teamX + teamW * 0.5f,
+                teamY + MathF.Max(2f * s, 1f), teamLabel,
                 teamColor, TextAlign.Center, shadowOffset: MathF.Max(1f, 1.5f * s),
                 shadowAlpha: 0.9f);
         }
@@ -762,12 +764,13 @@ public sealed class Hud
         if (!mode.TeamBased || pawn.Team == Team.None) return;
         string label = $"{Loc.HudYourTeam}：{GameTypes.TeamName(pawn.Team)}";
         float teamW = MathF.Min(width - 24f, ui.MeasureText(FaceBold, font, label) + 34f);
-        const float teamY = 63f;
-        ui.ChamferRect(cx - teamW * 0.5f, teamY, teamW, pillH, 7f,
+        float teamX = width - 10f - teamW;
+        const float teamY = top;
+        ui.ChamferRect(teamX, teamY, teamW, pillH, 7f,
             UiRenderer.Rgba(accent * 0.27f, 0.78f));
-        ui.Rect(cx - teamW * 0.5f, teamY + 4f, 4f, pillH - 8f,
+        ui.Rect(teamX, teamY + 4f, 4f, pillH - 8f,
             UiRenderer.Rgba(accent * 1.18f, 1f));
-        ui.TextShadow(FaceBold, font, cx, teamY + 3f, label,
+        ui.TextShadow(FaceBold, font, teamX + teamW * 0.5f, teamY + 3f, label,
             UiRenderer.Rgba(accent * 1.18f, 1f), TextAlign.Center, 1.5f, 0.9f);
     }
 
@@ -917,17 +920,25 @@ public sealed class Hud
         bool compact = CompactLayout(width, height);
         float titleFont = LayoutFont(15f * s);
         float statusFont = LayoutFont(13f * s);
-        float gap = compact ? 10f : 12f * s;
-        float cardWidth = compact
-            ? MathF.Min(254f, (width - 30f - gap) * 0.5f)
-            : 180f * s;
+        // Align each flag card exactly with the status card below it: health/armour on the
+        // left, current weapon/ammo on the right. Compact bottom rows use the shared 170 px
+        // width; full-size HUDs retain their intentionally different 240/250 scale widths.
+        float leftCardWidth = compact ? CompactSidePanelWidth(width, height) : 240f * s;
+        float rightCardWidth = compact ? CompactSidePanelWidth(width, height) : 250f * s;
         float cardHeight = MathF.Max(54f, 48f * s);
-        float x = width * 0.5f - (cardWidth * 2f + gap) * 0.5f;
+        float sideInset = compact ? 10f : 22f * s;
         float y = CompactBottomRow(width, height) ? height - 151f
             : compact ? height - 216f : height - 152f * s;
         foreach (Team team in FlagTeams)
         {
             if (!world.FlagHome.TryGetValue(team, out Vector3 flagHome)) continue;
+            // Put each team's state on its own side of the viewport. Besides matching the
+            // red-left/blue-right score language, the open middle leaves the combat view and
+            // flag-carrier message unobstructed in every split-screen arrangement.
+            float cardWidth = team == Team.Red ? leftCardWidth : rightCardWidth;
+            float x = team == Team.Red
+                ? sideInset
+                : width - sideInset - cardWidth;
             Vector3 col = GameTypes.TeamColor(team);
             int carrier = world.FlagCarrier.TryGetValue(team, out int c) ? c : -1;
             bool home = carrier < 0 && Vector3.Distance(world.FlagPosition[team], flagHome) < 0.4f;
@@ -948,7 +959,6 @@ public sealed class Hud
                 UiRenderer.Rgba(col * 1.3f, 0.95f));
             ui.Text(FaceRegular, statusFont, x + MathF.Max(8f, 10f * s), y + 28f, status,
                 UiRenderer.Rgba(statusColor, 0.98f));
-            x += cardWidth + gap;
         }
 
         if (pawn.HasFlag)

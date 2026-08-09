@@ -232,9 +232,10 @@ public sealed class App : IDisposable
                     _menu.CaptureLimit = 0;
                     _menu.DominationLimit = 0;
                     _menu.TimeLimitMinutes = 0;
+                    _menu.RespawnDelaySeconds = 0;
                     _renderSettings.Apply(QualityLevel.Low);
                     _cliOverrides.UnionWith(["players", "bots", "skill", "demoskill", "frags",
-                        "captures", "domination", "time", "quality", "participantteams",
+                        "captures", "domination", "time", "respawn", "quality", "participantteams",
                         "botskilloverrides"]);
                     i += 2;
                     break;
@@ -432,6 +433,12 @@ public sealed class App : IDisposable
                     _cliOverrides.Add("time");
                     i++;
                     break;
+                case "--respawn" when i + 1 < args.Length:
+                    if (int.TryParse(args[i + 1], out int respawn))
+                        _menu.RespawnDelaySeconds = MathX.Clamp(respawn, 0, 9);
+                    _cliOverrides.Add("respawn");
+                    i++;
+                    break;
                 case "--skill" when i + 1 < args.Length:
                     if (int.TryParse(args[i + 1], out int sk))
                         _menu.BotSkill = MathX.Clamp(sk, 0, Loc.SkillNames.Length - 1);
@@ -567,6 +574,7 @@ public sealed class App : IDisposable
         CaptureLimit = _menu.CaptureLimit,
         DominationLimit = _menu.DominationLimit,
         TimeLimitMinutes = _menu.TimeLimitMinutes,
+        RespawnDelaySeconds = _menu.RespawnDelaySeconds,
         PlayerTeams = [.. _menu.PlayerTeams],
         BotTeams = [.. _menu.BotTeams],
         BotSkillOverrides = [.. _menu.BotSkillOverrides],
@@ -597,6 +605,7 @@ public sealed class App : IDisposable
         if (!_cliOverrides.Contains("captures")) _menu.CaptureLimit = setup.CaptureLimit;
         if (!_cliOverrides.Contains("domination")) _menu.DominationLimit = setup.DominationLimit;
         if (!_cliOverrides.Contains("time")) _menu.TimeLimitMinutes = setup.TimeLimitMinutes;
+        if (!_cliOverrides.Contains("respawn")) _menu.RespawnDelaySeconds = setup.RespawnDelaySeconds;
         if (!_cliOverrides.Contains("participantteams"))
         {
             Array.Copy(setup.PlayerTeams, _menu.PlayerTeams,
@@ -1567,19 +1576,19 @@ public sealed class App : IDisposable
     private void SpawnMatch()
     {
         var mode = GameMode.Create(_menu.ModeKind, _menu.FragLimit, _menu.TimeLimitMinutes,
-            _menu.CaptureLimit, _menu.DominationLimit);
+            _menu.CaptureLimit, _menu.DominationLimit, _menu.RespawnDelaySeconds);
         // A map without flag bases cannot host CTF; fall back to team deathmatch.
         if (mode.Kind == GameModeKind.CaptureTheFlag && _level.FlagBases.Count < 2)
         {
             mode = GameMode.Create(GameModeKind.TeamDeathmatch, _menu.FragLimit, _menu.TimeLimitMinutes,
-                _menu.CaptureLimit);
+                _menu.CaptureLimit, respawnDelaySeconds: _menu.RespawnDelaySeconds);
             SetStatus("此地圖不支援奪旗，已改為團隊死亡競賽");
         }
         // Domination without control points would be a team deathmatch whose score never moves.
         if (mode.Kind == GameModeKind.Domination && _level.ControlPoints.Count == 0)
         {
             mode = GameMode.Create(GameModeKind.TeamDeathmatch, _menu.FragLimit, _menu.TimeLimitMinutes,
-                _menu.CaptureLimit);
+                _menu.CaptureLimit, respawnDelaySeconds: _menu.RespawnDelaySeconds);
             SetStatus("此地圖沒有控制點，已改為團隊死亡競賽");
         }
 
@@ -2344,7 +2353,9 @@ public sealed class App : IDisposable
             _menu.DemoMode = true;
             _menu.DemoSkill = 4;
             _menu.DominationLimit = 125;
+            _menu.RespawnDelaySeconds = 7;
             _menu.VerticalSplit = true;
+            _world.Mode.RespawnDelay = 7f;
             SaveUserSettings();
 
             // Give a Domination save non-default fractional and point-ownership state. A
@@ -2388,9 +2399,10 @@ public sealed class App : IDisposable
             && settings.BotSkillOverrides[0] == 5 && settings.BotSkillOverrides[1] == 0
             && settings.DemoMode && settings.DemoSkill == 4
             && settings.DominationLimit == 125
+            && settings.RespawnDelaySeconds == 7
             && settings.VerticalSplit;
         Console.WriteLine($"  設定檔: {(File.Exists(UserData.SettingsPath) ? "已寫入" : "缺少")}　" +
-                          $"控制/隊伍/個別難度/展示模式還原: {(settingsOk ? "通過" : "失敗")}");
+                          $"控制/隊伍/個別難度/展示模式/重生等待還原: {(settingsOk ? "通過" : "失敗")}");
 
         var reread = SaveStore.Read(0);
         var expected = _saveTestExpected;
@@ -2400,6 +2412,7 @@ public sealed class App : IDisposable
             && reread.Pickups.Count == expected.Pickups.Count
             && MathF.Abs(reread.WorldTime - expected.WorldTime) < 0.001f
             && reread.DominationLimit == expected.DominationLimit
+            && MathF.Abs(reread.RespawnDelay - expected.RespawnDelay) < 0.001f
             && MathF.Abs(reread.DominationScore0 - expected.DominationScore0) < 0.001f
             && MathF.Abs(reread.DominationScore1 - expected.DominationScore1) < 0.001f
             && MathF.Abs(reread.DominationScoreTimer - expected.DominationScoreTimer) < 0.001f
@@ -2464,7 +2477,9 @@ public sealed class App : IDisposable
                             - expected.ControlPoints[0].Since) < 0.001f)));
         bool restoreOk = rosterOk && matched == expected.Pawns.Count
                          && activePickups == expectedActive && worstDrift < 0.01f
-                         && dominationOk;
+                         && dominationOk
+                         && expected != null
+                         && MathF.Abs(_world.Mode.RespawnDelay - expected.RespawnDelay) < 0.001f;
 
         Console.WriteLine($"  載入還原: 角色 {matched}/{expected?.Pawns.Count ?? 0} 相符　" +
                           $"位置最大誤差 {worstDrift:0.000} m　" +

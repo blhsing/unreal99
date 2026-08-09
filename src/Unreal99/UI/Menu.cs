@@ -85,6 +85,7 @@ public sealed class Menu
     public int TimeLimitMinutes = 10;
     public int CaptureLimit = 5;
     public int DominationLimit = 100;
+    public int RespawnDelaySeconds = 3;
     /// <summary>Hands the local players to an autopilot so the match plays itself.</summary>
     public bool DemoMode;
     /// <summary>Skill of the autopilot driving the local players, independent of the opponents'.</summary>
@@ -643,6 +644,10 @@ public sealed class Menu
         AddChoice(Loc.OptTimeLimit,
             () => TimeLimitMinutes > 0 ? Loc.Minutes(TimeLimitMinutes) : Loc.OptNoLimit,
             d => TimeLimitMinutes = MathX.Clamp(TimeLimitMinutes + d, 0, 60), "時間到時分數最高者獲勝。");
+
+        AddChoice(Loc.OptRespawnDelay, () => Loc.Seconds(RespawnDelaySeconds),
+            d => RespawnDelaySeconds = MathX.Clamp(RespawnDelaySeconds + d, 0, 9),
+            "死亡後等待多久重新出現；0 秒代表立即重生，最多 9 秒。");
 
         if (LocalPlayers > 1)
             Add(Loc.DevicesOpen, () => Open(MenuScreen.Devices),
