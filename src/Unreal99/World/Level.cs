@@ -327,13 +327,15 @@ public sealed class LevelBuilder
         _mesh.WorldUv = true;
         _mesh.WorldUvScale = uvScale;
 
-        // The old wedge tapered to exactly zero at its low end. A constant-thickness sloped slab
-        // gives both side fascias and both ends an unmistakably structural profile.
-        // Long exposed ramps (notably November's gallery access) need enough fascia depth to
-        // read as load-bearing structures at gameplay distance, not floating sheets.
-        const float RampThickness = 1.25f;
-        Vector3 visualMin = new(min.X, min.Y - RampThickness, min.Z);
-        _mesh.AddRampSlab(min, max, risingAxis, RampThickness);
+        // The old wedge tapered to exactly zero at its low end. A parallel underside gives both
+        // side fascias and both ends a structural profile. A single 1.25 m depth was still too
+        // slight on broad exposed approaches such as Peak and November, so scale the slab by its
+        // smaller plan dimension while enforcing a substantial two-metre minimum everywhere.
+        float run = risingAxis is 0 or 1 ? max.X - min.X : max.Z - min.Z;
+        float width = risingAxis is 0 or 1 ? max.Z - min.Z : max.X - min.X;
+        float rampThickness = MathX.Clamp(MathF.Min(run, width) * 0.22f, 2.0f, 3.0f);
+        Vector3 visualMin = new(min.X, min.Y - rampThickness, min.Z);
+        _mesh.AddRampSlab(min, max, risingAxis, rampThickness);
         if (collide)
         {
             _level.Collision.Add(Brush.Ramp(min, max, risingAxis));
