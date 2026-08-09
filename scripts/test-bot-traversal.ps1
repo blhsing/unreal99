@@ -125,7 +125,7 @@ $results | Select-Object MapId, Map, Mode, Passed, ActiveSeconds, TravelMeters,
     LongestOscillationSeconds, OscillationEpisodes, WorstWindowPathMeters,
     WorstWindowNetMeters, WorstWindowExtentMeters, WorstWindowReversals,
     WorstState, WorstGoalNode, WorstPathCursor, WorstPathCount, MainSkill,
-    MaxOpponentSkill, VoidDeaths, FallDeaths, LavaDeaths,
+    MaxOpponentSkill, WeaponPickupGoals, AmmoPickupGoals, VoidDeaths, FallDeaths, LavaDeaths,
     @{ Name = 'Failures'; Expression = { @($_.Failures) -join ';' } }, Screenshot, Log |
     Export-Csv -LiteralPath $csvPath -NoTypeInformation -Encoding utf8
 

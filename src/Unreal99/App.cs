@@ -2625,7 +2625,8 @@ public sealed class App : IDisposable
             float longestStall = _autoShotLongestStalls.GetValueOrDefault(pawnId);
             float minimumTravel = MathF.Max(80f, metrics.Elapsed * 1.8f);
             int minimumCells = Math.Min(10, Math.Max(6, (int)(metrics.Elapsed / 7.5f)));
-            float mainSkill = (_world.ControllerFor(pawn) as PlayerController)?.AutoPilot?.Skill ?? -1f;
+            BotController mainBot = (_world.ControllerFor(pawn) as PlayerController)?.AutoPilot;
+            float mainSkill = mainBot?.Skill ?? -1f;
             float maxOpponentSkill = _world.Pawns.Where(p => p.PlayerIndex < 0)
                 .Select(p => (_world.ControllerFor(p) as BotController)?.Skill ?? 1f)
                 .DefaultIfEmpty(1f).Max();
@@ -2682,6 +2683,8 @@ public sealed class App : IDisposable
                 WorstLiftCommitted = metrics.WorstLiftCommitted,
                 MainSkill = MathF.Round(mainSkill, 3),
                 MaxOpponentSkill = MathF.Round(maxOpponentSkill, 3),
+                WeaponPickupGoals = mainBot?.DiagnosticWeaponPickupGoals ?? 0,
+                AmmoPickupGoals = mainBot?.DiagnosticAmmoPickupGoals ?? 0,
                 VoidDeaths = _world.VoidDeaths,
                 FallDeaths = _world.FallDeaths,
                 LavaDeaths = _world.LavaDeaths,
@@ -2703,9 +2706,13 @@ public sealed class App : IDisposable
                 carried.Add($"{GameTypes.WeaponName(weapon)}:{pawn.AmmoFor(weapon)}");
             }
             string flag = pawn.HasFlag ? GameTypes.TeamName(pawn.CarriedFlag) : "無";
+            Controller controller = _world.ControllerFor(pawn);
+            BotController bot = controller as BotController ?? (controller as PlayerController)?.AutoPilot;
+            string supply = bot == null ? "" :
+                $" · 補給目標 武器 {bot.DiagnosticWeaponPickupGoals}／彈藥 {bot.DiagnosticAmmoPickupGoals}";
             Console.WriteLine($"電腦診斷: {pawn.Name} · 隊伍 {GameTypes.TeamName(pawn.Team)} · " +
                 $"武器 [{string.Join(", ", carried)}] · 持旗 {flag} · 擊殺 {pawn.Frags} · 奪旗 {pawn.Captures} · " +
-                $"旗手擊殺 {pawn.FlagCarrierKills}");
+                $"旗手擊殺 {pawn.FlagCarrierKills}{supply}");
             if (pawn.HasFlag && _world.FlagHome.TryGetValue(pawn.Team, out Vector3 ownHome))
             {
                 int start = _world.Level.Nav.FindNearest(pawn.Position);

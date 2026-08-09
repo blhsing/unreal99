@@ -30,6 +30,8 @@ public sealed class BotController : Controller
     public Vector3 DiagnosticLiftSource => _activeLiftSource;
     public Vector3 DiagnosticLiftDestination => _activeLiftDestination;
     public bool DiagnosticLiftCommitted => _activeLiftCommitted;
+    public int DiagnosticWeaponPickupGoals { get; private set; }
+    public int DiagnosticAmmoPickupGoals { get; private set; }
 
     private readonly Rng _rng;
     private readonly List<int> _path = new(64);
@@ -483,10 +485,22 @@ public sealed class BotController : Controller
     {
         float healthFraction = (Pawn.Health + Pawn.Armor * 0.6f) / 160f;
 
-        // A hammer is a last-ditch close-range tool, not a reason to keep charging a distant
-        // opponent. Break contact and deliberately re-arm whenever every ranged weapon is dry.
-        if (world.Mode.Kind != GameModeKind.Instagib && !HasUsableRangedWeapon(Pawn))
+        // Once a reachable pickup route has been selected, finish the short detour even if an
+        // enemy enters view. Replacing SeekItem with Attack every frame made combat strafing pull
+        // the bot away from weapons it had already decided to collect.
+        if (_itemGoal is { Active: true } && _goalTimer > 0f
+            && _itemGoal.DesireFor(Pawn) > 0.05f)
         {
+            _state = BotState.SeekItem;
+            return;
+        }
+
+        // A hammer is a last-ditch close-range tool, and one remaining pistol round is not a
+        // healthy arsenal. Skilled bots maintain a reserve and acquire a real weapon before
+        // committing to another fight instead of waiting until every ranged weapon is dry.
+        if (world.Mode.Kind != GameModeKind.Instagib && NeedsCombatResupply(Pawn))
+        {
+            if (_state != BotState.SeekItem) _goalTimer = 0f;
             _state = BotState.SeekItem;
             return;
         }
@@ -1216,13 +1230,15 @@ public sealed class BotController : Controller
                     radius: 2.2f, refresh: 0.55f)) return;
             }
 
-            // Re-arm before a flag run when only the starter pistol remains, or search farther
-            // when every ranged weapon is dry. This also makes CTF bots use the map's arsenal.
+            // Re-arm before a flag run when only the starter pistol or a low reserve remains,
+            // and search farther when every ranged weapon is dry. This also makes CTF bots use
+            // the map's arsenal regardless of their ordinary combat skill.
             bool noRangedAmmo = !HasUsableRangedWeapon(Pawn);
-            bool needsUpgrade = noRangedAmmo || !HasUsefulWeaponUpgrade(Pawn);
-            if (!needsUpgrade) _ctfRearmAttempts = 0;
-            if (ourCarrier < 0 && needsUpgrade && _ctfRearmAttempts < 2
-                && TryChoosePickupGoal(world, noRangedAmmo ? 100f : 28f, combatOnly: true))
+            bool needsSupply = noRangedAmmo || !HasUsefulWeaponUpgrade(Pawn)
+                || NeedsCombatResupply(Pawn);
+            if (!needsSupply) _ctfRearmAttempts = 0;
+            if (ourCarrier < 0 && needsSupply && _ctfRearmAttempts < 2
+                && TryChoosePickupGoal(world, noRangedAmmo ? 100f : 45f, combatOnly: true))
             {
                 _ctfRearmAttempts++;
                 return;
@@ -1253,6 +1269,13 @@ public sealed class BotController : Controller
         switch (_state)
         {
             case BotState.Attack when visible && target != null:
+                // A nearby missing weapon is worth a brief, reachable detour even during combat.
+                // The radius grows with skill: Godlike notices the arsenal along its route while
+                // Newbie remains easier to starve and distract.
+                if (world.Mode.Kind != GameModeKind.Instagib
+                    && TryChoosePickupGoal(world, MathX.Lerp(5.5f, 14f, Skill),
+                        combatOnly: true, opportunistic: true))
+                    return;
                 _goalNode = nav.FindNearest(target.Position);
                 break;
 
@@ -1338,7 +1361,8 @@ public sealed class BotController : Controller
             refresh: 2.6f);
     }
 
-    private bool TryChoosePickupGoal(GameWorld world, float maxDistance, bool combatOnly)
+    private bool TryChoosePickupGoal(GameWorld world, float maxDistance, bool combatOnly,
+        bool opportunistic = false)
     {
         NavGraph nav = world.Level.Nav;
         int start = nav.FindNearest(Pawn.Position);
@@ -1346,6 +1370,7 @@ public sealed class BotController : Controller
 
         _pickupChoices.Clear();
         bool noRangedAmmo = !HasUsableRangedWeapon(Pawn);
+        bool needsCombatSupply = NeedsCombatResupply(Pawn);
 
         foreach (PickupEntity item in world.Pickups)
         {
@@ -1353,6 +1378,7 @@ public sealed class BotController : Controller
             if (item == _blockedItem && _blockedItemTimer > 0f) continue;
             if (combatOnly && item.Kind is not (PickupKind.WeaponPickup or PickupKind.AmmoPickup))
                 continue;
+            if (opportunistic && !IsUsefulOpportunisticPickup(Pawn, item)) continue;
 
             float desire = item.DesireFor(Pawn);
             if (desire <= 0.05f) continue;
@@ -1362,12 +1388,14 @@ public sealed class BotController : Controller
             float score = desire * 55f / MathF.Max(distance, 3f);
             if (item.Kind == PickupKind.WeaponPickup)
             {
-                if (!Pawn.HasWeapon[(int)item.Weapon]) score += 10f + Weapons.Get(item.Weapon).BotPreference * 4f;
+                if (!Pawn.HasWeapon[(int)item.Weapon])
+                    score += 16f + Weapons.Get(item.Weapon).BotPreference * 5f;
                 if (noRangedAmmo) score += 28f;
+                else if (needsCombatSupply) score += 22f;
             }
-            else if (item.Kind == PickupKind.AmmoPickup && noRangedAmmo)
+            else if (item.Kind == PickupKind.AmmoPickup && needsCombatSupply)
             {
-                score += 18f;
+                score += noRangedAmmo ? 22f : 16f;
             }
 
             int goalNode = nav.FindNearest(item.Position);
@@ -1393,6 +1421,8 @@ public sealed class BotController : Controller
 
             _itemGoal = choice.Item;
             _state = BotState.SeekItem;
+            if (choice.Item.Kind == PickupKind.WeaponPickup) DiagnosticWeaponPickupGoals++;
+            else if (choice.Item.Kind == PickupKind.AmmoPickup) DiagnosticAmmoPickupGoals++;
             if (Environment.GetEnvironmentVariable("UNREAL99_BOT_DEBUG") == "1"
                 && Pawn.PlayerIndex >= 0 && _pickupDebugReports++ < 16)
             {
@@ -1448,6 +1478,57 @@ public sealed class BotController : Controller
             if (pawn.AmmoFor(kind) > 0) return true;
         }
         return false;
+    }
+
+    /// <summary>
+    /// Resource-management threshold used before the binary "all ammo is gone" fallback.
+    /// Higher-skill bots maintain a larger reserve and deliberately upgrade the starter loadout;
+    /// lower tiers retain less disciplined resource management.
+    /// </summary>
+    private bool NeedsCombatResupply(Pawn pawn)
+    {
+        if (!HasUsableRangedWeapon(pawn)) return true;
+        // Godlike and the upper tiers deliberately secure a real weapon before combat. Newbie
+        // opponents still encounter weapons during ordinary roaming but do not gain the same
+        // disciplined opening route, preserving their intended difficulty handicap.
+        if (!HasUsefulWeaponUpgrade(pawn)) return Skill >= 0.55f;
+
+        float bestReserve = 0f;
+        for (int i = 0; i < (int)WeaponKind.Count; i++)
+        {
+            if (!pawn.HasWeapon[i]) continue;
+            WeaponDef def = Weapons.Get((WeaponKind)i);
+            if (def.Primary.Mode == FireMode.Melee || def.Ammo == AmmoKind.None) continue;
+            float fraction = pawn.AmmoFor(def.Kind) / (float)Math.Max(1, def.MaxAmmo);
+            bestReserve = MathF.Max(bestReserve, fraction);
+        }
+        return bestReserve < MathX.Lerp(0.06f, 0.24f, Skill);
+    }
+
+    /// <summary>Whether a combatant should step off its current route for this nearby pickup.</summary>
+    private bool IsUsefulOpportunisticPickup(Pawn pawn, PickupEntity item)
+    {
+        if (item.Kind == PickupKind.WeaponPickup)
+        {
+            WeaponDef def = Weapons.Get(item.Weapon);
+            if (def.Primary.Mode == FireMode.Melee) return false;
+            if (!pawn.HasWeapon[(int)item.Weapon]) return true;
+            return pawn.AmmoFor(item.Weapon) / (float)Math.Max(1, def.MaxAmmo)
+                < MathX.Lerp(0.16f, 0.42f, Skill);
+        }
+        if (item.Kind != PickupKind.AmmoPickup || item.Ammo == AmmoKind.None) return false;
+
+        bool ownsMatchingWeapon = false;
+        for (int i = 0; i < (int)WeaponKind.Count; i++)
+        {
+            if (!pawn.HasWeapon[i] || Weapons.All[i].Ammo != item.Ammo) continue;
+            ownsMatchingWeapon = true;
+            break;
+        }
+        if (!ownsMatchingWeapon) return false;
+        float fraction = pawn.Ammo[(int)item.Ammo]
+            / (float)Math.Max(1, Pawn.MaxAmmoFor(item.Ammo));
+        return fraction < MathX.Lerp(0.14f, 0.38f, Skill);
     }
 
     /// <summary>
