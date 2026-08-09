@@ -573,7 +573,7 @@ public sealed class Menu
 
         AddChoice(Loc.OptPlayers, () => Loc.PlayerCount(LocalPlayers),
             d => LocalPlayers = MathX.Clamp(LocalPlayers + d, 1, 4),
-            "第一位玩家使用鍵盤滑鼠，其餘玩家使用手把。");
+            "每位玩家可指派專屬滑鼠與按鍵；沒有專屬滑鼠的欄位可改用手把。");
 
         if (LocalPlayers == 2)
             AddChoice(Loc.OptSplitOrientation,
@@ -761,6 +761,12 @@ public sealed class Menu
         AddInfo($"{Loc.CtrlNextWeapon}：上一頁　　{Loc.CtrlPrevWeapon}：下一頁　　{Loc.CtrlScoreboard}：Delete");
         AddInfo("無第二個滑鼠時：數字鍵盤 4 6 8 5 轉動視角，0 開火，. 次要開火");
         AddInfo("");
+        AddInfo($"■ 玩家三預設配置（{Loc.CtrlKeyboardMouse}）");
+        AddInfo($"{Loc.CtrlMove}：Y G H J　　{Loc.CtrlLook}：第三個滑鼠");
+        AddInfo($"{Loc.CtrlFire}：滑鼠左鍵　　{Loc.CtrlAltFire}：滑鼠右鍵");
+        AddInfo($"{Loc.CtrlJump}：M　　{Loc.CtrlCrouch}：N");
+        AddInfo($"{Loc.CtrlNextWeapon}：U　　{Loc.CtrlPrevWeapon}：T　　{Loc.CtrlScoreboard}：B");
+        AddInfo("");
         AddInfo($"■ {Loc.CtrlGamepad}");
         AddInfo($"{Loc.CtrlMove}：左類比　　{Loc.CtrlLook}：右類比");
         AddInfo($"{Loc.CtrlFire}：RT / RB　　{Loc.CtrlAltFire}：LT / LB");
@@ -788,7 +794,7 @@ public sealed class Menu
               $"{Loc.DevicesKeyboards} {activeKeyboards}/{keyboards}"
             : $"■ {Loc.DevicesRawUnavailable}");
         if (raw) AddInfo(Loc.DevicesWiggleHint);
-        if (raw && activeMice < 2) AddInfo(Loc.DevicesNeedTwoMice);
+        if (raw && activeMice < Math.Max(2, LocalPlayers)) AddInfo(Loc.DevicesNeedTwoMice);
         AddInfo("");
 
         int slots = Math.Max(2, MathX.Clamp(LocalPlayers, 1, 4));

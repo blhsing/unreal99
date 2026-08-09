@@ -14,7 +14,7 @@ public enum DeviceKind
 /// <summary>
 /// Which physical devices drive one split-screen slot, plus that slot's control scheme.
 /// When raw input is available the mouse and keyboard handles pin the slot to one specific
-/// physical device, which is what makes two-mouse split-screen work.
+/// physical device, which is what makes multi-mouse split-screen work.
 /// </summary>
 public sealed class PlayerDevice
 {
@@ -76,8 +76,8 @@ public sealed class ControlSettings
 
 /// <summary>
 /// Wraps Silk.NET input into edge-triggered queries and per-player device routing.
-/// Keyboard/mouse always drives slot 0; gamepads fill slots 1..3 (or slot 0 if there is
-/// no keyboard player), so up to four people can share one screen.
+/// Raw Input can route a distinct keyboard/mouse pair to each slot; gamepads fill any later slot
+/// without a dedicated mouse, so up to four people can share one screen.
 /// </summary>
 public sealed class InputSystem : IDisposable
 {
@@ -282,6 +282,17 @@ public sealed class InputSystem : IDisposable
     public bool KeyDown(Key key) => _keysDown.Contains(key);
     public bool KeyPressed(Key key) => _keysPressed.Contains(key);
     public bool KeyReleased(Key key) => _keysReleased.Contains(key);
+    /// <summary>
+    /// Edge-triggered key state from either GLFW/Silk or any registered raw keyboard. Global
+    /// shortcuts use this because Windows can deliver Print Screen only through Raw Input while
+    /// an exclusive fullscreen OpenGL window owns the foreground.
+    /// </summary>
+    public bool GlobalKeyPressed(Key key)
+    {
+        if (KeyPressed(key)) return true;
+        int virtualKey = VirtualKeys.FromKey(key);
+        return virtualKey != 0 && RawAvailable && Raw.KeyPressed(0, virtualKey);
+    }
     public bool AnyKeyPressed => _keysPressed.Count > 0;
 
     /// <summary>First key pressed this frame on any keyboard, or Unknown. Used by the rebinder.</summary>

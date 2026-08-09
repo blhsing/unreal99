@@ -20,6 +20,24 @@ public sealed class Hud
     private static readonly uint PanelEdge = UiRenderer.Rgba(0.55f, 0.72f, 0.95f, 0.28f);
     private static readonly Team[] FlagTeams = [Team.Red, Team.Blue];
 
+    private static bool CompactLayout(int width, int height) => height <= 520 || width <= 680;
+    private static float LayoutFont(float requested) => MathF.Max(UiRenderer.MinimumTextSize, requested);
+
+    private static string FitText(UiRenderer ui, int face, float size, string text, float maximumWidth)
+    {
+        if (string.IsNullOrEmpty(text) || maximumWidth <= 0f) return "";
+        if (ui.MeasureText(face, size, text) <= maximumWidth) return text;
+        const string ellipsis = "…";
+        if (ui.MeasureText(face, size, ellipsis) > maximumWidth) return "";
+        for (int length = text.Length - 1; length > 0; length--)
+        {
+            if (char.IsHighSurrogate(text[length - 1])) length--;
+            string candidate = text[..Math.Max(0, length)] + ellipsis;
+            if (ui.MeasureText(face, size, candidate) <= maximumWidth) return candidate;
+        }
+        return ellipsis;
+    }
+
     public void Draw(UiRenderer ui, GameWorld world, Pawn pawn, PlayerController controller,
         int width, int height, float dt, bool showDebug, string debugText)
     {
@@ -154,6 +172,12 @@ public sealed class Hud
 
     private void DrawHealthArmor(UiRenderer ui, Pawn pawn, int width, int height, float s, Vector3 accent)
     {
+        if (CompactLayout(width, height))
+        {
+            DrawCompactHealthArmor(ui, pawn, width, height, accent);
+            return;
+        }
+
         float pad = 22f * s;
         float panelW = 240f * s;
         float panelH = 92f * s;
@@ -194,8 +218,48 @@ public sealed class Hud
         _ = accent;
     }
 
+    private void DrawCompactHealthArmor(UiRenderer ui, Pawn pawn, int width, int height, Vector3 accent)
+    {
+        const float pad = 10f;
+        float panelW = MathF.Min(242f, width * 0.43f);
+        const float panelH = 40f;
+        float x = pad;
+        float y = height - pad - panelH;
+        float font = LayoutFont(22f);
+        ui.ChamferRect(x, y, panelW, panelH, 7f, PanelBg);
+        ui.Line(new Vector2(x + 7f, y), new Vector2(x + panelW - 7f, y), 1.5f, PanelEdge);
+
+        float health = MathF.Max(0f, pawn.Health);
+        Vector3 healthColor = health > 100f ? new Vector3(0.35f, 1f, 0.85f)
+            : health > 50f ? new Vector3(0.35f, 1f, 0.5f)
+            : health > 25f ? new Vector3(1f, 0.85f, 0.25f)
+            : new Vector3(1f, 0.25f, 0.2f);
+        Vector3 armorColor = pawn.HasShieldBelt ? new Vector3(1f, 0.45f, 1f)
+            : new Vector3(1f, 0.72f, 0.25f);
+        float split = x + panelW * 0.52f;
+        ui.Text(FaceRegular, font, x + 9f, y + 5f, Loc.HudHealth,
+            UiRenderer.Rgba(0.75f, 0.82f, 0.92f, 0.95f));
+        ui.Text(FaceBold, font, split - 9f, y + 5f, ((int)health).ToString(),
+            UiRenderer.Rgba(healthColor), TextAlign.Right);
+        ui.Text(FaceRegular, font, split + 6f, y + 5f, Loc.HudArmor,
+            UiRenderer.Rgba(0.75f, 0.82f, 0.92f, 0.95f));
+        ui.Text(FaceBold, font, x + panelW - 9f, y + 5f, ((int)pawn.Armor).ToString(),
+            UiRenderer.Rgba(armorColor), TextAlign.Right);
+        ui.Rect(x + 9f, y + panelH - 4f, panelW * 0.43f, 2.5f,
+            UiRenderer.Rgba(healthColor, 0.95f));
+        ui.Rect(split + 6f, y + panelH - 4f, panelW * 0.40f, 2.5f,
+            UiRenderer.Rgba(armorColor, 0.95f));
+        _ = accent;
+    }
+
     private void DrawAmmoWeapon(UiRenderer ui, Pawn pawn, int width, int height, float s, Vector3 accent)
     {
+        if (CompactLayout(width, height))
+        {
+            DrawCompactAmmoWeapon(ui, pawn, width, height, accent);
+            return;
+        }
+
         float pad = 22f * s;
         float panelW = 250f * s;
         float panelH = 92f * s;
@@ -253,18 +317,54 @@ public sealed class Hud
         if (pawn.PlayerIndex >= 0) { }
     }
 
+    private void DrawCompactAmmoWeapon(UiRenderer ui, Pawn pawn, int width, int height, Vector3 accent)
+    {
+        const float pad = 10f;
+        float panelW = MathF.Min(242f, width * 0.43f);
+        const float panelH = 40f;
+        float x = width - pad - panelW;
+        float y = height - pad - panelH;
+        float font = LayoutFont(22f);
+        var def = pawn.WeaponDef;
+        string ammo = def.Ammo == AmmoKind.None ? "∞" : pawn.AmmoFor(pawn.Weapon).ToString();
+        float ammoWidth = ui.MeasureText(FaceBold, font, ammo);
+        string weapon = FitText(ui, FaceRegular, font, def.Name,
+            panelW - ammoWidth - 32f);
+
+        ui.ChamferRect(x, y, panelW, panelH, 7f, PanelBg);
+        ui.Line(new Vector2(x + 7f, y), new Vector2(x + panelW - 7f, y), 1.5f, PanelEdge);
+        ui.Text(FaceRegular, font, x + 9f, y + 5f, weapon,
+            UiRenderer.Rgba(accent * 1.12f, 0.98f));
+        ui.Text(FaceBold, font, x + panelW - 9f, y + 5f, ammo, White, TextAlign.Right);
+        if (def.Ammo != AmmoKind.None)
+        {
+            float fraction = pawn.AmmoFor(pawn.Weapon) / (float)Math.Max(1, def.MaxAmmo);
+            ui.Rect(x + 9f, y + panelH - 4f, (panelW - 18f) * MathX.Saturate(fraction), 2.5f,
+                UiRenderer.Rgba(accent, 0.96f));
+        }
+    }
+
     private void DrawPowerups(UiRenderer ui, Pawn pawn, int width, int height, float s)
     {
-        float x = 24f * s;
+        bool compact = CompactLayout(width, height);
+        float x = compact ? 10f : 24f * s;
         float y = height * 0.5f - 60f * s;
-        float rowH = 26f * s;
+        float font = LayoutFont(15f * s);
+        float rowH = MathF.Max(26f * s, font + 8f);
+        float panelW = compact ? MathF.Min(220f, width * 0.38f) : 158f * s;
 
         void Row(string label, float remaining, Vector3 color)
         {
-            ui.ChamferRect(x, y, 158f * s, rowH - 4f * s, 6f * s, UiRenderer.Rgba(0f, 0f, 0f, 0.42f));
+            float cardH = rowH - MathF.Max(3f, 4f * s);
+            ui.ChamferRect(x, y, panelW, cardH, 6f * s, UiRenderer.Rgba(0f, 0f, 0f, 0.42f));
             ui.Rect(x, y, 4f * s, rowH - 4f * s, UiRenderer.Rgba(color, 0.95f));
-            ui.Text(FaceRegular, 15f * s, x + 12f * s, y + 3f * s, label, UiRenderer.Rgba(color * 1.2f, 0.95f));
-            ui.Text(FaceBold, 15f * s, x + 148f * s, y + 3f * s, $"{(int)MathF.Ceiling(remaining)}",
+            string duration = $"{(int)MathF.Ceiling(remaining)}";
+            float durationWidth = ui.MeasureText(FaceBold, font, duration);
+            string fitted = FitText(ui, FaceRegular, font, label,
+                panelW - MathF.Max(24f, 12f * s) - durationWidth);
+            ui.Text(FaceRegular, font, x + MathF.Max(9f, 12f * s), y + 3f * s, fitted,
+                UiRenderer.Rgba(color * 1.2f, 0.95f));
+            ui.Text(FaceBold, font, x + panelW - MathF.Max(8f, 10f * s), y + 3f * s, duration,
                 White, TextAlign.Right);
             y += rowH;
         }
@@ -283,6 +383,12 @@ public sealed class Hud
     private void DrawMatchStatus(UiRenderer ui, GameWorld world, Pawn pawn, int width, int height, float s,
         Vector3 accent)
     {
+        if (CompactLayout(width, height))
+        {
+            DrawCompactMatchStatus(ui, world, pawn, width, accent);
+            return;
+        }
+
         var mode = world.Mode;
         float cx = width * 0.5f;
         float y = 12f * s;
@@ -336,20 +442,87 @@ public sealed class Hud
         ui.TextShadow(FaceRegular, 14f * s, cx, y + pillH + 3f * s, matchContext,
             UiRenderer.Rgba(0.78f, 0.84f, 0.94f, 0.94f), TextAlign.Center,
             shadowOffset: MathF.Max(1f, 1.5f * s), shadowAlpha: 0.9f);
+
+        if (mode.TeamBased && pawn.Team != Team.None)
+        {
+            // Scores alone do not say which side this viewport belongs to—particularly in demo
+            // mode and split screen. Keep a localized, team-coloured identity pill permanently
+            // below the map/mode line, independent of transient flag and control-point notices.
+            string teamLabel = $"{Loc.HudYourTeam}：{GameTypes.TeamName(pawn.Team)}";
+            float fontSize = MathF.Max(18f * s, 12f);
+            float teamH = MathF.Max(27f * s, 20f);
+            float teamW = ui.MeasureText(FaceBold, fontSize, teamLabel) + MathF.Max(34f * s, 24f);
+            float teamY = y + pillH + MathF.Max(24f * s, 18f);
+            uint teamColor = UiRenderer.Rgba(accent * 1.18f, 1f);
+            ui.ChamferRect(cx - teamW * 0.5f, teamY, teamW, teamH, 7f * s,
+                UiRenderer.Rgba(accent * 0.27f, 0.76f));
+            ui.Rect(cx - teamW * 0.5f, teamY + 4f * s, MathF.Max(4f * s, 3f),
+                teamH - 8f * s, teamColor);
+            ui.TextShadow(FaceBold, fontSize, cx, teamY + MathF.Max(2f * s, 1f), teamLabel,
+                teamColor, TextAlign.Center, shadowOffset: MathF.Max(1f, 1.5f * s),
+                shadowAlpha: 0.9f);
+        }
+    }
+
+    private void DrawCompactMatchStatus(UiRenderer ui, GameWorld world, Pawn pawn, int width,
+        Vector3 accent)
+    {
+        var mode = world.Mode;
+        float cx = width * 0.5f;
+        const float font = UiRenderer.MinimumTextSize;
+        const float pillH = 30f;
+        const float top = 5f;
+        string time = mode.TimeLimit > 0f ? Loc.TimeRemaining(mode.TimeRemaining) : "∞";
+        string score = mode.TeamBased
+            ? $"{Loc.HudTeamRed} {mode.TeamScore(Team.Red)}  ·  {time}  ·  " +
+              $"{mode.TeamScore(Team.Blue)} {Loc.HudTeamBlue}"
+            : $"{Loc.HudFrags} {mode.ScoreOf(pawn)}  ·  {time}";
+        score = FitText(ui, FaceBold, font, score, width - 28f);
+        float scoreW = MathF.Min(width - 18f, ui.MeasureText(FaceBold, font, score) + 28f);
+        ui.ChamferRect(cx - scoreW * 0.5f, top, scoreW, pillH, 7f, PanelBg);
+        ui.Text(FaceBold, font, cx, top + 3f, score, White, TextAlign.Center);
+
+        string context = $"{Loc.ModeName(mode.Kind)} · {world.Level.Name}";
+        if (mode.LimitValue > 0) context += $" · {mode.LimitValue}";
+        context = FitText(ui, FaceRegular, font, context, width - 24f);
+        ui.TextShadow(FaceRegular, font, cx, top + 33f, context,
+            UiRenderer.Rgba(0.80f, 0.86f, 0.96f, 0.98f), TextAlign.Center,
+            shadowOffset: 1.5f, shadowAlpha: 0.9f);
+
+        if (!mode.TeamBased || pawn.Team == Team.None) return;
+        string label = $"{Loc.HudYourTeam}：{GameTypes.TeamName(pawn.Team)}";
+        float teamW = MathF.Min(width - 24f, ui.MeasureText(FaceBold, font, label) + 34f);
+        const float teamY = 63f;
+        ui.ChamferRect(cx - teamW * 0.5f, teamY, teamW, pillH, 7f,
+            UiRenderer.Rgba(accent * 0.27f, 0.78f));
+        ui.Rect(cx - teamW * 0.5f, teamY + 4f, 4f, pillH - 8f,
+            UiRenderer.Rgba(accent * 1.18f, 1f));
+        ui.TextShadow(FaceBold, font, cx, teamY + 3f, label,
+            UiRenderer.Rgba(accent * 1.18f, 1f), TextAlign.Center, 1.5f, 0.9f);
     }
 
     private void DrawKillFeed(UiRenderer ui, GameWorld world, int width, int height, float s)
     {
-        float x = width - 22f * s;
-        float y = 92f * s;
-        float rowH = 22f * s;
+        bool compact = CompactLayout(width, height);
+        float font = LayoutFont(16f * s);
+        float x = width - (compact ? 10f : 22f * s);
+        float y = compact ? 102f : MathF.Max(92f * s, font + 58f);
+        float rowH = font + 8f;
+        float maximumWidth = compact ? MathF.Min(width * 0.50f, 360f) : width - 44f * s;
+        int rows = 0;
+        int maximumRows = compact ? 3 : Math.Max(3, (int)((height * 0.42f - y) / rowH));
         for (int i = world.KillFeed.Count - 1; i >= 0; i--)
         {
+            if (rows++ >= maximumRows) break;
             var entry = world.KillFeed[i];
             float alpha = MathX.Saturate(entry.Timer / 1.1f);
-            float w = ui.MeasureText(FaceRegular, 16f * s, entry.Text) + 18f * s;
-            ui.ChamferRect(x - w, y, w, rowH - 3f * s, 5f * s, UiRenderer.Rgba(0f, 0f, 0f, 0.42f * alpha));
-            ui.Text(FaceRegular, 16f * s, x - 9f * s, y + 1f * s, entry.Text,
+            string text = FitText(ui, FaceRegular, font, entry.Text,
+                maximumWidth - MathF.Max(16f, 18f * s));
+            float w = MathF.Min(maximumWidth,
+                ui.MeasureText(FaceRegular, font, text) + MathF.Max(16f, 18f * s));
+            ui.ChamferRect(x - w, y, w, rowH - 3f, 5f * s,
+                UiRenderer.Rgba(0f, 0f, 0f, 0.50f * alpha));
+            ui.Text(FaceRegular, font, x - MathF.Max(8f, 9f * s), y + 2f, text,
                 UiRenderer.Rgba(entry.Color * 1.2f, alpha), TextAlign.Right);
             y += rowH;
         }
@@ -418,11 +591,18 @@ public sealed class Hud
         var points = world.Level.ControlPoints;
         if (points.Count == 0) return;
 
-        float cardWidth = 132f * s;
-        float gap = 10f * s;
+        bool compact = CompactLayout(width, height);
+        float font = LayoutFont(15f * s);
+        float statusFont = LayoutFont(13f * s);
+        float gap = compact ? 8f : 10f * s;
+        float available = width - (compact ? 24f : 48f * s);
+        float cardWidth = compact
+            ? MathF.Min(196f, (available - (points.Count - 1) * gap) / points.Count)
+            : 132f * s;
         float total = points.Count * cardWidth + (points.Count - 1) * gap;
         float x = width * 0.5f - total * 0.5f;
-        float y = height - 146f * s;
+        float cardHeight = MathF.Max(52f, 48f * s);
+        float y = compact ? height - 132f : height - 152f * s;
 
         for (int i = 0; i < points.Count; i++)
         {
@@ -432,20 +612,25 @@ public sealed class Hud
             float since = i < world.ControlPointSince.Count ? world.ControlPointSince[i] : 99f;
             float pulse = since < 1.2f ? 0.62f + 0.38f * MathF.Cos(since * 18f) : 0.62f;
 
-            ui.ChamferRect(x, y, cardWidth, 42f * s, 6f * s, UiRenderer.Rgba(col * 0.34f, pulse));
+            ui.ChamferRect(x, y, cardWidth, cardHeight, 6f * s, UiRenderer.Rgba(col * 0.34f, pulse));
             if (owner == pawn.Team && owner != Team.None)
-                ui.RectOutline(x, y, cardWidth, 42f * s, 1.6f * s, UiRenderer.Rgba(col, 0.85f));
+                ui.RectOutline(x, y, cardWidth, cardHeight, 1.6f * s, UiRenderer.Rgba(col, 0.85f));
 
-            ui.Text(FaceBold, 15f * s, x + 10f * s, y + 3f * s, points[i].Name,
+            string pointName = FitText(ui, FaceBold, font, points[i].Name,
+                cardWidth - MathF.Max(16f, 20f * s));
+            string ownerName = owner == Team.None ? Loc.DomNeutral : GameTypes.TeamName(owner);
+            ownerName = FitText(ui, FaceRegular, statusFont, ownerName,
+                cardWidth - MathF.Max(16f, 20f * s));
+            ui.Text(FaceBold, font, x + MathF.Max(8f, 10f * s), y + 3f, pointName,
                 UiRenderer.Rgba(0.94f, 0.96f, 1f));
-            ui.Text(FaceRegular, 13f * s, x + 10f * s, y + 23f * s,
-                owner == Team.None ? Loc.DomNeutral : GameTypes.TeamName(owner),
+            ui.Text(FaceRegular, statusFont, x + MathF.Max(8f, 10f * s), y + 27f, ownerName,
                 UiRenderer.Rgba(col * 1.25f, 0.98f));
             x += cardWidth + gap;
         }
 
         int mine = world.ControlPointsHeldBy(pawn.Team);
-        ui.Text(FaceRegular, 14f * s, width * 0.5f, y - 20f * s, Loc.DomTeamHolds(mine),
+        string held = FitText(ui, FaceRegular, LayoutFont(14f * s), Loc.DomTeamHolds(mine), width - 24f);
+        ui.Text(FaceRegular, LayoutFont(14f * s), width * 0.5f, y - 28f, held,
             UiRenderer.Rgba(0.72f, 0.80f, 0.92f), TextAlign.Center);
     }
 
@@ -458,10 +643,16 @@ public sealed class Hud
         }
         if (world.Mode.Kind != GameModeKind.CaptureTheFlag) return;
 
-        float cardWidth = 180f * s;
-        float gap = 12f * s;
+        bool compact = CompactLayout(width, height);
+        float titleFont = LayoutFont(15f * s);
+        float statusFont = LayoutFont(13f * s);
+        float gap = compact ? 10f : 12f * s;
+        float cardWidth = compact
+            ? MathF.Min(254f, (width - 30f - gap) * 0.5f)
+            : 180f * s;
+        float cardHeight = MathF.Max(54f, 48f * s);
         float x = width * 0.5f - (cardWidth * 2f + gap) * 0.5f;
-        float y = height - 146f * s;
+        float y = compact ? height - 132f : height - 152f * s;
         foreach (Team team in FlagTeams)
         {
             if (!world.FlagHome.TryGetValue(team, out Vector3 flagHome)) continue;
@@ -476,19 +667,25 @@ public sealed class Hud
             Vector3 statusColor = carrier >= 0 ? new Vector3(1f, 0.76f, 0.25f)
                 : home ? new Vector3(0.48f, 1f, 0.58f) : new Vector3(1f, 0.48f, 0.25f);
 
-            ui.ChamferRect(x, y, cardWidth, 42f * s, 6f * s, UiRenderer.Rgba(col * 0.3f, 0.62f));
-            ui.Text(FaceBold, 15f * s, x + 10f * s, y + 3f * s,
-                $"{GameTypes.TeamName(team)}旗幟",
+            ui.ChamferRect(x, y, cardWidth, cardHeight, 6f * s, UiRenderer.Rgba(col * 0.3f, 0.62f));
+            string title = FitText(ui, FaceBold, titleFont,
+                $"{GameTypes.TeamName(team)}旗幟", cardWidth - MathF.Max(16f, 20f * s));
+            status = FitText(ui, FaceRegular, statusFont, status,
+                cardWidth - MathF.Max(16f, 20f * s));
+            ui.Text(FaceBold, titleFont, x + MathF.Max(8f, 10f * s), y + 3f, title,
                 UiRenderer.Rgba(col * 1.3f, 0.95f));
-            ui.Text(FaceRegular, 13f * s, x + 10f * s, y + 21f * s, status,
+            ui.Text(FaceRegular, statusFont, x + MathF.Max(8f, 10f * s), y + 28f, status,
                 UiRenderer.Rgba(statusColor, 0.98f));
             x += cardWidth + gap;
         }
 
         if (pawn.HasFlag)
-            ui.TextShadow(FaceBold, 22f * s, width * 0.5f, height - 178f * s,
-                Loc.YouHoldFlag(GameTypes.TeamName(pawn.CarriedFlag)),
+        {
+            string held = FitText(ui, FaceBold, LayoutFont(22f * s),
+                Loc.YouHoldFlag(GameTypes.TeamName(pawn.CarriedFlag)), width - 24f);
+            ui.TextShadow(FaceBold, LayoutFont(22f * s), width * 0.5f, y - 30f, held,
                 UiRenderer.Rgba(GameTypes.TeamColor(pawn.CarriedFlag) * 1.3f, 1f), TextAlign.Center, 2f * s);
+        }
     }
 
     private void DrawDeathOverlay(UiRenderer ui, GameWorld world, Pawn pawn, int width, int height, float s)
@@ -643,13 +840,16 @@ public sealed class Hud
     {
         if (string.IsNullOrEmpty(text)) return;
         string[] lines = text.Split('\n');
-        float lh = 17f * s;
+        float font = LayoutFont(14f * s);
+        float lh = font + 5f;
         float w = 0f;
-        foreach (string line in lines) w = MathF.Max(w, ui.MeasureText(FaceRegular, 14f * s, line));
+        foreach (string line in lines) w = MathF.Max(w, ui.MeasureText(FaceRegular, font, line));
+        w = MathF.Min(w, width - 28f);
         ui.Rect(10f * s, 10f * s, w + 18f * s, lines.Length * lh + 12f * s,
             UiRenderer.Rgba(0f, 0f, 0f, 0.55f));
         for (int i = 0; i < lines.Length; i++)
-            ui.Text(FaceRegular, 14f * s, 19f * s, 16f * s + i * lh, lines[i],
+            ui.Text(FaceRegular, font, 19f * s, 16f * s + i * lh,
+                FitText(ui, FaceRegular, font, lines[i], w),
                 UiRenderer.Rgba(0.6f, 1f, 0.7f, 0.95f));
         _ = (width, height);
     }

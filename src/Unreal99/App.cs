@@ -83,6 +83,9 @@ public sealed class App : IDisposable
     private bool _noHud;
     private int _weaponGuideCapture = -1;
     private int _weaponProfileCapture = -1;
+    private string _weaponTurntableDirectory;
+    private int _weaponTurntableFrame;
+    private int _weaponTurntableCaptured;
     private int _weaponFootageMode = -1;
     private bool _weaponFootageBothModes;
     private string _weaponFootageDirectory;
@@ -92,6 +95,9 @@ public sealed class App : IDisposable
     private float _flyRadius, _flyHeight, _flyAngleDeg, _flyLookY;
     private MenuScreen _bootMenuScreen = MenuScreen.Main;
     private readonly List<string> _pendingScreenshots = new();
+    // Clear floor in Stalwart's main hall. The offset camera remains inside the room while the
+    // weapon is viewed from the same elevated three-quarter angle as an approaching player.
+    private static readonly Vector3 WeaponTurntableBase = new(10f, 0.05f, -8f);
 
     /// <summary>Non-zero when an automated behavioral gate fails.</summary>
     public int ExitCode { get; private set; }
@@ -144,7 +150,8 @@ public sealed class App : IDisposable
         options.Title = Loc.WindowTitle;
         options.API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.Default,
             new APIVersion(3, 3));
-        options.VSync = !_traversalTest && _weaponFootageMode < 0;
+        options.VSync = !_traversalTest && _weaponFootageMode < 0
+            && _weaponTurntableDirectory == null;
         options.PreferredDepthBufferBits = 24;
         options.PreferredStencilBufferBits = 0;
         options.WindowBorder = WindowBorder.Resizable;
@@ -301,6 +308,25 @@ public sealed class App : IDisposable
                     _noHud = true;
                     i++;
                     break;
+                case "--weaponturntable" when i + 2 < args.Length:
+                    // Documentation capture: rotate the real upright ground-pickup model through
+                    // one revolution while a fixed elevated camera views it like an approaching
+                    // player. Numbered lossless frames are converted to the README's WebP.
+                    _weaponProfileCapture = MathX.Clamp(
+                        int.TryParse(args[i + 1], out int turntableWeapon) ? turntableWeapon : 0,
+                        0, (int)WeaponKind.Count - 1);
+                    _weaponTurntableDirectory = args[i + 2];
+                    _menu.Map = MapId.Stalwart;
+                    _menu.LocalPlayers = 1;
+                    _menu.BotCount = 0;
+                    _cliOverrides.Add("map");
+                    _cliOverrides.Add("players");
+                    _cliOverrides.Add("bots");
+                    _autoStartMatch = true;
+                    _windowed = true;
+                    _noHud = true;
+                    i += 2;
+                    break;
                 case "--flycam" when i + 4 < args.Length:
                     // Explicit fly-by framing: radius, camera height, orbit angle, look-at height.
                     // One automatic orbit cannot frame seventeen very differently shaped arenas,
@@ -431,7 +457,7 @@ public sealed class App : IDisposable
         _inputContext = _window.CreateInput();
         _input = new InputSystem(_inputContext);
 
-        // Per-device input. GLFW merges every mouse into one cursor, so two-mouse split-screen
+        // Per-device input. GLFW merges every mouse into one cursor, so multi-mouse split-screen
         // needs Windows Raw Input; without it the game still runs on a single shared mouse.
         nint hwnd = 0;
         try { if (_window.Native?.Win32 is { } win32) hwnd = win32.Hwnd; }
@@ -1042,8 +1068,8 @@ public sealed class App : IDisposable
     /// latch onto real devices as they reveal themselves — wiggle each mouse once and the
     /// assignment settles — while anything the player picked by hand is left untouched.
     /// Keyboards are deliberately left shared unless assigned explicitly: binding a player to a
-    /// phantom keyboard would leave them unable to move, and the two default binding profiles
-    /// make a single shared keyboard perfectly playable.
+    /// phantom keyboard would leave them unable to move, and the first three default binding
+    /// profiles use separate clusters on one shared keyboard.
     /// </summary>
     private void AutoAssignDevices(bool onlyUnassigned = false)
     {
@@ -1083,9 +1109,8 @@ public sealed class App : IDisposable
 
     /// <summary>
     /// Picks what actually drives each slot for this match. Player one always takes keyboard and
-    /// mouse. Later slots prefer their own physical mouse (the point of two-mouse split-screen),
-    /// fall back to a gamepad, and finally to the shared keyboard with the second binding profile,
-    /// which turns with the numpad instead of the mouse.
+    /// mouse. Later slots prefer their own physical mouse (including a third independent mouse),
+    /// fall back to a gamepad, and finally to their shared-keyboard binding profile.
     /// </summary>
     private void ConfigureMatchDevices(int localPlayers)
     {
@@ -1171,7 +1196,8 @@ public sealed class App : IDisposable
         // Behavioral suites use the production update/render path but advance it at a stable
         // 60 Hz without waiting for wall-clock VSync. This makes long all-map runs practical
         // while preserving the same per-tick physics and bot decisions as normal gameplay.
-        if (_traversalTest || _weaponFootageMode >= 0) dt = 1f / 60f;
+        if (_traversalTest || _weaponFootageMode >= 0 || _weaponTurntableDirectory != null)
+            dt = 1f / 60f;
         _time += dt;
         if (_audio != null) _audio.Time = _time;
 
@@ -1221,6 +1247,7 @@ public sealed class App : IDisposable
         }
         HandleAutoScreenshot();
         HandleWeaponFootageCapture();
+        HandleWeaponTurntableCapture();
         _input.EndFrame(dt);
     }
 
@@ -1257,7 +1284,7 @@ public sealed class App : IDisposable
         // Windows may return a blank desktop capture for exclusive/fullscreen OpenGL windows.
         // Both keys therefore read the game's final framebuffer directly instead of relying on
         // the operating-system screenshot path.
-        if (_input.KeyPressed(Key.F12) || _input.KeyPressed(Key.PrintScreen)) QueueScreenshot();
+        if (_input.GlobalKeyPressed(Key.F12) || _input.GlobalKeyPressed(Key.PrintScreen)) QueueScreenshot();
         if (_input.KeyPressed(Key.F3)) _showDebug = !_showDebug;
         if (_input.KeyPressed(Key.F11))
         {
@@ -1346,6 +1373,7 @@ public sealed class App : IDisposable
         _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
         _ui.Begin(Width, Height);
         _menu.DrawLoading(_ui, Width, Height, stage, progress, _time);
+        DrawVersionLabel();
         _ui.End();
     }
 
@@ -1521,7 +1549,8 @@ public sealed class App : IDisposable
                 _state = AppState.Playing;
                 // Automated traversal runs must never capture or warp the user's real desktop
                 // cursor. Their local player is bot-driven and has no need for mouse-look.
-                if (_traversalTest || _saveTest || _weaponFootageMode >= 0 || _autoShotFrames >= 0)
+                if (_traversalTest || _saveTest || _weaponFootageMode >= 0
+                    || _weaponTurntableDirectory != null || _autoShotFrames >= 0)
                     _input.SetPointerMode(InputSystem.PointerMode.Normal);
                 else
                     _input.SetMouseCapture(true);
@@ -1895,11 +1924,23 @@ public sealed class App : IDisposable
         if (_weaponProfileCapture >= 0 && _players.Count > 0)
         {
             // Match updates can still emit ambient arena particles; exclude them from the clean
-            // profile plate so only the live weapon mesh and its studio lighting are visible.
+            // capture plate so only the intended live weapon scene is visible.
             _renderer.Particles.Clear();
             _renderer.Effects.Clear();
-            _world.SubmitWeaponProfile(_scene, (WeaponKind)_weaponProfileCapture,
-                _players[0].Pawn.Position + new Vector3(0f, 0.55f, 0f));
+            if (_weaponTurntableDirectory != null)
+            {
+                _level.Environment.ApplyTo(_scene);
+                _level.Submit(_scene, _world.Materials, _world.Time);
+                const int turntableFrames = 36;
+                float yaw = _weaponTurntableCaptured / (float)turntableFrames * MathX.TwoPi;
+                _world.SubmitWeaponTurntable(_scene, (WeaponKind)_weaponProfileCapture,
+                    WeaponTurntableBase, yaw);
+            }
+            else
+            {
+                _world.SubmitWeaponProfile(_scene, (WeaponKind)_weaponProfileCapture,
+                    _players[0].Pawn.Position + new Vector3(0f, 0.55f, 0f));
+            }
         }
         else
         {
@@ -1980,12 +2021,17 @@ public sealed class App : IDisposable
 
         if (_weaponProfileCapture >= 0 && controller.PlayerIndex == 0)
         {
-            Vector3 weapon = pawn.Position + new Vector3(0f, 0.55f, 0f);
-            cam.Position = weapon + new Vector3(3.2f, 0.12f, 0f);
+            bool turntable = _weaponTurntableDirectory != null;
+            Vector3 weapon = turntable
+                ? WeaponTurntableBase + new Vector3(0f, 0.55f, 0f)
+                : pawn.Position + new Vector3(0f, 0.55f, 0f);
+            cam.Position = weapon + (turntable
+                ? new Vector3(3.4f, 2.15f, 3.0f)
+                : new Vector3(3.2f, 0.12f, 0f));
             Vector3 look = MathX.SafeNormalize(weapon - cam.Position, -MathX.Right);
             MathX.YawPitchFromDir(look, out cam.Yaw, out cam.Pitch);
             cam.Roll = 0f;
-            cam.FovY = VerticalFov(42f, aspect);
+            cam.FovY = VerticalFov(turntable ? 38f : 42f, aspect);
             cam.Update(aspect);
             return cam;
         }
@@ -2143,11 +2189,28 @@ public sealed class App : IDisposable
 
     private void DrawStatusLine()
     {
+        DrawVersionLabel();
         if (_statusTimer <= 0f || string.IsNullOrEmpty(_statusMessage)) return;
         float s = MathF.Max(Height / 900f, 0.5f);
         float alpha = MathX.Saturate(_statusTimer);
-        _ui.TextShadow(_hud.FaceRegular, 18f * s, Width * 0.5f, Height - 26f * s, _statusMessage,
+        _ui.TextShadow(_hud.FaceRegular, MathF.Max(22f, 18f * s), Width * 0.5f, Height - 26f * s, _statusMessage,
             UiRenderer.Rgba(1f, 0.85f, 0.4f, alpha), TextAlign.Center, 2f * s);
+    }
+
+    /// <summary>
+    /// Keeps the release identity visible in every interactive state, including fullscreen,
+    /// loading, menus, gameplay and results. Automated documentation/test captures stay clean.
+    /// </summary>
+    private void DrawVersionLabel()
+    {
+        if (_weaponGuideCapture >= 0 || _weaponProfileCapture >= 0 || _traversalTest) return;
+        const float size = 22f;
+        const float margin = 12f;
+        float measured = _fonts.Measure(_hud.FaceRegular, size, Loc.GameVersionLabel);
+        _ui.Rect(margin - 5f, margin - 3f, measured + 10f, size + 8f,
+            UiRenderer.Rgba(0.015f, 0.025f, 0.055f, 0.72f));
+        _ui.TextShadow(_hud.FaceRegular, size, margin, margin, Loc.GameVersionLabel,
+            UiRenderer.Rgba(0.8f, 0.87f, 0.98f, 0.96f), TextAlign.Left, 2f);
     }
 
     private void SetStatus(string message, float duration = 3.5f)
@@ -2203,7 +2266,8 @@ public sealed class App : IDisposable
 
         Console.WriteLine("──── 輸入自我測試 ────");
         Console.WriteLine(InputDiagnostics.Report(_input.Raw));
-        for (int i = 0; i < 2; i++)
+        int reportedSlots = Math.Min(3, _playerDevices.Length);
+        for (int i = 0; i < reportedSlots; i++)
         {
             var device = _playerDevices[i];
             Console.WriteLine($"  玩家{i + 1}: 滑鼠={(device.MouseHandle != 0 ? device.MouseName : "共用")} " +
@@ -2217,7 +2281,7 @@ public sealed class App : IDisposable
                 : "共用滾輪";
             Console.WriteLine($"           滾輪累計={_inputTestWheel[i]:0.0} 來源={wheelSource}");
         }
-        Console.WriteLine("  測試期間請分別轉動兩個滑鼠的滾輪；兩列的累計值應各自變動。");
+        Console.WriteLine("  測試期間請分別轉動三個滑鼠的滾輪；三列的累計值應各自變動。");
         Console.WriteLine("──────────────────────");
         _window.Close();
     }
@@ -2590,8 +2654,18 @@ public sealed class App : IDisposable
         var pixels = new byte[w * h * 4];
         _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         _gl.PixelStore(PixelStoreParameter.PackAlignment, 1);
-        fixed (byte* p = pixels)
-            _gl.ReadPixels(0, 0, (uint)w, (uint)h, PixelFormat.Rgba, PixelType.UnsignedByte, p);
+        // The callback renders into the default framebuffer's back buffer. Its implicit read
+        // selection differs between windowed and fullscreen Intel/Windows drivers; explicitly
+        // selecting Back prevents the successful-but-transparent PNGs those drivers returned.
+        _gl.Finish();
+        ReadDefaultBuffer(ReadBufferMode.Back, pixels);
+        if (!HasVisibleScreenshotContent(pixels))
+        {
+            // A few borderless/exclusive paths expose only the last swapped front buffer. It is
+            // one frame older but still the actual game image and preferable to a blank capture.
+            ReadDefaultBuffer(ReadBufferMode.Front, pixels);
+            _gl.ReadBuffer(ReadBufferMode.Back);
+        }
         try
         {
             Png.Write(path, w, h, pixels, 4, flipVertically: true);
@@ -2604,6 +2678,33 @@ public sealed class App : IDisposable
         catch (Exception ex)
         {
             Console.WriteLine($"截圖失敗: {ex.Message}");
+        }
+
+        void ReadDefaultBuffer(ReadBufferMode buffer, byte[] destination)
+        {
+            _gl.ReadBuffer(buffer);
+            fixed (byte* p = destination)
+                _gl.ReadPixels(0, 0, (uint)w, (uint)h, PixelFormat.Rgba,
+                    PixelType.UnsignedByte, p);
+        }
+
+        static bool HasVisibleScreenshotContent(byte[] rgba)
+        {
+            int visible = 0;
+            int darkest = 255;
+            int brightest = 0;
+            // Sampling is sufficient to distinguish a rendered frame from an all-zero/default
+            // buffer and avoids another full-resolution pass on every screenshot.
+            int pixelStep = Math.Max(1, rgba.Length / 4 / 4096);
+            for (int pixel = 0; pixel < rgba.Length / 4; pixel += pixelStep)
+            {
+                int i = pixel * 4;
+                int value = Math.Max(rgba[i], Math.Max(rgba[i + 1], rgba[i + 2]));
+                if (rgba[i + 3] > 8 && value > 8) visible++;
+                darkest = Math.Min(darkest, value);
+                brightest = Math.Max(brightest, value);
+            }
+            return visible >= 8 && brightest - darkest >= 6;
         }
     }
 
@@ -2681,6 +2782,35 @@ public sealed class App : IDisposable
 
         Console.WriteLine($"武器動態擷取完成: {GameTypes.WeaponName((WeaponKind)_weaponGuideCapture)} · " +
                           $"{(_weaponFootageMode == 0 ? "主要" : "次要")} · {FrameCount} 畫格");
+        _window.Close();
+    }
+
+    /// <summary>
+    /// Captures a seamless 36-frame revolution of the live ground-pickup mesh. Four simulation
+    /// ticks between frames keep the output at 15 fps while the explicit frame-derived yaw makes
+    /// the first/last transition exactly the same ten-degree step as every other transition.
+    /// </summary>
+    private void HandleWeaponTurntableCapture()
+    {
+        if (_weaponTurntableDirectory == null || _weaponProfileCapture < 0
+            || _state != AppState.Playing || _world == null || _world.ResumeCountdown > 0f
+            || _world.Mode.State == MatchState.Warmup) return;
+
+        const int captureEvery = 4;
+        const int frameCount = 36;
+        _weaponTurntableFrame++;
+        if ((_weaponTurntableFrame - 1) % captureEvery != 0) return;
+
+        Directory.CreateDirectory(_weaponTurntableDirectory);
+        string path = Path.Combine(_weaponTurntableDirectory,
+            $"{_weaponTurntableCaptured:D3}.png");
+        SaveScreenshot(path, quiet: true);
+        _weaponTurntableCaptured++;
+        if (_weaponTurntableCaptured < frameCount) return;
+
+        Console.WriteLine($"武器旋轉展示擷取完成: " +
+                          $"{GameTypes.WeaponName((WeaponKind)_weaponProfileCapture)} · " +
+                          $"{frameCount} 畫格 · 360°");
         _window.Close();
     }
 

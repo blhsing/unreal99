@@ -11,7 +11,7 @@ namespace Unreal99.Platform;
 /// </summary>
 public sealed class UserSettings
 {
-    public int Version = 4;
+    public int Version = 5;
 
     // --- video ---
     public int Quality = (int)QualityLevel.High;
@@ -86,6 +86,19 @@ public static class SettingsStore
     public static UserSettings Load() => UserData.ReadJsonOrNull<UserSettings>(UserData.SettingsPath);
 
     public static bool Save(UserSettings settings) => UserData.WriteJson(UserData.SettingsPath, settings);
+
+    private static bool StoredBindingsMatch(PlayerProfileData stored, BindingProfile expected)
+    {
+        if (stored.BindingKeys.Count != expected.Bindings.Length
+            || stored.BindingMouseButtons.Count != expected.Bindings.Length) return false;
+        for (int i = 0; i < expected.Bindings.Length; i++)
+        {
+            InputBinding binding = expected.Bindings[i];
+            if (stored.BindingKeys[i] != (int)binding.Key
+                || stored.BindingMouseButtons[i] != binding.MouseButton) return false;
+        }
+        return true;
+    }
 
     public static UserSettings Capture(RenderSettings render, ControlSettings controls, float masterVolume,
         bool vsync, bool showFps, PlayerDevice[] devices, IReadOnlyList<string> playerNames,
@@ -191,6 +204,12 @@ public static class SettingsStore
                 ? Unreal99.UI.Loc.PlayerDefaultNames[i]
                 : $"玩家 {i + 1}";
 
+        // Versions before 5 gave players 2–4 the same arrow-key profile. Upgrade player three
+        // only when it is still byte-for-byte that legacy default; customized bindings remain
+        // untouched.
+        bool migratePlayerThreeDefaults = s.Version < 5 && s.Players.Count > 2
+            && StoredBindingsMatch(s.Players[2], BindingProfile.CreateDefault(1));
+
         for (int i = 0; i < devices.Length && i < s.Players.Count; i++)
         {
             var p = s.Players[i];
@@ -209,16 +228,57 @@ public static class SettingsStore
             d.MouseHandle = 0;
             d.KeyboardHandle = 0;
 
-            int n = Math.Min(d.Bindings.Bindings.Length,
-                Math.Min(p.BindingKeys.Count, p.BindingMouseButtons.Count));
-            for (int a = 0; a < n; a++)
+            if (i == 2 && migratePlayerThreeDefaults)
             {
-                int button = p.BindingMouseButtons[a];
-                d.Bindings.Bindings[a] = button >= 0
-                    ? InputBinding.OnMouse(button)
-                    : InputBinding.OnKey((Key)p.BindingKeys[a]);
+                d.Bindings = BindingProfile.CreateDefault(2);
+            }
+            else
+            {
+                int n = Math.Min(d.Bindings.Bindings.Length,
+                    Math.Min(p.BindingKeys.Count, p.BindingMouseButtons.Count));
+                for (int a = 0; a < n; a++)
+                {
+                    int button = p.BindingMouseButtons[a];
+                    d.Bindings.Bindings[a] = button >= 0
+                        ? InputBinding.OnMouse(button)
+                        : InputBinding.OnKey((Key)p.BindingKeys[a]);
+                }
             }
         }
+    }
+
+    /// <summary>Headless regression for upgrading the legacy player-three defaults.</summary>
+    public static int RunPlayerThreeMigrationSelfTest()
+    {
+        var legacy = new UserSettings { Version = 4 };
+        for (int i = 0; i < 4; i++)
+        {
+            // Before version 5 every later slot inherited player two's arrow-key profile.
+            BindingProfile profile = BindingProfile.CreateDefault(i == 2 ? 1 : i);
+            var stored = new PlayerProfileData();
+            foreach (InputBinding binding in profile.Bindings)
+            {
+                stored.BindingKeys.Add((int)binding.Key);
+                stored.BindingMouseButtons.Add(binding.MouseButton);
+            }
+            legacy.Players.Add(stored);
+        }
+
+        var devices = Enumerable.Range(0, 4).Select(PlayerDevice.Keyboard).ToArray();
+        var names = new string[4];
+        Apply(legacy, new RenderSettings(), new ControlSettings(), devices, names, new MatchSetup(),
+            out _, out _, out _);
+        bool migrated = devices[2].Bindings[GameAction.MoveForward] == InputBinding.OnKey(Key.Y)
+            && devices[2].Bindings[GameAction.MoveBack] == InputBinding.OnKey(Key.H)
+            && devices[2].Bindings[GameAction.MoveLeft] == InputBinding.OnKey(Key.G)
+            && devices[2].Bindings[GameAction.MoveRight] == InputBinding.OnKey(Key.J)
+            && devices[2].Bindings[GameAction.PrevWeapon] == InputBinding.OnKey(Key.T)
+            && devices[2].Bindings[GameAction.NextWeapon] == InputBinding.OnKey(Key.U)
+            && devices[2].Bindings[GameAction.Jump] == InputBinding.OnKey(Key.M)
+            && devices[2].Bindings[GameAction.Crouch] == InputBinding.OnKey(Key.N)
+            && devices[2].Bindings[GameAction.Scoreboard] == InputBinding.OnKey(Key.B);
+        Console.WriteLine($"舊版玩家三設定遷移: {(migrated ? "通過" : "失敗")}");
+        return migrated ? 0 : 1;
     }
 }
 

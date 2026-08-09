@@ -8,8 +8,10 @@ public static class Loc
 {
     // ---------------------------------------------------------------- application
     public const string GameTitle = "虛幻競技場 99";
+    public const string GameVersion = "1.0.0";
+    public const string GameVersionLabel = "版本 1.0.0";
     public const string GameSubtitle = "重製版 · C#/.NET 引擎";
-    public const string WindowTitle = "虛幻競技場 99 — 重製版";
+    public const string WindowTitle = "虛幻競技場 99 — 重製版 · 1.0.0";
     public const string Loading = "載入中";
     public const string GeneratingWorld = "產生場景中";
     public const string GeneratingTextures = "產生材質中";
@@ -250,6 +252,7 @@ public static class Loc
     public const string HudPressFireToRespawn = "按開火鍵重生";
     public const string HudTeamRed = "紅隊";
     public const string HudTeamBlue = "藍隊";
+    public const string HudYourTeam = "你的隊伍";
     public const string HudLeader = "領先";
     public const string HudYouAreDead = "你已陣亡";
     public const string HudNoAmmo = "彈藥耗盡";
@@ -356,7 +359,7 @@ public static class Loc
     public const string DevicesClearAssign = "清除所有指派";
     public const string DevicesRawUnavailable = "此系統無法使用多滑鼠輸入，所有玩家將共用一組滑鼠。";
     public const string DevicesRawActive = "多滑鼠輸入已啟用：每位玩家可使用各自的滑鼠瞄準。";
-    public const string DevicesNeedTwoMice = "使用中的滑鼠少於兩個，請接上第二個滑鼠並移動它。";
+    public const string DevicesNeedTwoMice = "使用中的專屬滑鼠少於本機玩家數；請接上其餘滑鼠並逐一移動。";
     public const string DevicesWiggleHint = "提示：移動每一個滑鼠，系統會自動辨識並依序指派給各玩家。";
     public const string DevicesConflict = "警告：多位玩家共用同一個滑鼠。";
 

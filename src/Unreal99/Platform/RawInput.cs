@@ -30,7 +30,7 @@ public struct RawMouseState
 }
 
 /// <summary>
-/// Windows Raw Input. GLFW merges every mouse into one system cursor, which makes two-mouse
+/// Windows Raw Input. GLFW merges every mouse into one system cursor, which makes multi-mouse
 /// split-screen impossible; Raw Input reports each HID separately, so this layer subclasses the
 /// game window, intercepts WM_INPUT, and keeps motion, buttons and keys separated by device.
 ///

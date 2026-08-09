@@ -17,6 +17,11 @@
     <InvariantGlobalization>false</InvariantGlobalization>
     <NoWarn>CS8981;CA1416</NoWarn>
     <ApplicationIcon>Assets\Unreal99.ico</ApplicationIcon>
+    <Version>1.0.0</Version>
+    <AssemblyVersion>1.0.0.0</AssemblyVersion>
+    <FileVersion>1.0.0.0</FileVersion>
+    <InformationalVersion>1.0.0</InformationalVersion>
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
   </PropertyGroup>
 
   <ItemGroup>

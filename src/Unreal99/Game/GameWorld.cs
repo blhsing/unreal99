@@ -1893,6 +1893,48 @@ public sealed class GameWorld
     }
 
     /// <summary>
+    /// Stages the exact live weapon-pickup mesh, scale, materials and pedestal at ground level for
+    /// a documentation turntable. Only the yaw is supplied by the capture frame so the resulting
+    /// animation covers one uniform, seamless 360-degree revolution.
+    /// </summary>
+    public void SubmitWeaponTurntable(RenderScene scene, WeaponKind weapon, Vector3 groundPosition,
+        float yaw)
+    {
+        Vector3 weaponPosition = groundPosition + new Vector3(0f, 0.55f, 0f);
+        Matrix4x4 weaponTransform = Matrix4x4.CreateScale(1.25f)
+            * Matrix4x4.CreateRotationY(yaw)
+            * Matrix4x4.CreateTranslation(weaponPosition);
+        Mesh weaponMesh = _weaponModels.MeshFor(weapon);
+        foreach (MeshSection section in _weaponModels.SectionsFor(weapon))
+        {
+            Material material = Materials.Get(section.Material);
+            var draw = MakePickupDraw(weaponMesh, section, material, weaponTransform,
+                weaponPosition, 2.2f);
+            draw.CastShadow = true;
+            scene.Opaque.Add(draw);
+        }
+
+        // This is the same torus rendered underneath every live weapon pickup, not a
+        // documentation-only stand. It anchors the elevated camera view to the arena floor.
+        Matrix4x4 pedestalTransform = Matrix4x4.CreateTranslation(groundPosition);
+        Mesh pedestal = _pickupModels.MeshFor(PickupKind.WeaponPickup);
+        foreach (MeshSection section in _pickupModels.SectionsFor(PickupKind.WeaponPickup))
+        {
+            Material material = Materials.Get(section.Material);
+            var draw = MakePickupDraw(pedestal, section, material, pedestalTransform,
+                groundPosition, 0.6f);
+            draw.CastShadow = true;
+            if (material.Transparent) scene.Transparent.Add(draw); else scene.Opaque.Add(draw);
+        }
+
+        Vector3 tint = Weapons.Get(weapon).Tint;
+        scene.AddLight(weaponPosition + new Vector3(1.8f, 2.2f, 1.3f), 7f,
+            tint * 0.55f + new Vector3(0.45f), 3.8f, 2f);
+        scene.AddLight(weaponPosition + new Vector3(-1.8f, 0.8f, -1.4f), 5.5f,
+            new Vector3(1f, 0.38f, 0.16f), 2.1f, 1.6f);
+    }
+
+    /// <summary>
     /// Draws each control point in its owner's colour. The dais and pillar are baked into the
     /// level, but ownership is the one thing about a control point that changes, so the coloured
     /// part has to be submitted per frame: a slowly turning marker above the pillar plus a light

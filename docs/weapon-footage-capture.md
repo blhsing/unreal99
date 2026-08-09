@@ -1,6 +1,6 @@
 # 武器實戰動畫擷取流程
 
-本文件說明如何重建 README 武器指南中的主要／次要射擊動畫，以及如何驗證與提交結果。所有動畫
+本文件說明如何重建 README 武器指南中的主要／次要射擊動畫與 360° 地面拾取展示，以及如何驗證與提交結果。所有動畫
 都必須由目前版本的遊戲實際算圖，不得以概念圖、後製特效或手繪畫面代替。
 
 ## 成品與負責元件
@@ -9,17 +9,17 @@
 
 - `docs/weapons/<slug>-primary.webp`：主要射擊實戰。
 - `docs/weapons/<slug>-secondary.webp`：次要射擊實戰。
-- `docs/weapons/<slug>-profile.jpg`：遊戲內直立拾取物的側面圖。
+- `docs/weapons/<slug>-turntable.webp`：從玩家接近角度觀看的遊戲內拾取物 360° 旋轉展示。
 
 流程由三個部分組成：
 
 1. `src/Unreal99/App.cs` 的 `--weaponfootage` 模式啟動真正的 Gothic 關卡、武器系統和電腦控制器，
    並從 OpenGL 最後完成的畫面緩衝輸出編號 PNG。
 2. `docs/capture-weapons.ps1` 建置遊戲、依序擷取每把武器、呼叫轉檔器及清理暫存畫格。
-3. `docs/build-weapon-webp.py` 將 30 張 PNG 縮放為 640×360，編碼成循環 WebP，並重新讀取成品
-   驗證動畫格數與尺寸。
+3. `docs/build-weapon-webp.py` 將實戰的 30 張或旋轉展示的 36 張 PNG 縮放為 640×360，編碼成
+   循環 WebP，並重新讀取成品驗證動畫格數與尺寸。
 
-README 只引用 WebP 成品和側面圖；`.capture` 下的 PNG 是可重新產生的暫存資料，不得提交。
+README 只引用 WebP 成品；`.capture` 下的 PNG 是可重新產生的暫存資料，不得提交。
 
 ## 實戰場景規則
 
@@ -46,44 +46,51 @@ README 只引用 WebP 成品和側面圖；`.capture` 下的 PNG 是可重新產
 自動擷取不會鎖定、隱藏或移動桌面游標。畫面直接來自遊戲 framebuffer，也不受 Windows 全螢幕
 桌面截圖可能變成空白的問題影響。
 
-## 直立側面圖如何擷取
+## 360° 地面拾取展示如何擷取
 
-武器指南的 `*-profile.jpg` 不是從動畫截一格，也不是把第一人稱槍枝旋轉後裁切。它使用
-`--weaponprofile N` 的獨立遊戲內攝影模式，流程如下：
+武器指南的 `*-turntable.webp` 不是把第一人稱槍枝旋轉，也不是從實戰動畫重複取格。它使用
+`--weaponturntable N 目錄` 的獨立遊戲內攝影模式，實際測試過的流程如下：
 
-1. 遊戲以 1600×900 視窗模式進入 Stalwart，建立一名本機玩家且不加入電腦玩家。
-2. HUD、第一人稱武器和一般關卡場景不會送入這個畫面的 `RenderScene`；上一幀可能殘留的粒子與
-   效果也會先清除，因此人物、拾取台、煙霧或競技場物件不會擋住輪廓。
-3. `GameWorld.SubmitWeaponProfile` 取得與實際武器拾取物相同的 `Mesh`、`MeshSection` 和材質，保持
-   模型的直立本地姿態，以 `1.25` 倍縮放放在玩家位置上方 0.55 m。沒有另造文件專用武器模型。
-4. 場景改用無霧、無雲、無星的深色攝影背景，並使用暖色主日光、冷色前側補光和暖色後側輪廓光。
-   這些光仍走遊戲的正常材質、陰影和 renderer，而不是事後加亮。
-5. 攝影機位於武器右側 3.2 m、上方 0.12 m，直接看向武器中心，水平視野為 42°。武器本地長軸
-   因此以 broadside 側面朝向鏡頭，而不是像舊版地面拾取物那樣平躺到難以辨認。
-6. `--autoshot 12` 等待 12 個畫格後，直接從 OpenGL framebuffer 儲存完整 PNG。這段時間不可手動
-   縮放擷取視窗，因為下一步使用 1600×900 畫面的固定裁切座標。
-7. `Save-CroppedCapture` 從原圖 `(x=500, y=280, width=1000, height=562)` 取出武器區域，以高品質
-   bicubic 縮放為 800×450，最後用 JPEG 品質 88 寫入 `docs/weapons/<slug>-profile.jpg`。
+1. 遊戲以固定 1600×900 視窗進入 Stalwart，建立一名本機玩家且不加入電腦玩家；HUD、第一人稱
+   手臂、粒子與特效不會混入畫面。
+2. Stalwart 的真實環境、地板幾何、材質與光照仍由正常 `Level.Submit` 路徑算圖。展示位置固定在
+   世界座標 `(10, 0.05, -8)`，避免牆、道具或角色遮住武器。
+3. `GameWorld.SubmitWeaponTurntable` 取得與實際武器拾取物相同的 `Mesh`、`MeshSection` 和材質，
+   保持遊戲中可辨認的直立姿態，以 `1.25` 倍縮放放在地面上方 0.55 m。武器下方也使用遊戲中每個
+   `WeaponPickup` 實際繪製的環形拾取台，沒有文件專用替身模型。
+4. 固定攝影機位於武器中心的相對座標 `(3.4, 2.15, 3.0)`，直接注視武器中心，視野 38°。這是玩家
+   接近地面拾取物時常見的三分之四俯視角度，可以同時看清頂面、側面、握把與拾取台。
+5. 武器每格繞世界 Y 軸旋轉 10°。捕捉從 0° 到 350° 共 36 格；每四個 60 Hz 模擬 tick 直接讀取
+   一次 OpenGL framebuffer，所以成品約為 15 fps。350° 回到 0° 仍是相同的 10° 步幅，循環不會
+   在接縫停頓或重複同一角度。
+6. 武器色調的主燈與暖色輪廓燈仍走遊戲 renderer、陰影與 PBR 材質。`build-weapon-webp.py` 以
+   `--expected-frames 36 --quality 78` 轉成 640×360 循環 WebP，並重新開啟成品驗證尺寸與格數。
 
-協調腳本使用的實際遊戲命令等同於：
+直接擷取火箭發射器的 36 張來源 PNG：
 
 ```powershell
 dotnet .\src\Unreal99\bin\Release\net10.0\Unreal99.dll `
-  --weaponprofile 8 `
-  --autoshot 12 .\docs\weapons\.capture\rocket-launcher-profile.capture.png
+  --weaponturntable 8 .\artifacts\rocket-turntable\frames
 ```
 
-正式產生側面圖時不需要手動執行裁切；不加 `-SkipProfiles` 執行協調腳本，就會在每把武器的兩段
-動畫完成後自動執行上述命令與固定裁切：
+單獨轉檔：
 
 ```powershell
-# 重建火箭發射器的動畫與側面圖
-.\docs\capture-weapons.ps1 -NoBuild -StartWeapon 8 -EndWeapon 8
+python .\docs\build-weapon-webp.py `
+  --input .\artifacts\rocket-turntable\frames `
+  --output .\artifacts\rocket-launcher-turntable.webp `
+  --expected-frames 36 --quality 78
 ```
 
-`--weaponfloor` 目前仍是 `--weaponprofile` 的相容別名，只供舊腳本使用；新文件和自動化一律使用
-`--weaponprofile`。若只想檢查未裁切的攝影棚畫面，可把直接命令的輸出改到 `artifacts/`，但不可
-用該完整 PNG 直接取代 README 的 800×450 成品。
+正式重建火箭發射器的旋轉展示，不重拍已存在的實戰動畫：
+
+```powershell
+.\docs\capture-weapons.ps1 -NoBuild -SkipActionFootage -StartWeapon 8 -EndWeapon 8
+```
+
+`--weaponprofile` 與 `--weaponfloor` 只保留為舊工具的相容入口；README 與現行自動化一律使用
+`--weaponturntable`。同樣地，腳本仍接受舊的 `-SkipProfiles` 名稱，但只作為 `-SkipTurntables` 的
+別名。新命令不得再產生或提交 `*-profile.jpg`。
 
 ## 必要環境
 
@@ -100,22 +107,22 @@ python -m pip install Pillow
 
 ## 完整重建
 
-建置 Release 版本、重建 22 段動畫和 11 張側面圖：
+建置 Release 版本、重建 22 段實戰動畫和 11 段旋轉展示：
 
 ```powershell
 .\docs\capture-weapons.ps1
 ```
 
-只更新動畫、保留已存在的側面圖：
+只更新實戰動畫、保留已存在的旋轉展示：
 
 ```powershell
-.\docs\capture-weapons.ps1 -SkipProfiles
+.\docs\capture-weapons.ps1 -SkipTurntables
 ```
 
 若 Release DLL 已由目前工作目錄中的原始碼建置完成，可省略重複建置：
 
 ```powershell
-.\docs\capture-weapons.ps1 -NoBuild -SkipProfiles
+.\docs\capture-weapons.ps1 -NoBuild -SkipTurntables
 ```
 
 腳本預設使用 `src/Unreal99/bin/Release/net10.0/Unreal99.dll`，並以 `CreateNoWindow` 啟動每個擷取
@@ -126,7 +133,7 @@ python -m pip install Pillow
 `StartWeapon` 和 `EndWeapon` 都包含端點。以下只重建火箭發射器：
 
 ```powershell
-.\docs\capture-weapons.ps1 -NoBuild -SkipProfiles -StartWeapon 8 -EndWeapon 8
+.\docs\capture-weapons.ps1 -NoBuild -SkipTurntables -StartWeapon 8 -EndWeapon 8
 ```
 
 武器索引如下：
@@ -152,7 +159,7 @@ python -m pip install Pillow
   -Game "C:\builds\Unreal99\Unreal99.exe" `
   -Python "C:\Python314\python.exe" `
   -OutputDirectory "C:\captures\weapons" `
-  -SkipProfiles
+  -SkipTurntables
 ```
 
 自訂輸出目錄適合試拍；正式 README 素材仍須放在 `docs/weapons/`。
@@ -182,21 +189,28 @@ python .\docs\build-weapon-webp.py `
   --output .\artifacts\rocket-primary.webp
 ```
 
-轉檔器預設要求正好 30 張 PNG；缺格、多格、輸出格數錯誤或尺寸不是 640×360 都會使命令失敗。
-只有刻意測試其他長度時才應以 `--expected-frames` 覆寫預期值。
+轉檔器預設要求正好 30 張 PNG；旋轉展示必須明確使用 `--expected-frames 36`。缺格、多格、輸出格數
+錯誤或尺寸不是 640×360 都會使命令失敗。只有刻意測試其他長度時才可覆寫成不同數值。
 
 ## 自動驗證與清理
 
 協調腳本在任何子程序傳回非零狀態時立即停止，也會確認來源遊戲存在並拒絕不安全的暫存路徑。
 每個 WebP 編碼後，Python 會重新開啟成品驗證：
 
-- 來源正好有 30 張 PNG。
-- 成品保留全部 30 個動畫畫格。
+- 實戰來源正好有 30 張 PNG；旋轉展示正好有 36 張 PNG。
+- 成品保留來源的全部 30 或 36 個動畫畫格。
 - 成品尺寸為 640×360。
 - 動畫設定為循環播放，每格 67 ms。
 
 完整批次完成後才刪除 `docs/weapons/.capture/`。Windows 防毒或索引服務偶爾會暫時保留剛讀過的
 PNG；清理會每 500 ms 重試，最長約一分鐘，避免已成功的轉檔因短暫 `Access is denied` 而失敗。
+
+### 1.0.0 擷取紀錄
+
+2026-08-09 的 1.0.0 批次以本文件命令完成 11 把武器、共 396 張旋轉來源畫格；轉檔後逐一重新開啟
+11 個 `*-turntable.webp`，確認每個成品皆為 640×360、36 格且循環播放。人工驗收另將每把武器的
+0°、90°、180°、270° 合成接觸表檢查，四個角度均不同，模型、握把／槍管等特徵與環形拾取台在
+整圈中都未被裁切或場景遮住。本次正式成品即為 README 目前引用的 11 個旋轉展示。
 
 ## 人工畫面驗收
 
@@ -219,16 +233,17 @@ PNG；清理會每 500 ms 重試，最長約一分鐘，避免已成功的轉檔
 - 狙擊步槍次要：縮放視角仍能看清敵人。
 - 救世主主要與次要：遠距投射物及大範圍爆炸。
 
-### 側面圖驗收
+### 360° 展示驗收
 
-任何武器模型或攝影棚路徑變更後，也要逐張檢查 `*-profile.jpg`：
+任何武器模型、Stalwart 幾何、拾取台或旋轉擷取路徑變更後，都要逐段檢查 `*-turntable.webp`：
 
-- 成品正好是 800×450，武器名稱對應正確。
-- 武器保持直立、側面朝向鏡頭，主要輪廓可立即辨認；不得平躺或只看見槍口端面。
-- 完整模型都在安全邊界內，槍管、握把、彈鼓、刀刃等辨識特徵沒有被固定裁切切掉。
-- 沒有玩家身體、HUD、第一人稱手臂、拾取台、關卡幾何、粒子或文字混入畫面。
-- 深色背景與冷暖輪廓光能分開模型邊緣，材質沒有過曝成白塊或暗到失去細節。
-- 圖片來自目前遊戲的實際 mesh、sections 和 materials；不得用舊截圖掩蓋模型變更。
+- 成品正好是 640×360、36 格、循環播放，武器名稱對應正確。
+- 四個四分之一圈角度以及中間畫格都不同；完整涵蓋 0°～350°，首尾銜接仍是 10°。
+- 武器保持遊戲內直立拾取姿態，從三分之四俯視角可看清頂面與側面，不可只剩槍口端面。
+- 完整模型都在安全邊界內，槍管、握把、彈鼓、刀刃等辨識特徵在整圈中都沒有被裁掉。
+- 真實 Stalwart 地板與環形拾取台清楚可見；沒有玩家身體、HUD、第一人稱手臂、粒子或文字。
+- 所有角度都維持足夠材質細節，沒有過曝白塊、全黑面、空白格或場景遮蔽。
+- 展示來自目前遊戲實際 mesh、sections、materials 與拾取台；不得用舊圖片補格。
 
 ## 何時必須重建
 
@@ -240,7 +255,7 @@ PNG；清理會每 500 ms 重試，最長約一分鐘，避免已成功的轉檔
 - Gothic 幾何、碰撞、導航節點、開闊度或站位選擇。
 - `DocumentationFireMode`、攝影玩家無敵規則或 `--weaponfootage` 參數。
 - WebP 尺寸、畫格數、品質或 README 武器指南版面。
-- `SubmitWeaponProfile`、武器本地姿態、攝影棚燈光、42° 鏡頭或固定裁切座標。
+- `SubmitWeaponTurntable`、武器本地姿態、拾取台、Stalwart 展示位置、38° 鏡頭或旋轉步幅。
 
 ## 版本控制程序
 
@@ -257,7 +272,7 @@ dotnet build .\UnrealClone.slnx -c Release --no-restore
 - `src/Unreal99/App.cs`、`PlayerController.cs`、`Pawn.cs`、`GameWorld.cs` 中受影響的擷取邏輯。
 - `docs/capture-weapons.ps1` 與 `docs/build-weapon-webp.py`。
 - 本文件與 README 的武器指南或指令說明。
-- 所有實際更新的 `docs/weapons/*-primary.webp`、`*-secondary.webp` 和 `*-profile.jpg`。
+- 所有實際更新的 `docs/weapons/*-primary.webp`、`*-secondary.webp` 和 `*-turntable.webp`。
 
 提交前以 `git diff --cached --stat` 再看一次範圍。動畫是文件的實際輸入，不可只提交產生器而漏掉
 成品；同樣也不可只提交二進位成品而不提交產生它們所需的程式碼與說明。

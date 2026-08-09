@@ -46,6 +46,20 @@ dotnet src\Unreal99\bin\Release\net10.0\Unreal99.dll `
     --traversaltest 3600 artifacts\single-map.png --map 7 --mode 0
 ```
 
+### 投射物瞄準物理回歸
+
+走圖測試驗證實際對戰整合；另以無視窗的 `--aimtest` 驗證提前瞄準的數學與投射物資料是否一致：
+
+```powershell
+dotnet src\Unreal99\bin\Release\net10.0\Unreal99.dll --aimtest
+```
+
+此測試逐案模擬投射物與目標抵達攔截時間的位置，涵蓋靜止目標、橫向移動、受重力的空中目標、
+具有額外向上初速及下墜的彈道武器，以及速度超過投射物的不可達目標。可解案例的誤差必須不超過
+`0.02 m`，不可達案例必須安全回退，不得產生無效方向；結束碼 `0` 與 `AIM_TEST PASS` 缺一不可。
+修改電腦瞄準、武器投射物速度、重力、額外初速或壽命時，必須同時執行此測試與至少一張地圖的
+3600 畫格實戰走圖測試。
+
 ## 自動判定門檻
 
 遊戲每 0.2 秒採樣主角位置，並在結束時輸出一行 `TRAVERSAL_RESULT` JSON。下列條件全部成立才會

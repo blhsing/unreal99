@@ -1,16 +1,20 @@
 using System.Text;
 using Unreal99;
+using Unreal99.Game;
 using Unreal99.Platform;
 using Unreal99.UI;
 
 // Console output includes Traditional Chinese status lines.
 try { Console.OutputEncoding = Encoding.UTF8; } catch (IOException) { /* redirected stdout */ }
 
-Console.WriteLine($"{Loc.GameTitle} — {Loc.GameSubtitle}");
+Console.WriteLine($"{Loc.GameTitle} — {Loc.GameSubtitle} · {Loc.GameVersionLabel}");
 
 // Installer mode: write the icon and the Start Menu entry, then exit without opening a window.
 if (args.Contains("--install-shortcut")) return Installer.InstallStartMenuShortcut(args) ? 0 : 1;
 if (args.Contains("--uninstall-shortcut")) return Installer.UninstallStartMenuShortcut() ? 0 : 1;
+if (args.Contains("--aimtest")) return BotAimPrediction.RunSelfTest();
+if (args.Contains("--bindingtest"))
+    return BindingProfile.RunSelfTest() | SettingsStore.RunPlayerThreeMigrationSelfTest();
 
 using var app = new App();
 try

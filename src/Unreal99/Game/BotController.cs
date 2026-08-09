@@ -8,6 +8,159 @@ namespace Unreal99.Game;
 public enum BotState { Roam, SeekItem, Attack, Retreat, Hunt, Camp }
 
 /// <summary>
+/// Solves the first physically reachable projectile interception. The relative equation includes
+/// the target's current velocity and acceleration as well as the projectile's gravity and fixed
+/// upward launch boost; its result is therefore the direction to fire, not merely the target's
+/// estimated future position.
+/// </summary>
+internal static class BotAimPrediction
+{
+    internal readonly record struct Solution(
+        Vector3 AimPoint, Vector3 ProjectedTargetPoint, float TravelTime, float MissDistance);
+
+    internal static bool TrySolveIntercept(
+        Vector3 origin,
+        Vector3 targetPoint,
+        Vector3 targetVelocity,
+        Vector3 targetAcceleration,
+        float projectileSpeed,
+        Vector3 projectileLaunchBoost,
+        Vector3 projectileAcceleration,
+        float maximumTravelTime,
+        out Solution solution)
+    {
+        solution = default;
+        if (projectileSpeed <= 0.01f || maximumTravelTime <= 0.01f) return false;
+
+        Vector3 relativePosition = targetPoint - origin;
+        if (relativePosition.LengthSquared() <= 1e-6f)
+        {
+            solution = new Solution(targetPoint, targetPoint, 0f, 0f);
+            return true;
+        }
+
+        Vector3 relativeVelocity = targetVelocity - projectileLaunchBoost;
+        Vector3 relativeAcceleration = targetAcceleration - projectileAcceleration;
+
+        static float Equation(Vector3 p, Vector3 v, Vector3 a, float speed, float time)
+        {
+            Vector3 required = p + v * time + a * (0.5f * time * time);
+            return required.Length() - speed * time;
+        }
+
+        // With equal/no acceleration this is the standard exact moving-target quadratic. It is
+        // both cheaper and more accurate than scanning, which covers the genuinely ballistic case.
+        float interceptTime = -1f;
+        if (relativeAcceleration.LengthSquared() <= 1e-6f)
+        {
+            float a = Vector3.Dot(relativeVelocity, relativeVelocity)
+                - projectileSpeed * projectileSpeed;
+            float b = 2f * Vector3.Dot(relativePosition, relativeVelocity);
+            float c = Vector3.Dot(relativePosition, relativePosition);
+            if (MathF.Abs(a) <= 1e-6f)
+            {
+                if (MathF.Abs(b) > 1e-6f) interceptTime = -c / b;
+            }
+            else
+            {
+                float discriminant = b * b - 4f * a * c;
+                if (discriminant >= 0f)
+                {
+                    float root = MathF.Sqrt(discriminant);
+                    float t0 = (-b - root) / (2f * a);
+                    float t1 = (-b + root) / (2f * a);
+                    if (t0 > 0.001f) interceptTime = t0;
+                    if (t1 > 0.001f && (interceptTime < 0f || t1 < interceptTime)) interceptTime = t1;
+                }
+            }
+        }
+        else
+        {
+            // Gravity turns the equation quartic after squaring. Find its earliest positive root
+            // directly; an early root is the useful low arc and avoids choosing a late lob when
+            // both are mathematically possible.
+            const int searchSteps = 40;
+            float previousTime = 0f;
+            float previousValue = relativePosition.Length();
+            for (int i = 1; i <= searchSteps; i++)
+            {
+                float time = maximumTravelTime * i / searchSteps;
+                float value = Equation(relativePosition, relativeVelocity, relativeAcceleration,
+                    projectileSpeed, time);
+                if (value <= 0f && previousValue > 0f)
+                {
+                    float low = previousTime;
+                    float high = time;
+                    for (int iteration = 0; iteration < 20; iteration++)
+                    {
+                        float middle = (low + high) * 0.5f;
+                        if (Equation(relativePosition, relativeVelocity, relativeAcceleration,
+                            projectileSpeed, middle) > 0f)
+                            low = middle;
+                        else
+                            high = middle;
+                    }
+                    interceptTime = (low + high) * 0.5f;
+                    break;
+                }
+                previousTime = time;
+                previousValue = value;
+            }
+        }
+
+        if (interceptTime <= 0.001f || interceptTime > maximumTravelTime) return false;
+
+        Vector3 requiredDisplacement = relativePosition + relativeVelocity * interceptTime
+            + relativeAcceleration * (0.5f * interceptTime * interceptTime);
+        Vector3 aimDirection = MathX.SafeNormalize(requiredDisplacement, MathX.Forward);
+        Vector3 projectedTarget = targetPoint + targetVelocity * interceptTime
+            + targetAcceleration * (0.5f * interceptTime * interceptTime);
+        Vector3 projectedProjectile = origin + aimDirection * projectileSpeed * interceptTime
+            + projectileLaunchBoost * interceptTime
+            + projectileAcceleration * (0.5f * interceptTime * interceptTime);
+        float miss = Vector3.Distance(projectedProjectile, projectedTarget);
+        solution = new Solution(origin + requiredDisplacement, projectedTarget, interceptTime, miss);
+        return miss <= 0.05f;
+    }
+
+    /// <summary>Headless deterministic regression gate, invoked by <c>--aimtest</c>.</summary>
+    internal static int RunSelfTest()
+    {
+        int failures = 0;
+
+        void Check(string name, Vector3 origin, Vector3 target, Vector3 velocity,
+            Vector3 targetAcceleration, float speed, Vector3 launchBoost,
+            Vector3 projectileAcceleration, float lifetime, bool shouldSolve = true)
+        {
+            bool solved = TrySolveIntercept(origin, target, velocity, targetAcceleration, speed,
+                launchBoost, projectileAcceleration, lifetime, out Solution result);
+            bool passed = solved == shouldSolve && (!solved || result.MissDistance <= 0.02f);
+            if (!passed) failures++;
+            Console.WriteLine($"AIM_CASE {name} {(passed ? "PASS" : "FAIL")} " +
+                $"solved={solved} time={(solved ? result.TravelTime : 0f):F4} " +
+                $"miss={(solved ? result.MissDistance : 0f):F5}");
+        }
+
+        Check("stationary", Vector3.Zero, new Vector3(30f, 1f, 0f), Vector3.Zero,
+            Vector3.Zero, 30f, Vector3.Zero, Vector3.Zero, 5f);
+        Check("lateral", Vector3.Zero, new Vector3(30f, 1f, 0f), new Vector3(0f, 0f, 7f),
+            Vector3.Zero, 30f, Vector3.Zero, Vector3.Zero, 5f);
+        Check("airborne-target", new Vector3(0f, 2f, 0f), new Vector3(24f, 8f, 0f),
+            new Vector3(2f, 5f, 4f), -MathX.Up * Physics.Gravity, 34f,
+            Vector3.Zero, Vector3.Zero, 6f);
+        Check("ballistic-bio", new Vector3(0f, 2f, 0f), new Vector3(25f, 2f, 0f),
+            new Vector3(0f, 0f, 5f), Vector3.Zero, 26f,
+            MathX.Up * ProjectileFactory.VerticalLaunchSpeed(ProjectileKind.BioGlob, 26f),
+            -MathX.Up * Physics.Gravity, ProjectileFactory.Lifetime(ProjectileKind.BioGlob));
+        Check("unreachable", Vector3.Zero, new Vector3(12f, 0f, 0f), new Vector3(40f, 0f, 0f),
+            Vector3.Zero, 20f, Vector3.Zero, Vector3.Zero, 4f, shouldSolve: false);
+
+        Console.WriteLine($"AIM_TEST {(failures == 0 ? "PASS" : "FAIL")} failures={failures}");
+        return failures == 0 ? 0 : 1;
+    }
+}
+
+/// <summary>
 /// Bot AI: plans on the level's waypoint graph, steers locally, picks targets and weapons,
 /// and aims with a skill-scaled error model. Skill affects reaction time, aim jitter,
 /// projectile leading, dodge frequency and situational awareness.
@@ -684,15 +837,25 @@ public sealed class BotController : Controller
                     ? def.Primary.ProjectileSpeed : 0f;
                 if (projectileSpeed > 0f)
                 {
-                    // Lead the target, scaled by skill so weak bots miss moving targets.
-                    float dist = Vector3.Distance(Pawn.EyePosition, aimAt);
-                    float travel = dist / projectileSpeed;
-                    aimAt += target.Velocity * travel * LeadAccuracy;
-                    // Compensate for projectile drop on ballistic weapons.
-                    if (def.Primary.Projectile is ProjectileKind.Grenade or ProjectileKind.FlakShell
-                        or ProjectileKind.BioGlob)
-                        aimAt += MathX.Up * (0.5f * Physics.Gravity * world.Level.GravityScale
-                            * travel * travel * LeadAccuracy);
+                    ProjectileKind projectile = def.Primary.Projectile;
+                    float gravity = Physics.Gravity * world.Level.GravityScale;
+                    Vector3 targetAcceleration = !target.OnGround && !target.InWater
+                        ? -MathX.Up * gravity
+                        : Vector3.Zero;
+                    Vector3 projectileAcceleration = ProjectileFactory.AffectedByGravity(projectile)
+                        ? -MathX.Up * gravity
+                        : Vector3.Zero;
+                    Vector3 launchBoost = MathX.Up
+                        * ProjectileFactory.VerticalLaunchSpeed(projectile, projectileSpeed);
+                    if (BotAimPrediction.TrySolveIntercept(Pawn.EyePosition, aimAt,
+                        target.Velocity, targetAcceleration, projectileSpeed, launchBoost,
+                        projectileAcceleration, ProjectileFactory.Lifetime(projectile),
+                        out BotAimPrediction.Solution prediction))
+                    {
+                        // Lower skill tiers deliberately apply only part of the physically exact
+                        // lead. Godlike uses the complete speed/direction/gravity projection.
+                        aimAt = Vector3.Lerp(aimAt, prediction.AimPoint, LeadAccuracy);
+                    }
                 }
             }
 

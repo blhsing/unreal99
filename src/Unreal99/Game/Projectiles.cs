@@ -139,6 +139,39 @@ public sealed class ProjectileModels : IDisposable
 
 public static class ProjectileFactory
 {
+    /// <summary>
+    /// Returns whether the live projectile simulation applies arena gravity to this kind.
+    /// Bot interception uses this same source of truth so its ballistic compensation cannot
+    /// silently drift from the projectile it is trying to place on target.
+    /// </summary>
+    public static bool AffectedByGravity(ProjectileKind kind) => kind is
+        ProjectileKind.Grenade or ProjectileKind.FlakShell or ProjectileKind.FlakShard
+        or ProjectileKind.BioGlob;
+
+    /// <summary>Extra upward launch velocity added after the aimed muzzle velocity.</summary>
+    public static float VerticalLaunchSpeed(ProjectileKind kind, float projectileSpeed) => kind switch
+    {
+        ProjectileKind.Grenade => projectileSpeed * 0.24f,
+        ProjectileKind.FlakShell => projectileSpeed * 0.20f,
+        ProjectileKind.BioGlob => projectileSpeed * 0.13f,
+        _ => 0f,
+    };
+
+    /// <summary>Maximum simulated flight time for one projectile kind.</summary>
+    public static float Lifetime(ProjectileKind kind) => kind switch
+    {
+        ProjectileKind.Rocket => 6f,
+        ProjectileKind.Grenade => 2.6f,
+        ProjectileKind.FlakShell => 3.2f,
+        ProjectileKind.FlakShard => 1.5f,
+        ProjectileKind.BioGlob => 7f,
+        ProjectileKind.ShockBall => 5f,
+        ProjectileKind.PlasmaBolt => 2.4f,
+        ProjectileKind.RipperBlade => 3.2f,
+        ProjectileKind.Warhead => 9f,
+        _ => 0f,
+    };
+
     /// <summary>Fills in the per-kind behaviour for a projectile spawned from <paramref name="fire"/>.</summary>
     public static Projectile Create(ProjectileKind kind, in FireDef fire, Vector3 position, Vector3 direction,
         int ownerId, Team ownerTeam, Vector3 tint, float damageScale, Rng rng)
@@ -160,48 +193,47 @@ public static class ProjectileFactory
             DamageScale = damageScale,
             Color = tint,
             ArmDelay = 0.02f,
+            AffectedByGravity = AffectedByGravity(kind),
+            MaxLife = Lifetime(kind),
         };
 
         switch (kind)
         {
             case ProjectileKind.Rocket:
-                p.Radius = 0.14f; p.MaxLife = 6f; p.AffectedByGravity = false; p.Spin = 6f;
+                p.Radius = 0.14f; p.Spin = 6f;
                 break;
             case ProjectileKind.Grenade:
-                p.Radius = 0.12f; p.MaxLife = 2.6f; p.AffectedByGravity = true;
+                p.Radius = 0.12f;
                 p.BouncesLeft = 4; p.ExplodeOnTimeout = true; p.Spin = 12f;
-                p.Velocity += new Vector3(0, fire.ProjectileSpeed * 0.24f, 0);
                 break;
             case ProjectileKind.FlakShell:
-                p.Radius = 0.11f; p.MaxLife = 3.2f; p.AffectedByGravity = true;
+                p.Radius = 0.11f;
                 p.BouncesLeft = 1; p.ExplodeOnTimeout = true; p.Spin = 9f;
-                p.Velocity += new Vector3(0, fire.ProjectileSpeed * 0.20f, 0);
                 break;
             case ProjectileKind.FlakShard:
-                p.Radius = 0.06f; p.MaxLife = 1.5f; p.AffectedByGravity = true;
+                p.Radius = 0.06f;
                 p.BouncesLeft = 2; p.Spin = 22f;
                 // Slight speed variance so a blast reads as a spray rather than a wall.
                 p.Velocity *= rng.Range(0.82f, 1.18f);
                 break;
             case ProjectileKind.BioGlob:
-                p.Radius = 0.13f; p.MaxLife = 7f; p.AffectedByGravity = true;
+                p.Radius = 0.13f;
                 p.StickOnImpact = true; p.ExplodeOnTimeout = true; p.Spin = 4f;
-                p.Velocity += new Vector3(0, fire.ProjectileSpeed * 0.13f, 0);
                 break;
             case ProjectileKind.ShockBall:
-                p.Radius = 0.24f; p.MaxLife = 5f; p.ComboTarget = true; p.Spin = 3f;
+                p.Radius = 0.24f; p.ComboTarget = true; p.Spin = 3f;
                 break;
             case ProjectileKind.PlasmaBolt:
-                p.Radius = 0.10f; p.MaxLife = 2.4f; p.Spin = 14f;
+                p.Radius = 0.10f; p.Spin = 14f;
                 break;
             case ProjectileKind.RipperBlade:
-                p.Radius = 0.14f; p.MaxLife = 3.2f; p.BouncesLeft = 5; p.Spin = 34f;
-                p.AffectedByGravity = false;
+                p.Radius = 0.14f; p.BouncesLeft = 5; p.Spin = 34f;
                 break;
             case ProjectileKind.Warhead:
-                p.Radius = 0.30f; p.MaxLife = 9f; p.Spin = 2f;
+                p.Radius = 0.30f; p.Spin = 2f;
                 break;
         }
+        p.Velocity += MathX.Up * VerticalLaunchSpeed(kind, fire.ProjectileSpeed);
         p.Life = p.MaxLife;
         return p;
     }

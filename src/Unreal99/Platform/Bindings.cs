@@ -45,9 +45,9 @@ public sealed class BindingProfile
     }
 
     /// <summary>
-    /// Default schemes. Player one takes the usual left-hand WASD cluster; player two takes the
-    /// arrow/navigation cluster so both can share a single keyboard. Firing always comes from the
-    /// player's own mouse, so two mice give two fully independent aimers.
+    /// Default schemes. Player one takes the usual left-hand WASD cluster, player two takes the
+    /// arrow/navigation cluster, and player three takes YGHJ. Firing always comes from the
+    /// player's own mouse, so three mice give three fully independent aimers.
     /// </summary>
     public static BindingProfile CreateDefault(int playerIndex)
     {
@@ -76,7 +76,7 @@ public sealed class BindingProfile
             for (int i = 0; i < slots.Length; i++)
                 p[GameAction.Weapon1 + i] = InputBinding.OnKey(slots[i]);
         }
-        else
+        else if (playerIndex == 1)
         {
             p[GameAction.MoveForward] = InputBinding.OnKey(Key.Up);
             p[GameAction.MoveBack] = InputBinding.OnKey(Key.Down);
@@ -95,7 +95,65 @@ public sealed class BindingProfile
             // Weapon slots stay unbound here: the numpad is taken by turning, and this profile
             // cycles with PageUp/PageDown instead. They can be bound from the options screen.
         }
+        else if (playerIndex == 2)
+        {
+            // Deliberately distinct from both WASD and the arrow cluster so three players can
+            // share one keyboard while three raw-input mice independently drive their views.
+            p[GameAction.MoveForward] = InputBinding.OnKey(Key.Y);
+            p[GameAction.MoveBack] = InputBinding.OnKey(Key.H);
+            p[GameAction.MoveLeft] = InputBinding.OnKey(Key.G);
+            p[GameAction.MoveRight] = InputBinding.OnKey(Key.J);
+            p[GameAction.Jump] = InputBinding.OnKey(Key.M);
+            p[GameAction.Crouch] = InputBinding.OnKey(Key.N);
+            p[GameAction.NextWeapon] = InputBinding.OnKey(Key.U);
+            p[GameAction.PrevWeapon] = InputBinding.OnKey(Key.T);
+            p[GameAction.Scoreboard] = InputBinding.OnKey(Key.B);
+        }
+        else
+        {
+            // Player four normally uses a gamepad or a separately assigned keyboard. Keep the
+            // established navigation-key fallback for existing four-player configurations.
+            p[GameAction.MoveForward] = InputBinding.OnKey(Key.Up);
+            p[GameAction.MoveBack] = InputBinding.OnKey(Key.Down);
+            p[GameAction.MoveLeft] = InputBinding.OnKey(Key.Left);
+            p[GameAction.MoveRight] = InputBinding.OnKey(Key.Right);
+            p[GameAction.LookLeft] = InputBinding.OnKey(Key.Keypad4);
+            p[GameAction.LookRight] = InputBinding.OnKey(Key.Keypad6);
+            p[GameAction.LookUp] = InputBinding.OnKey(Key.Keypad8);
+            p[GameAction.LookDown] = InputBinding.OnKey(Key.Keypad5);
+            p[GameAction.Jump] = InputBinding.OnKey(Key.ShiftRight);
+            p[GameAction.Crouch] = InputBinding.OnKey(Key.ControlRight);
+            p[GameAction.NextWeapon] = InputBinding.OnKey(Key.PageUp);
+            p[GameAction.PrevWeapon] = InputBinding.OnKey(Key.PageDown);
+            p[GameAction.Scoreboard] = InputBinding.OnKey(Key.Delete);
+        }
         return p;
+    }
+
+    /// <summary>Headless regression for the three-player shared-keyboard defaults.</summary>
+    public static int RunSelfTest()
+    {
+        BindingProfile p3 = CreateDefault(2);
+        (GameAction Action, Key Key)[] expected =
+        [
+            (GameAction.MoveForward, Key.Y), (GameAction.MoveBack, Key.H),
+            (GameAction.MoveLeft, Key.G), (GameAction.MoveRight, Key.J),
+            (GameAction.PrevWeapon, Key.T), (GameAction.NextWeapon, Key.U),
+            (GameAction.Jump, Key.M), (GameAction.Crouch, Key.N),
+            (GameAction.Scoreboard, Key.B),
+        ];
+        bool passed = p3[GameAction.Fire] == InputBinding.OnMouse(0)
+            && p3[GameAction.AltFire] == InputBinding.OnMouse(1);
+        foreach (var item in expected)
+        {
+            bool itemPassed = p3[item.Action] == InputBinding.OnKey(item.Key);
+            Console.WriteLine($"玩家三預設 {BindingNames.Action(item.Action),-8}: " +
+                              $"{BindingNames.Control(p3[item.Action]),-8} " +
+                              $"{(itemPassed ? "通過" : "失敗")}");
+            passed &= itemPassed;
+        }
+        Console.WriteLine($"玩家三滑鼠開火/次要開火: {(passed ? "通過" : "失敗")}");
+        return passed ? 0 : 1;
     }
 
     /// <summary>
@@ -247,6 +305,7 @@ public static class VirtualKeys
             Key.End => 0x23,
             Key.PageUp => 0x21,
             Key.PageDown => 0x22,
+            Key.PrintScreen => 0x2C,
             Key.Left => 0x25,
             Key.Up => 0x26,
             Key.Right => 0x27,
@@ -298,6 +357,7 @@ public static class VirtualKeys
             0x23 => Key.End,
             0x21 => Key.PageUp,
             0x22 => Key.PageDown,
+            0x2C => Key.PrintScreen,
             0x25 => Key.Left,
             0x26 => Key.Up,
             0x27 => Key.Right,
