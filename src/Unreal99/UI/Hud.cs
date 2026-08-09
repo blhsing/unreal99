@@ -22,7 +22,14 @@ public sealed class Hud
     private static readonly uint PanelEdge = UiRenderer.Rgba(0.55f, 0.72f, 0.95f, 0.28f);
     private static readonly Team[] FlagTeams = [Team.Red, Team.Blue];
 
-    private static bool CompactLayout(int width, int height) => height <= 520 || width <= 680;
+    // A native 1920x1080 four-player game yields 960x540 quadrants. Treat those (and either
+    // orientation of two-player split screen) as compact so objective and inventory bands never
+    // fall back to the single-view coordinates and overlap.
+    private static bool CompactLayout(int width, int height) => height <= 600 || width <= 1000;
+    private static bool CompactBottomRow(int width, int height)
+        => CompactLayout(width, height) && width >= 880;
+    private static float CompactSidePanelWidth(int width, int height)
+        => CompactBottomRow(width, height) ? MathF.Min(170f, width * 0.18f) : MathF.Min(242f, width * 0.43f);
     private static float LayoutFont(float requested) => MathF.Max(UiRenderer.MinimumTextSize, requested);
 
     private static string FitText(UiRenderer ui, int face, float size, string text, float maximumWidth)
@@ -367,8 +374,9 @@ public sealed class Hud
     private void DrawCompactHealthArmor(UiRenderer ui, Pawn pawn, int width, int height, Vector3 accent)
     {
         const float pad = 10f;
-        float panelW = MathF.Min(242f, width * 0.43f);
-        const float panelH = 66f;
+        bool bottomRow = CompactBottomRow(width, height);
+        float panelW = CompactSidePanelWidth(width, height);
+        float panelH = bottomRow ? 74f : 66f;
         float x = pad;
         float y = height - pad - panelH;
         float font = LayoutFont(22f);
@@ -385,6 +393,33 @@ public sealed class Hud
             : new Vector3(1f, 0.25f, 0.2f);
         Vector3 armorColor = pawn.HasShieldBelt ? new Vector3(1f, 0.45f, 1f)
             : new Vector3(1f, 0.72f, 0.25f);
+
+        if (bottomRow)
+        {
+            // Three short rows preserve full-sized text and three-digit values in the narrowed
+            // side card. The thin bars remain visible beneath their corresponding value rows.
+            const float valueLeft = 70f;
+            ui.Text(FaceRegular, font, x + 9f, y + 25f, Loc.HudHealth,
+                UiRenderer.Rgba(0.75f, 0.82f, 0.92f, 0.95f));
+            ui.Text(FaceBold, font, x + panelW - 9f, y + 25f, ((int)health).ToString(),
+                UiRenderer.Rgba(healthColor), TextAlign.Right);
+            ui.Rect(x + valueLeft, y + 45f, panelW - valueLeft - 9f, 3f,
+                UiRenderer.Rgba(0.08f, 0.09f, 0.12f, 0.85f));
+            ui.Rect(x + valueLeft, y + 45f,
+                (panelW - valueLeft - 9f) * MathX.Saturate(health / MathF.Max(1f, pawn.MaxHealth)), 3f,
+                UiRenderer.Rgba(healthColor, 0.95f));
+            ui.Text(FaceRegular, font, x + 9f, y + 48f, Loc.HudArmor,
+                UiRenderer.Rgba(0.75f, 0.82f, 0.92f, 0.95f));
+            ui.Text(FaceBold, font, x + panelW - 9f, y + 48f, ((int)pawn.Armor).ToString(),
+                UiRenderer.Rgba(armorColor), TextAlign.Right);
+            ui.Rect(x + valueLeft, y + 69f, panelW - valueLeft - 9f, 3f,
+                UiRenderer.Rgba(0.08f, 0.09f, 0.12f, 0.85f));
+            ui.Rect(x + valueLeft, y + 69f,
+                (panelW - valueLeft - 9f) * MathX.Saturate(pawn.Armor / 150f), 3f,
+                UiRenderer.Rgba(armorColor, 0.95f));
+            return;
+        }
+
         float split = x + panelW * 0.52f;
         ui.Text(FaceRegular, font, x + 9f, y + 30f, Loc.HudHealth,
             UiRenderer.Rgba(0.75f, 0.82f, 0.92f, 0.95f));
@@ -455,7 +490,7 @@ public sealed class Hud
     private void DrawCompactAmmoWeapon(UiRenderer ui, Pawn pawn, int width, int height, Vector3 accent)
     {
         const float pad = 10f;
-        float panelW = MathF.Min(242f, width * 0.43f);
+        float panelW = CompactSidePanelWidth(width, height);
         const float panelH = 40f;
         float x = width - pad - panelW;
         float y = height - pad - panelH;
@@ -488,18 +523,21 @@ public sealed class Hud
         int width, int height, float s, Vector3 accent)
     {
         bool compact = CompactLayout(width, height);
+        bool bottomRow = CompactBottomRow(width, height);
         WeaponKind[] order = Weapons.CycleOrder;
         float gap = compact ? 3f : 4f * s;
-        float available = compact
-            ? width - 16f
+        float available = bottomRow
+            ? width - (CompactSidePanelWidth(width, height) + 18f) * 2f
+            : compact ? width - 16f
             : width - MathF.Min(width * 0.38f, 560f * s);
         float cardWidth = MathX.Clamp(
             (available - gap * (order.Length - 1)) / order.Length,
-            compact ? 48f : 58f, compact ? 70f : 84f * s);
-        float cardHeight = compact ? 64f : MathF.Max(70f, 70f * s);
+            bottomRow ? 36f : compact ? 48f : 58f, compact ? 70f : 84f * s);
+        float cardHeight = bottomRow ? 74f : compact ? 64f : MathF.Max(70f, 70f * s);
         float totalWidth = order.Length * cardWidth + (order.Length - 1) * gap;
         float startX = width * 0.5f - totalWidth * 0.5f;
-        float y = compact ? height - 151f : height - cardHeight - 10f * s;
+        float y = bottomRow ? height - cardHeight - 10f
+            : compact ? height - 151f : height - cardHeight - 10f * s;
         float font = LayoutFont(compact ? 22f : 18f * s);
 
         for (int i = 0; i < order.Length; i++)
@@ -834,7 +872,8 @@ public sealed class Hud
         float total = points.Count * cardWidth + (points.Count - 1) * gap;
         float x = width * 0.5f - total * 0.5f;
         float cardHeight = MathF.Max(52f, 48f * s);
-        float y = compact ? height - 216f : height - 152f * s;
+        float y = CompactBottomRow(width, height) ? height - 151f
+            : compact ? height - 216f : height - 152f * s;
 
         for (int i = 0; i < points.Count; i++)
         {
@@ -884,7 +923,8 @@ public sealed class Hud
             : 180f * s;
         float cardHeight = MathF.Max(54f, 48f * s);
         float x = width * 0.5f - (cardWidth * 2f + gap) * 0.5f;
-        float y = compact ? height - 216f : height - 152f * s;
+        float y = CompactBottomRow(width, height) ? height - 151f
+            : compact ? height - 216f : height - 152f * s;
         foreach (Team team in FlagTeams)
         {
             if (!world.FlagHome.TryGetValue(team, out Vector3 flagHome)) continue;

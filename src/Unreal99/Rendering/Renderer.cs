@@ -496,7 +496,8 @@ public sealed class Renderer : IDisposable
     }
 
     /// <summary>Renders one player's view into <paramref name="rect"/> of the default framebuffer.</summary>
-    public void RenderView(int viewIndex, in Camera camera, RenderScene scene, ViewportRect rect, ViewEffects fx)
+    public void RenderView(int viewIndex, in Camera camera, RenderScene scene, ViewportRect rect, ViewEffects fx,
+        Framebuffer output = null)
     {
         var t = GetTargets(viewIndex, rect.Width, rect.Height);
 
@@ -570,7 +571,7 @@ public sealed class Renderer : IDisposable
         Particles.Render(camera, BlendMode.Additive);
 
         // ---- post ----
-        PostProcess(t, camera, scene, fx, rect);
+        PostProcess(t, camera, scene, fx, rect, output);
     }
 
     /// <summary>
@@ -695,7 +696,8 @@ public sealed class Renderer : IDisposable
         DrawCallCount++;
     }
 
-    private void PostProcess(ViewTargets t, in Camera camera, RenderScene scene, ViewEffects fx, ViewportRect rect)
+    private void PostProcess(ViewTargets t, in Camera camera, RenderScene scene, ViewEffects fx,
+        ViewportRect rect, Framebuffer output)
     {
         _gl.Disable(EnableCap.DepthTest);
         _gl.Disable(EnableCap.CullFace);
@@ -844,8 +846,9 @@ public sealed class Renderer : IDisposable
         (Settings.EffectiveSsao ? t.SsaoBlur.Color[0] : t.Scene.Color[0]).Bind(4);
         FullscreenPass(_composite);
 
-        // ---- FXAA straight into the window's viewport rect ----
-        Framebuffer.BindDefault(_gl);
+        // ---- FXAA into the frame-composition target (or directly to the window as fallback) ----
+        if (output != null) output.Bind(setViewport: false);
+        else Framebuffer.BindDefault(_gl);
         _gl.Viewport(rect.X, rect.Y, (uint)rect.Width, (uint)rect.Height);
         _fxaa.Use();
         _fxaa.Set("uTex", 0);

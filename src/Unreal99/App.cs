@@ -32,6 +32,8 @@ public sealed class App : IDisposable
     private Texture2D _logoTexture;
     private readonly Texture2D[] _mapThumbnails = new Texture2D[(int)MapId.Count];
     private Renderer _renderer;
+    private Rendering.Framebuffer _presentFrame;
+    private nint _nativeWindowHandle;
     private AudioSystem _audio;
     private readonly Hud _hud = new();
     private readonly Menu _menu = new();
@@ -462,6 +464,7 @@ public sealed class App : IDisposable
         nint hwnd = 0;
         try { if (_window.Native?.Win32 is { } win32) hwnd = win32.Hwnd; }
         catch (Exception) { hwnd = 0; }
+        _nativeWindowHandle = hwnd;
         bool raw = hwnd != 0 && _input.TryEnableRawInput(hwnd);
         if (raw && _inputTest) _input.Raw.AcceptBackgroundInput = true;
         Console.WriteLine(raw
@@ -1962,8 +1965,8 @@ public sealed class App : IDisposable
         Vector3 focus = _players.Count > 0 ? _players[0].Pawn.Position : _level.Center;
         _renderer.BeginFrame(_scene, focus, _time);
 
-        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
-        _gl.Viewport(0, 0, (uint)Width, (uint)Height);
+        EnsurePresentFrame();
+        _presentFrame.Bind();
         _gl.ClearColor(0f, 0f, 0f, 1f);
         _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
@@ -1979,13 +1982,14 @@ public sealed class App : IDisposable
             fx.ChromaticBoost = pawn.Alive ? pawn.DamageFlash * 0.004f : 0f;
 
             var rect = viewports[Math.Min(i, viewports.Length - 1)];
-            _renderer.RenderView(i, _cameras[i], _scene, rect, fx);
+            _renderer.RenderView(i, _cameras[i], _scene, rect, fx, _presentFrame);
         }
 
         // --- HUD per view ---
         for (int i = 0; i < viewCount && !_noHud && _weaponGuideCapture < 0; i++)
         {
             var rect = viewports[Math.Min(i, viewports.Length - 1)];
+            _presentFrame.Bind(setViewport: false);
             _gl.Viewport(rect.X, rect.Y, (uint)rect.Width, (uint)rect.Height);
             _ui.Begin(rect.Width, rect.Height);
             _hud.Draw(_ui, _world, _players[i].Pawn, _players[i], _cameras[i], rect.Width, rect.Height, dt,
@@ -1994,11 +1998,17 @@ public sealed class App : IDisposable
         }
 
         // --- split-screen dividers and any leftover quadrant ---
+        _presentFrame.Bind(setViewport: false);
         _gl.Viewport(0, 0, (uint)Width, (uint)Height);
         _ui.Begin(Width, Height);
         DrawSplitScreenChrome(viewCount, viewports);
         DrawStatusLine();
         _ui.End();
+
+        // Present from an ordinary colour texture. Besides keeping split-screen composition in
+        // one place, this gives Print Screen/F12 a reliable capture source on fullscreen Intel
+        // drivers whose default front and back buffers both read as black.
+        _renderer.Blit(_presentFrame.Color[0], new ViewportRect(0, 0, Width, Height));
 
         // --- audio listener follows player one ---
         if (_audio != null && _players.Count > 0)
@@ -2006,6 +2016,18 @@ public sealed class App : IDisposable
             var cam = _cameras[0];
             _audio.SetListener(cam.Position, cam.Forward, cam.Up, _players[0].Pawn.Velocity);
         }
+    }
+
+    private void EnsurePresentFrame()
+    {
+        if (_presentFrame == null)
+        {
+            _presentFrame = new Rendering.Framebuffer(_gl, Width, Height,
+                [(InternalFormat.Rgba8, PixelFormat.Rgba, PixelType.UnsignedByte)],
+                depth: false, depthAsTexture: false, linear: true);
+            return;
+        }
+        _presentFrame.Resize(Width, Height);
     }
 
     private Camera BuildCamera(Pawn pawn, PlayerController controller, ViewportRect rect, float dt)
@@ -2650,30 +2672,51 @@ public sealed class App : IDisposable
         _pendingScreenshots.Add(path);
     }
 
-    private unsafe void SaveScreenshot(string path, bool quiet = false)
+    private unsafe void SaveScreenshot(string path, bool quiet = false, bool copyToClipboard = false)
     {
         int w = Width, h = Height;
         var pixels = new byte[w * h * 4];
-        _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
         _gl.PixelStore(PixelStoreParameter.PackAlignment, 1);
-        // The callback renders into the default framebuffer's back buffer. Its implicit read
-        // selection differs between windowed and fullscreen Intel/Windows drivers; explicitly
-        // selecting Back prevents the successful-but-transparent PNGs those drivers returned.
-        _gl.Finish();
-        ReadDefaultBuffer(ReadBufferMode.Back, pixels);
-        if (!HasVisibleScreenshotContent(pixels))
+        bool composedFrame = _presentFrame != null && _presentFrame.Width == w
+            && _presentFrame.Height == h && _state == AppState.Playing;
+        if (composedFrame)
         {
-            // A few borderless/exclusive paths expose only the last swapped front buffer. It is
-            // one frame older but still the actual game image and preferable to a blank capture.
-            ReadDefaultBuffer(ReadBufferMode.Front, pixels);
+            // Gameplay is composed in an offscreen colour target specifically so fullscreen
+            // capture does not depend on driver-specific front/back default-buffer behaviour.
+            _presentFrame.Bind(setViewport: false);
+            _gl.ReadBuffer(ReadBufferMode.ColorAttachment0);
+            _gl.Finish();
+            fixed (byte* p = pixels)
+                _gl.ReadPixels(0, 0, (uint)w, (uint)h, PixelFormat.Rgba,
+                    PixelType.UnsignedByte, p);
+            Rendering.Framebuffer.BindDefault(_gl);
             _gl.ReadBuffer(ReadBufferMode.Back);
+        }
+        else
+        {
+            _gl.BindFramebuffer(FramebufferTarget.Framebuffer, 0);
+            // Menus still draw directly to the window. Prefer its back buffer and retain the
+            // front-buffer fallback for drivers that expose only the most recently swapped frame.
+            _gl.Finish();
+            ReadDefaultBuffer(ReadBufferMode.Back, pixels);
+            if (!HasVisibleScreenshotContent(pixels))
+            {
+                ReadDefaultBuffer(ReadBufferMode.Front, pixels);
+                _gl.ReadBuffer(ReadBufferMode.Back);
+            }
         }
         try
         {
             Png.Write(path, w, h, pixels, 4, flipVertically: true);
+            string clipboardError = "";
+            bool copied = copyToClipboard
+                && ScreenshotClipboard.TrySetRgba(_nativeWindowHandle, w, h, pixels, out clipboardError);
+            if (copyToClipboard && !copied && !string.IsNullOrEmpty(clipboardError))
+                Console.WriteLine($"截圖複製到剪貼簿失敗: {clipboardError}");
             if (!quiet)
             {
-                SetStatus($"{Loc.SysScreenshotSaved}: {Path.GetFileName(path)}");
+                string status = copied ? Loc.SysScreenshotSavedAndCopied : Loc.SysScreenshotSaved;
+                SetStatus($"{status}: {Path.GetFileName(path)}");
                 Console.WriteLine($"截圖已儲存: {path}");
             }
         }
@@ -2712,7 +2755,8 @@ public sealed class App : IDisposable
 
     private void HandleAutoScreenshot()
     {
-        foreach (string path in _pendingScreenshots) SaveScreenshot(path);
+        foreach (string path in _pendingScreenshots)
+            SaveScreenshot(path, copyToClipboard: true);
         _pendingScreenshots.Clear();
 
         if (_autoShotFrames < 0) return;
@@ -2999,6 +3043,7 @@ public sealed class App : IDisposable
         if (_level != _menuLevel) _level?.Dispose();
         _menuLevel?.Dispose();
         _renderer?.Dispose();
+        _presentFrame?.Dispose();
         _logoTexture?.Dispose();
         foreach (var thumbnail in _mapThumbnails) thumbnail?.Dispose();
         foreach (var thumbnail in _slotThumbnails.Values) thumbnail?.Dispose();

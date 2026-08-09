@@ -555,6 +555,8 @@ public sealed class Menu
         bool teamMode = ModeKind is GameModeKind.TeamDeathmatch or GameModeKind.CaptureTheFlag
             or GameModeKind.Domination;
 
+        Add(Loc.OptStartMatch, () => OnStartMatch?.Invoke(), "進入戰場。");
+
         AddChoice(Loc.OptGameMode, () => Loc.ModeName(ModeKind), d =>
         {
             int n = Enum.GetValues<GameModeKind>().Length;
@@ -648,7 +650,6 @@ public sealed class Menu
                     ? Loc.DevicesRawActive
                     : Loc.DevicesRawUnavailable);
 
-        Add(Loc.OptStartMatch, () => OnStartMatch?.Invoke(), "進入戰場。");
         Add(Loc.MenuBack, () => Open(MenuScreen.Main));
     }
 

@@ -1,4 +1,5 @@
 using System.Numerics;
+using System.Runtime.InteropServices;
 using Silk.NET.Input;
 using Unreal99.Core;
 
@@ -88,6 +89,7 @@ public sealed class InputSystem : IDisposable
     private readonly HashSet<Key> _keysDown = new();
     private readonly HashSet<Key> _keysPressed = new();
     private readonly HashSet<Key> _keysReleased = new();
+    private readonly HashSet<int> _asyncKeysDown = new();
     private readonly bool[] _mouseDown = new bool[8];
     private readonly bool[] _mousePressed = new bool[8];
     private Vector2 _mousePosition;
@@ -289,10 +291,22 @@ public sealed class InputSystem : IDisposable
     /// </summary>
     public bool GlobalKeyPressed(Key key)
     {
-        if (KeyPressed(key)) return true;
         int virtualKey = VirtualKeys.FromKey(key);
-        return virtualKey != 0 && RawAvailable && Raw.KeyPressed(0, virtualKey);
+        bool pressed = KeyPressed(key)
+            || virtualKey != 0 && RawAvailable && Raw.KeyPressed(0, virtualKey);
+        if (!OperatingSystem.IsWindows() || virtualKey == 0) return pressed;
+
+        // GLFW and even Raw Input can omit VK_SNAPSHOT in exclusive fullscreen. Polling the
+        // physical state closes that gap while the set keeps the result edge-triggered.
+        short state = GetAsyncKeyState(virtualKey);
+        bool down = (state & 0x8000) != 0;
+        bool wasDown = _asyncKeysDown.Contains(virtualKey);
+        if (down) _asyncKeysDown.Add(virtualKey); else _asyncKeysDown.Remove(virtualKey);
+        return pressed || down && !wasDown || (state & 1) != 0;
     }
+
+    [DllImport("user32.dll")]
+    private static extern short GetAsyncKeyState(int virtualKey);
     public bool AnyKeyPressed => _keysPressed.Count > 0;
 
     /// <summary>First key pressed this frame on any keyboard, or Unknown. Used by the rebinder.</summary>

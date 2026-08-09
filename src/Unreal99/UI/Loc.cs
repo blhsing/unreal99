@@ -373,6 +373,7 @@ public static class Loc
 
     // ---------------------------------------------------------------- system
     public const string SysScreenshotSaved = "截圖已儲存";
+    public const string SysScreenshotSavedAndCopied = "截圖已儲存並複製到剪貼簿";
     public const string SysFps = "每秒畫格";
     public const string SysDrawCalls = "繪製呼叫";
     public const string SysTriangles = "三角形";
