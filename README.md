@@ -63,7 +63,7 @@ artifacts\installer\Unreal99Installer.exe --help
 | `--bots N` | 電腦對手數量，0～15 |
 | `--skill N` | 電腦難度，0（新手）～5（神級） |
 | `--demoskill N` | 示範模式代打難度，0（新手）～5（神級），與對手難度分開 |
-| `--map N` | 競技場編號 0～16，見下方〈競技場〉 |
+| `--map N` | 競技場編號 0～20，見下方〈競技場〉 |
 | `--mode N` | 0 死亡競賽、1 團隊死亡競賽、2 奪旗大戰、3 最後生還者、4 瞬殺模式、5 支配佔領 |
 | `--frags N` / `--time N` | 擊殺上限／時間上限（分鐘） |
 | `--quality N` | 0 低、1 中、2 高、3 史詩 |
@@ -88,7 +88,7 @@ artifacts\installer\Unreal99Installer.exe --help
 
 ## 競技場
 
-十七座競技場，**每一座都是向 1999 年原作經典地圖的致敬之作**。佈局、路線、上下樓的方式與
+二十一座競技場，**每一座都是向 1999 年原作經典地圖的致敬之作**。佈局、路線、上下樓的方式與
 每張圖的武器道具清單都**逐一對照過原作資料**（來源見
 [docs/original-map-reference.md](docs/original-map-reference.md)），幾何、材質與模型則完全用
 `LevelBuilder` 重新打造，沒有反編譯、轉檔或沿用任何原作關卡資料。
@@ -128,9 +128,18 @@ artifacts\installer\Unreal99Installer.exe --help
 <tr>
 <td><img src="docs/arenas/15-facingworlds.jpg" width="100%"><br><b>15 · CTF-對峙世界</b><br><i>Facing Worlds</i></td>
 <td><img src="docs/arenas/16-lavagiant.jpg" width="100%"><br><b>16 · CTF-熔岩巨人</b><br><i>Lava Giant</i></td>
-<td></td>
+<td><img src="docs/arenas/17-leadworks.jpg" width="100%"><br><b>17 · DOM-熔鉛廠</b><br><i>Leadworks</i></td>
+</tr>
+<tr>
+<td><img src="docs/arenas/18-sesmar.jpg" width="100%"><br><b>18 · DOM-賽斯瑪之墓</b><br><i>Sesmar</i></td>
+<td><img src="docs/arenas/19-olden.jpg" width="100%"><br><b>19 · DOM-奧登含水層</b><br><i>Olden</i></td>
+<td><img src="docs/arenas/20-cinder.jpg" width="100%"><br><b>20 · DOM-灰燼鑄造廠</b><br><i>Cinder</i></td>
 </tr>
 </table>
+
+統治模式的四張圖以 `--mode 5` 擷取，控制點因此顯示所屬隊伍的顏色；用死亡競賽拍 DOM 圖，
+所有控制點都會是中立灰，等於沒拍到重點。擷取流程與各圖的鏡頭參數見
+[docs/capture-arenas.ps1](docs/capture-arenas.ps1)。
 
 | `--map` | 名稱 | 致敬對象 | 特色 |
 | --- | --- | --- | --- |
@@ -384,7 +393,7 @@ src/Unreal99/
   Core/         數學（GL 慣例矩陣）、亂數
   Platform/     輸入系統、Raw Input、按鍵配置、PNG／ICO 輸出、開始選單捷徑
   Rendering/    OpenGL 封裝、著色器、算圖器、粒子、字型、2D 介面
-  World/        碰撞筆刷、導航圖、關卡建構器、十七座競技場
+  World/        碰撞筆刷、導航圖、關卡建構器、二十一座競技場
   Game/         角色移動、武器、投射物、道具、電腦 AI、遊戲模式、模擬
   Audio/        程序化合成 + OpenAL 3D 播放
   UI/           繁體中文字串表、HUD、選單
@@ -434,7 +443,7 @@ src/Unreal99.Installer/
   奔跑、跳躍、落地、蹲伏、開火、閃避、死亡等所有動作皆以解析式計算，不使用關鍵影格。
 * **武器** — 十一把全部以程式建模，統一以 -Z 為前方的區域座標系，因此同一份網格可同時用於
   第一人稱視角、第三人稱持槍與道具展示台。
-* **競技場** — 十七座場地全部透過 `LevelBuilder` 撰寫，同時產生算圖幾何與碰撞筆刷。圓形結構
+* **競技場** — 二十一座場地全部透過 `LevelBuilder` 撰寫，同時產生算圖幾何與碰撞筆刷。圓形結構
   會柵格化成軸對齊區塊，確保碰撞與可見表面完全一致。路徑點圖在關卡建好後自動生成，
   因此新增競技場不需要另外標註導航資料。
 * **音效** — 所有音效在啟動時合成為 PCM 緩衝（濾波雜訊爆發、掃頻正弦、加法式鐘聲），
@@ -453,7 +462,7 @@ src/Unreal99.Installer/
 學習曲線，最簡單級別有明顯的反應、移動與傷害限制；第 5 級保留原有強度。牠們會依交戰距離選擇武器、避免被自己的爆炸波及、
 追擊失去視野的目標最後出現的位置、受傷時退往掩體，並在奪旗模式中執行目標。
 
-可用下列固定步長測試讓神級主角分別走遍全部十七張地圖，並以新手對手維持低干擾環境：
+可用下列固定步長測試讓神級主角分別走遍全部二十一張地圖，並以新手對手維持低干擾環境：
 
 ```powershell
 .\scripts\test-bot-traversal.ps1 -Frames 3600
@@ -475,6 +484,6 @@ src/Unreal99.Installer/
 所有角色、武器模型、材質與音效皆為原創。本專案是同類型遊戲的獨立實作，並非移植，
 不含原作的任何素材。
 
-十七座競技場的佈局向 1999 年原作的經典地圖致敬，但幾何、材質與道具配置都是重新設計並以程式
+二十一座競技場的佈局向 1999 年原作的經典地圖致敬，但幾何、材質與道具配置都是重新設計並以程式
 產生的——沒有反編譯、轉檔或複製任何原作關卡資料。地圖名稱為對應的中文命名，並在上表中標註
 致敬對象。
