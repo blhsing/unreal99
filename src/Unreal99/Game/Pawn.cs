@@ -18,6 +18,8 @@ public struct PawnInput
     public Vector2 Dodge;
     public int WeaponCycle;       // -1 previous, +1 next
     public int WeaponSelect;      // direct slot, or -1
+    /// <summary>Edge-triggered: board the nearest vehicle, or leave the one you are in.</summary>
+    public bool UseVehicle;
 }
 
 /// <summary>

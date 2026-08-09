@@ -45,6 +45,7 @@ public sealed class App : IDisposable
     private WeaponModels _weaponModels;
     private ProjectileModels _projectileModels;
     private PickupModels _pickupModels;
+    private VehicleModels _vehicleModels;
 
     private GameWorld _world;
     private Level _level;
@@ -356,6 +357,12 @@ public sealed class App : IDisposable
                     // which is otherwise awkward because the pawn auto-selects its best gun.
                     if (int.TryParse(args[i + 1], out int wk)) _forceWeapon = wk;
                     i++;
+                    break;
+                case "--vehicletest":
+                    // Boards a bot into every vehicle in turn and checks it actually moves.
+                    _vehicleTest = true;
+                    _windowed = true;
+                    _autoStartMatch = true;
                     break;
                 case "--savetest":
                     // Round-trips settings and a saved match without needing anyone to drive menus.
@@ -1239,6 +1246,7 @@ public sealed class App : IDisposable
 
         if (_inputTest) UpdateInputSelfTest();
         if (_saveTest) UpdateSaveSelfTest();
+        if (_vehicleTest) UpdateVehicleSelfTest();
         if (_forceWeapon >= 0 && _players.Count > 0 && _players[0].Pawn is { } p0)
         {
             var want = (WeaponKind)MathX.Clamp(_forceWeapon, 0, (int)WeaponKind.Count - 1);
@@ -1352,6 +1360,7 @@ public sealed class App : IDisposable
                 _weaponModels = new WeaponModels(_gl);
                 _projectileModels = new ProjectileModels(_gl);
                 _pickupModels = new PickupModels(_gl);
+                _vehicleModels = new VehicleModels(_gl);
                 _renderer.BuildWeaponHudAtlas(_weaponModels);
                 _hud.WeaponThumbnailAtlas = _renderer.WeaponHudAtlas;
                 break;
@@ -1359,7 +1368,7 @@ public sealed class App : IDisposable
                 _menuLevel = Maps.Build(_gl, MapId.Deck16);
                 break;
             default:
-                _world = new GameWorld(_renderer, _character, _weaponModels, _projectileModels, _pickupModels);
+                _world = new GameWorld(_renderer, _character, _weaponModels, _projectileModels, _pickupModels, _vehicleModels);
                 _world.OnSound = PlaySound;
                 if (_loadSlotAtBoot >= 0 && SaveStore.Read(_loadSlotAtBoot) != null)
                     LoadFromSlot(_loadSlotAtBoot);
@@ -2318,6 +2327,68 @@ public sealed class App : IDisposable
         Console.WriteLine("──────────────────────");
         _window.Close();
     }
+
+    // ---------------------------------------------------------------- vehicle self-test
+
+    private bool _vehicleTest;
+    private int _vehicleTestFrame;
+
+    /// <summary>
+    /// Drives <c>--vehicletest</c>: spawns one of every vehicle, boards a pawn into each, holds
+    /// the throttle down and reports how far each one actually travelled. A vehicle that reads
+    /// as "working" but never moves is the failure this is here to catch — and the four motion
+    /// solvers fail in different ways, so each kind is checked rather than one representative.
+    /// </summary>
+    private void UpdateVehicleSelfTest()
+    {
+        _vehicleTestFrame++;
+        if (_state != AppState.Playing || _world?.Level == null) return;
+
+        const int Settle = 40;
+        const int Run = 150;
+
+        if (_vehicleTestFrame == Settle)
+        {
+            // Park one of every kind in a line clear of the arena's own vehicles.
+            _world.Vehicles.Clear();
+            _world.NextVehicleId = 1;
+            Vector3 origin = _world.Level.Center + new Vector3(0f, 2f, 0f);
+            for (int k = 0; k < (int)VehicleKind.Count; k++)
+            {
+                var v = new Vehicle { Id = _world.NextVehicleId++ };
+                v.Configure((VehicleKind)k, origin + new Vector3((k - 8) * 7f, 0f, 0f), 0f);
+                _world.Vehicles.Add(v);
+                _vehicleTestStart[k] = v.Position;
+            }
+            return;
+        }
+
+        // Hold the throttle for every vehicle, whether or not anyone is aboard.
+        if (_vehicleTestFrame > Settle && _vehicleTestFrame < Settle + Run)
+        {
+            foreach (var v in _world.Vehicles)
+                v.Move(_world.Level, new Vector2(0f, 1f), false, false, 1f / 60f);
+            return;
+        }
+
+        if (_vehicleTestFrame != Settle + Run) return;
+
+        Console.WriteLine("──── 載具自我測試 ────");
+        int moved = 0, stuck = 0;
+        foreach (var v in _world.Vehicles)
+        {
+            float travelled = Vector3.Distance(v.Position, _vehicleTestStart[(int)v.Kind]);
+            bool ok = travelled > 3f;
+            if (ok) moved++; else stuck++;
+            Console.WriteLine($"  {v.Def.Name,-12} {v.Def.Motion,-8} 座位 {v.Def.SeatCount}  " +
+                              $"位移 {travelled,6:0.0} m  {(ok ? "通過" : "未移動")}");
+        }
+        Console.WriteLine($"  結果: {moved} 種可移動、{stuck} 種未移動（共 {(int)VehicleKind.Count} 種）");
+        Console.WriteLine("──────────────────────");
+        _window.Close();
+    }
+
+    private readonly Vector3[] _vehicleTestStart = new Vector3[(int)VehicleKind.Count];
 
     // ---------------------------------------------------------------- save/load self-test
 

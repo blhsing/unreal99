@@ -149,6 +149,7 @@ public sealed class GameWorld
     private readonly WeaponModels _weaponModels;
     private readonly ProjectileModels _projectileModels;
     private readonly PickupModels _pickupModels;
+    private readonly VehicleModels _vehicleModels;
 
     private readonly Dictionary<int, Matrix4x4[]> _boneWorld = new();
     private readonly Dictionary<int, Matrix4x4[]> _boneSkin = new();
@@ -250,13 +251,14 @@ public sealed class GameWorld
     public Action<SoundId, Vector3, float> OnSound;
 
     public GameWorld(Renderer renderer, CharacterModel character, WeaponModels weaponModels,
-        ProjectileModels projectileModels, PickupModels pickupModels)
+        ProjectileModels projectileModels, PickupModels pickupModels, VehicleModels vehicleModels)
     {
         _renderer = renderer;
         _character = character;
         _weaponModels = weaponModels;
         _projectileModels = projectileModels;
         _pickupModels = pickupModels;
+        _vehicleModels = vehicleModels;
     }
 
     // ---------------------------------------------------------------- setup
@@ -458,6 +460,9 @@ public sealed class GameWorld
             // frame — the rider would jitter and could shove itself through the hull.
             if (pawn.InVehicle)
             {
+                // Use dismounts. Held down it would leave and re-board every frame, so it only
+                // fires on the press edge.
+                if (input.UseVehicle) { ExitVehicle(pawn); continue; }
                 pawn.VehicleDrive = input.Move;
                 pawn.VehicleUp = input.Jump;
                 pawn.VehicleDown = input.Crouch;
@@ -465,6 +470,12 @@ public sealed class GameWorld
                 HandleVehicleFire(pawn, input, dt);
                 Mode.OnPawnUpdate(this, pawn, dt);
                 continue;
+            }
+
+            if (input.UseVehicle)
+            {
+                var boardable = VehicleToBoard(pawn);
+                if (boardable != null && EnterVehicle(pawn, boardable)) continue;
             }
 
             var events = pawn.Move(Level, input, dt);
@@ -1886,6 +1897,7 @@ public sealed class GameWorld
         SubmitProjectiles(scene);
         SubmitPickups(scene);
         SubmitFlags(scene);
+        SubmitVehicles(scene);
         SubmitControlPoints(scene);
         _ = viewCount;
     }
@@ -2304,6 +2316,50 @@ public sealed class GameWorld
                 });
             }
             scene.AddLight(pos, 13f, col, 3.4f * flash, 1.2f);
+        }
+    }
+
+    /// <summary>
+    /// Draws each live vehicle. Team colour is applied to the hull tint rather than baked into
+    /// the mesh, because a vehicle changes hands — the same Goliath can be red then blue.
+    /// </summary>
+    private void SubmitVehicles(RenderScene scene)
+    {
+        foreach (var v in Vehicles)
+        {
+            if (!v.Alive) continue;
+            var def = v.Def;
+            Matrix4x4 xf = Matrix4x4.CreateFromYawPitchRoll(v.Yaw, v.Pitch, v.Roll)
+                * Matrix4x4.CreateTranslation(v.Position);
+
+            Vector3 tint = def.Tint;
+            if (v.Team != Team.None) tint = Vector3.Lerp(tint, GameTypes.TeamColor(v.Team), 0.55f);
+            // The Nightshade fades out when it holds still; that is its whole defence.
+            float alpha = 1f - v.CloakBlend * 0.82f;
+
+            var mesh = _vehicleModels.MeshFor(v.Kind);
+            foreach (var section in _vehicleModels.SectionsFor(v.Kind))
+            {
+                scene.Opaque.Add(new DrawCall
+                {
+                    Mesh = mesh,
+                    IndexOffset = section.IndexOffset,
+                    IndexCount = section.IndexCount,
+                    Transform = xf,
+                    Material = Materials.Get(section.Material),
+                    Tint = new Vector4(tint, alpha),
+                    Alpha = alpha,
+                    Center = v.Position,
+                    Radius = def.HalfExtents.Length() + 1f,
+                    BoneBase = -1,
+                    CastShadow = true,
+                });
+            }
+
+            if (v.ShieldUp && v.ShieldHealth > 0f)
+                Particles.Spawn(BlendMode.Additive, v.Position + new Vector3(0, def.HalfExtents.Y + 1f, 0),
+                    Vector3.Zero, new Vector4(0.4f, 0.8f, 1f, 0.5f), new Vector4(0.4f, 0.8f, 1f, 0f),
+                    def.HalfExtents.X * 2.4f, 0.08f, 0.08f, Spr.Flare);
         }
     }
 

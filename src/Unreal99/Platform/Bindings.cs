@@ -11,6 +11,8 @@ public enum GameAction
     LookLeft, LookRight, LookUp, LookDown,
     Jump, Crouch, Fire, AltFire,
     NextWeapon, PrevWeapon, Scoreboard,
+    /// <summary>Board or leave a vehicle.</summary>
+    UseVehicle,
     Weapon1, Weapon2, Weapon3, Weapon4, Weapon5,
     Weapon6, Weapon7, Weapon8, Weapon9, Weapon10,
     Count
@@ -64,6 +66,7 @@ public sealed class BindingProfile
             p[GameAction.MoveLeft] = InputBinding.OnKey(Key.A);
             p[GameAction.MoveRight] = InputBinding.OnKey(Key.D);
             p[GameAction.Jump] = InputBinding.OnKey(Key.Space);
+            p[GameAction.UseVehicle] = InputBinding.OnKey(Key.F);
             p[GameAction.Crouch] = InputBinding.OnKey(Key.ControlLeft);
             p[GameAction.NextWeapon] = InputBinding.OnKey(Key.E);
             p[GameAction.PrevWeapon] = InputBinding.OnKey(Key.Q);
@@ -88,6 +91,7 @@ public sealed class BindingProfile
             p[GameAction.LookUp] = InputBinding.OnKey(Key.Keypad8);
             p[GameAction.LookDown] = InputBinding.OnKey(Key.Keypad5);
             p[GameAction.Jump] = InputBinding.OnKey(Key.ShiftRight);
+            p[GameAction.UseVehicle] = InputBinding.OnKey(Key.Enter);
             p[GameAction.Crouch] = InputBinding.OnKey(Key.ControlRight);
             p[GameAction.NextWeapon] = InputBinding.OnKey(Key.PageUp);
             p[GameAction.PrevWeapon] = InputBinding.OnKey(Key.PageDown);
@@ -104,6 +108,7 @@ public sealed class BindingProfile
             p[GameAction.MoveLeft] = InputBinding.OnKey(Key.G);
             p[GameAction.MoveRight] = InputBinding.OnKey(Key.J);
             p[GameAction.Jump] = InputBinding.OnKey(Key.M);
+            p[GameAction.UseVehicle] = InputBinding.OnKey(Key.N);
             p[GameAction.Crouch] = InputBinding.OnKey(Key.N);
             p[GameAction.NextWeapon] = InputBinding.OnKey(Key.U);
             p[GameAction.PrevWeapon] = InputBinding.OnKey(Key.T);
@@ -122,6 +127,7 @@ public sealed class BindingProfile
             p[GameAction.LookUp] = InputBinding.OnKey(Key.Keypad8);
             p[GameAction.LookDown] = InputBinding.OnKey(Key.Keypad5);
             p[GameAction.Jump] = InputBinding.OnKey(Key.ShiftRight);
+            p[GameAction.UseVehicle] = InputBinding.OnKey(Key.Enter);
             p[GameAction.Crouch] = InputBinding.OnKey(Key.ControlRight);
             p[GameAction.NextWeapon] = InputBinding.OnKey(Key.PageUp);
             p[GameAction.PrevWeapon] = InputBinding.OnKey(Key.PageDown);
@@ -141,6 +147,7 @@ public sealed class BindingProfile
             (GameAction.PrevWeapon, Key.T), (GameAction.NextWeapon, Key.U),
             (GameAction.Jump, Key.M), (GameAction.Crouch, Key.N),
             (GameAction.Scoreboard, Key.B),
+            (GameAction.UseVehicle, Key.F),
         ];
         bool passed = p3[GameAction.Fire] == InputBinding.OnMouse(0)
             && p3[GameAction.AltFire] == InputBinding.OnMouse(1);
