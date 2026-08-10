@@ -22,6 +22,7 @@ public sealed class VehicleModels : IDisposable
     private readonly Mesh[] _meshes = new Mesh[(int)VehicleKind.Count];
     private readonly MeshSection[][] _sections = new MeshSection[(int)VehicleKind.Count][];
     private readonly (Vector3 Min, Vector3 Max)[] _bounds = new (Vector3, Vector3)[(int)VehicleKind.Count];
+    private readonly Vector3[][] _hulls = new Vector3[(int)VehicleKind.Count][];
 
     public Mesh MeshFor(VehicleKind k) => _meshes[(int)k];
     public MeshSection[] SectionsFor(VehicleKind k) => _sections[(int)k];
@@ -33,6 +34,20 @@ public sealed class VehicleModels : IDisposable
     /// </summary>
     public (Vector3 Min, Vector3 Max) BoundsFor(VehicleKind k) => _bounds[(int)k];
 
+    /// <summary>
+    /// Model-space offset that puts the mesh's footprint centre on the turntable's spin axis.
+    /// Without it a long subject spins about whatever point the modelling happened to use as the
+    /// origin, swinging out to one side of the frame instead of turning in place.
+    /// </summary>
+    public Vector3 TurntablePivot(VehicleKind k)
+    {
+        var (lo, hi) = _bounds[(int)k];
+        return new Vector3((lo.X + hi.X) * 0.5f, 0f, (lo.Z + hi.Z) * 0.5f);
+    }
+
+    /// <summary>Silhouette support points, in model space. See <see cref="MeshBuilder.SupportCloud"/>.</summary>
+    public Vector3[] HullFor(VehicleKind k) => _hulls[(int)k];
+
     public VehicleModels(GL gl)
     {
         for (int i = 0; i < (int)VehicleKind.Count; i++)
@@ -41,6 +56,7 @@ public sealed class VehicleModels : IDisposable
             Build((VehicleKind)i, mb);
             mb.RecalculateTangents();
             _bounds[i] = mb.Bounds();
+            _hulls[i] = mb.SupportCloud();
             var (v, ind, s) = mb.Build();
             _meshes[i] = Mesh.CreateStatic<Vertex>(gl, v, ind, VertexLayouts.Static);
             _sections[i] = s;

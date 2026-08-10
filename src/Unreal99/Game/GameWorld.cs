@@ -2961,8 +2961,12 @@ public sealed class GameWorld
         scene.EnvIntensity = 0.85f;
         scene.FogDensity = 0f;
 
+        const float weaponScale = 1.25f;
         Vector3 weaponPosition = groundPosition + new Vector3(0f, 0.55f, 0f);
-        Matrix4x4 weaponTransform = Matrix4x4.CreateScale(1.25f)
+        // Shift the footprint centre onto the spin axis before rotating, so the weapon turns in
+        // place rather than orbiting the grip it happens to be modelled around.
+        Matrix4x4 weaponTransform = Matrix4x4.CreateScale(weaponScale)
+            * Matrix4x4.CreateTranslation(_weaponModels.TurntablePivot(weapon) * -weaponScale)
             * Matrix4x4.CreateRotationY(yaw)
             * Matrix4x4.CreateTranslation(weaponPosition);
         Mesh weaponMesh = _weaponModels.MeshFor(weapon);
@@ -2975,18 +2979,9 @@ public sealed class GameWorld
             scene.Opaque.Add(draw);
         }
 
-        // This is the same torus rendered underneath every live weapon pickup, not a
-        // documentation-only stand. It anchors the elevated camera view to the arena floor.
-        Matrix4x4 pedestalTransform = Matrix4x4.CreateTranslation(groundPosition);
-        Mesh pedestal = _pickupModels.MeshFor(PickupKind.WeaponPickup);
-        foreach (MeshSection section in _pickupModels.SectionsFor(PickupKind.WeaponPickup))
-        {
-            Material material = Materials.Get(section.Material);
-            var draw = MakePickupDraw(pedestal, section, material, pedestalTransform,
-                groundPosition, 0.6f);
-            draw.CastShadow = true;
-            if (material.Transparent) scene.Transparent.Add(draw); else scene.Opaque.Add(draw);
-        }
+        // Deliberately no pickup ring. It anchors the weapon to a floor in the arena, but on a
+        // studio plate there is no floor — it just costs a third of the frame the weapon itself
+        // should be filling.
 
         Vector3 tint = Weapons.Get(weapon).Tint;
         scene.AddLight(weaponPosition + new Vector3(1.8f, 2.2f, 1.3f), 7f,
@@ -3195,7 +3190,11 @@ public sealed class GameWorld
             scene.SunColor = new Vector3(5.6f, 5.4f, 5.1f);
         }
         Vector3 position = groundPosition + new Vector3(0f, def.HalfExtents.Y, 0f);
-        Matrix4x4 transform = Matrix4x4.CreateRotationY(yaw) * Matrix4x4.CreateTranslation(position);
+        // Shift the footprint centre onto the spin axis first: a Goliath's gun and a Darkwalker's
+        // legs both hang well off the model origin, and without this they orbit it.
+        Matrix4x4 transform = Matrix4x4.CreateTranslation(-_vehicleModels.TurntablePivot(kind))
+            * Matrix4x4.CreateRotationY(yaw)
+            * Matrix4x4.CreateTranslation(position);
         Mesh mesh = _vehicleModels.MeshFor(kind);
         foreach (MeshSection section in _vehicleModels.SectionsFor(kind))
         {

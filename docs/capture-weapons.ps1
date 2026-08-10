@@ -98,6 +98,29 @@ function Invoke-GameCapture {
     }
 }
 
+function Invoke-GameCaptureChecked {
+    param([object[]]$Arguments, [string[]]$FrameDirectories, [int]$ExpectedFrames)
+
+    # The game occasionally leaves a run of zero-byte PNGs behind — the frames are written from a
+    # framebuffer read-back, and if that fails the file is created but never filled. It is rare
+    # and it clears on a retry, but silently encoding the result is not an option, so verify the
+    # frames before handing them to the converter.
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        foreach ($directory in $FrameDirectories) { Remove-CaptureDirectory $directory }
+        Invoke-GameCapture $Arguments
+
+        $bad = 0
+        foreach ($directory in $FrameDirectories) {
+            $frames = @(Get-ChildItem -LiteralPath $directory -Filter "*.png" -ErrorAction SilentlyContinue)
+            if ($frames.Count -ne $ExpectedFrames) { $bad++; continue }
+            if (@($frames | Where-Object { $_.Length -eq 0 }).Count -gt 0) { $bad++ }
+        }
+        if ($bad -eq 0) { return }
+        Write-Host "  capture produced empty frames; retrying ($attempt/3)"
+    }
+    throw "Capture kept producing empty frames: $($Arguments -join ' ')"
+}
+
 $slugs = @(
     "impact-hammer", "enforcer", "bio-rifle", "shock-rifle", "pulse-gun", "ripper",
     "minigun", "flak-cannon", "rocket-launcher", "sniper-rifle", "redeemer"
@@ -110,7 +133,8 @@ for ($weapon = $StartWeapon; $weapon -le $EndWeapon; $weapon++) {
     $slug = $slugs[$weapon]
     $weaponFrameRoot = Join-Path $temporaryRoot $slug
     if (-not $SkipActionFootage) {
-        Invoke-GameCapture @("--weaponfootage", $weapon, "both", $weaponFrameRoot)
+        Invoke-GameCaptureChecked @("--weaponfootage", $weapon, "both", $weaponFrameRoot) `
+            @((Join-Path $weaponFrameRoot "primary"), (Join-Path $weaponFrameRoot "secondary")) 30
         foreach ($mode in @("primary", "secondary")) {
             $frameDirectory = Join-Path $weaponFrameRoot $mode
             $destination = Join-Path $outputPath ($slug + "-" + $mode + ".webp")
@@ -121,7 +145,7 @@ for ($weapon = $StartWeapon; $weapon -le $EndWeapon; $weapon++) {
     if (-not $SkipTurntables) {
         $turntableFrames = Join-Path $weaponFrameRoot "turntable"
         $turntableDestination = Join-Path $outputPath ($slug + "-turntable.webp")
-        Invoke-GameCapture @("--weaponturntable", $weapon, $turntableFrames)
+        Invoke-GameCaptureChecked @("--weaponturntable", $weapon, $turntableFrames) @($turntableFrames) 36
         & $pythonCommand $webpBuilder --input $turntableFrames --output $turntableDestination `
             --expected-frames 36 --quality 78 --alpha
         if ($LASTEXITCODE -ne 0) { throw "Turntable WebP conversion failed for $slug" }

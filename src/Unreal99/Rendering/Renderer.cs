@@ -518,6 +518,11 @@ public sealed class Renderer : IDisposable
         // Alpha only: the colour already on the target is the finished, tone-mapped image.
         _gl.ColorMask(false, false, false, true);
 
+        // Wipe alpha first. The composite and FXAA passes both write an opaque vec4, so by this
+        // point the whole viewport is alpha 1 regardless of what the frame was cleared to.
+        _gl.ClearColor(0f, 0f, 0f, 0f);
+        _gl.Clear(ClearBufferMask.ColorBufferBit);
+
         _silhouette.Use();
         foreach (var dc in scene.Opaque)
         {

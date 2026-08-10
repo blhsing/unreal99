@@ -103,10 +103,16 @@ public sealed class App : IDisposable
     private float _flyRadius, _flyHeight, _flyAngleDeg, _flyLookY;
     private MenuScreen _bootMenuScreen = MenuScreen.Main;
     private readonly List<string> _pendingScreenshots = new();
-    // Clear floor in Stalwart's main hall. The offset camera remains inside the room while the
-    // weapon is viewed from the same elevated three-quarter angle as an approaching player.
+    // The arena is not drawn on a studio plate, so this is only where the subject sits in world
+    // space; the camera is placed relative to it by <see cref="FrameSubject"/>.
     private static readonly Vector3 WeaponTurntableBase = new(10f, 0.05f, -8f);
     private static readonly Vector3 VehicleTurntableBase = new(10f, 0.05f, -8f);
+
+    /// <summary>Frames in one full turn of a documentation turntable — a 10° step.</summary>
+    private const int TurntableFrames = 36;
+
+    /// <summary>How much of the frame to leave as a border around a framed subject.</summary>
+    private const float FrameMargin = 1.04f;
 
     /// <summary>Non-zero when an automated behavioral gate fails.</summary>
     public int ExitCode { get; private set; }
@@ -1989,8 +1995,7 @@ public sealed class App : IDisposable
             _renderer.Effects.Clear();
             if (_vehicleTurntableDirectory != null)
             {
-                const int turntableFrames = 36;
-                float yaw = _vehicleTurntableCaptured / (float)turntableFrames * MathX.TwoPi;
+                float yaw = _vehicleTurntableCaptured / (float)TurntableFrames * MathX.TwoPi;
                 _world.SubmitVehicleTurntable(_scene, (VehicleKind)_vehicleTurntableCapture,
                     VehicleTurntableBase, yaw);
                 _scene.StudioPlate = true;
@@ -1999,8 +2004,7 @@ public sealed class App : IDisposable
             {
                 // Studio plate: the subject alone, no arena and no sky, so the exported frame can
                 // carry a real alpha channel rather than a blue backdrop.
-                const int turntableFrames = 36;
-                float yaw = _weaponTurntableCaptured / (float)turntableFrames * MathX.TwoPi;
+                float yaw = _weaponTurntableCaptured / (float)TurntableFrames * MathX.TwoPi;
                 _world.SubmitWeaponTurntable(_scene, (WeaponKind)_weaponProfileCapture,
                     WeaponTurntableBase, yaw);
                 _scene.StudioPlate = true;
@@ -2117,22 +2121,24 @@ public sealed class App : IDisposable
             if (_vehicleTurntableCapture >= 0)
             {
                 var kind = (VehicleKind)_vehicleTurntableCapture;
-                var (lo, hi) = _world.VehicleMeshes.BoundsFor(kind);
+                // Same pivot the turntable spins about, so the silhouette is measured from the axis.
+                Vector3 pivot = _world.VehicleMeshes.TurntablePivot(kind);
+                Vector3[] hull = Array.ConvertAll(_world.VehicleMeshes.HullFor(kind), p => p - pivot);
                 Vector3 origin = VehicleTurntableBase
                     + new Vector3(0f, VehicleDef.Get(kind).HalfExtents.Y, 0f);
-                return FrameSubject(cam, origin, lo, hi, 1f, aspect, 34f);
+                return FrameSubject(cam, origin, hull, 1f, aspect, 34f);
             }
 
             bool turntable = _weaponTurntableDirectory != null;
             if (turntable)
             {
-                var (lo, hi) = _world.WeaponMeshes.BoundsFor((WeaponKind)_weaponProfileCapture);
+                var kind = (WeaponKind)_weaponProfileCapture;
+                // Same pivot the turntable spins about, so the silhouette is measured from the axis.
+                Vector3 pivot = _world.WeaponMeshes.TurntablePivot(kind);
+                Vector3[] hull = Array.ConvertAll(_world.WeaponMeshes.HullFor(kind), p => p - pivot);
                 Vector3 origin = WeaponTurntableBase + new Vector3(0f, 0.55f, 0f);
-                // The pickup pedestal sits on the ground below the weapon; include it so the
-                // subject is centred on what is actually in frame, not on the weapon alone.
-                lo = Vector3.Min(lo * 1.25f, new Vector3(-0.35f, -0.60f, -0.35f));
-                hi = Vector3.Max(hi * 1.25f, new Vector3(0.35f, 0f, 0.35f));
-                return FrameSubject(cam, origin, lo, hi, 1f, aspect, 32f);
+                // Nothing but the weapon is in the plate, so frame on the weapon alone.
+                return FrameSubject(cam, origin, hull, 1.25f, aspect, 32f);
             }
 
             Vector3 weapon = pawn.Position + new Vector3(0f, 0.55f, 0f);
@@ -2888,40 +2894,93 @@ public sealed class App : IDisposable
     }
 
     /// <summary>
-    /// Places a documentation camera so the subject is centred and fully inside the frame,
-    /// whatever its shape. The distance comes from the subject's own bounding sphere and the
-    /// camera's field of view rather than from hand-tuned offsets — a Goliath's gun, a
-    /// Darkwalker's legs and a hoverboard all differ by an order of magnitude in size, and every
-    /// per-vehicle fudge factor that tried to cover that range clipped something.
+    /// Places a documentation camera so a spinning subject stays fully inside the frame and fills
+    /// as much of it as it can, whatever its shape. <paramref name="hull"/> holds the subject's
+    /// silhouette support points in model space, already relative to the spin axis — the caller
+    /// subtracts the same pivot the turntable itself rotates about.
     /// </summary>
-    private static Camera FrameSubject(Camera cam, Vector3 origin, Vector3 min, Vector3 max,
+    /// <remarks>
+    /// The subject spins, so the framing has to hold for every frame of the turn rather than for
+    /// the one pose the mesh happened to be modelled in — getting that wrong is how the sniper
+    /// rifle and the Redeemer ended up with their muzzles cut off. Nothing here is hand-tuned per
+    /// subject: a Goliath's gun, a Darkwalker's legs and a hoverboard differ by an order of
+    /// magnitude in size, and every fudge factor that tried to cover that range clipped something.
+    /// </remarks>
+    private static Camera FrameSubject(Camera cam, Vector3 origin, Vector3[] hull,
         float modelScale, float aspect, float fovDegrees)
     {
-        Vector3 centre = origin + (min + max) * 0.5f * modelScale;
-        Vector3 half = (max - min) * 0.5f * modelScale;
-
-        // Three-quarter view from slightly above: the angle that reads a silhouette best.
+        // Three-quarter view from slightly above: the angle that reads a silhouette best. Only how
+        // far back the camera stands and how high it rides are solved for; the direction is fixed.
         Vector3 dir = Vector3.Normalize(new Vector3(0.80f, 0.42f, 0.66f));
+        Vector3 forward = -dir;
+        Vector3 right = MathX.SafeNormalize(Vector3.Cross(forward, MathX.Up), MathX.Right);
+        Vector3 up = Vector3.Cross(right, forward);
+        Vector3 centre = new(origin.X, origin.Y, origin.Z);
 
         cam.FovY = VerticalFov(fovDegrees, aspect);
         float halfFovY = cam.FovY * 0.5f;
         float halfFovX = MathF.Atan(MathF.Tan(halfFovY) * aspect);
+        // Narrow the usable cone rather than push the camera back, so the margin stays an even
+        // border on all four sides whichever axis ends up binding.
+        float tanX = MathF.Tan(halfFovX) / FrameMargin;
+        float tanY = MathF.Tan(halfFovY) / FrameMargin;
 
-        // Fit width and height separately. A bounding sphere would be safe but wasteful: a tank
-        // is four times longer than it is tall, and fitting its diagonal into the short axis
-        // leaves the subject swimming in empty frame. The subject spins, so the horizontal
-        // extent is the worst-case XZ radius; the vertical extent is the height plus whatever
-        // that radius contributes once the camera is looking down at it.
-        float spinRadius = MathF.Max(0.02f, MathF.Sqrt(half.X * half.X + half.Z * half.Z));
-        float tilt = MathF.Asin(MathX.Clamp(dir.Y, -1f, 1f));
-        float verticalExtent = MathF.Max(0.02f,
-            half.Y * MathF.Cos(tilt) + spinRadius * MathF.Sin(tilt));
-        float distance = MathF.Max(
-            spinRadius / MathF.Tan(halfFovX),
-            verticalExtent / MathF.Tan(halfFovY)) * 1.14f;
-        cam.Position = centre + dir * distance;
-        MathX.YawPitchFromDir(MathX.SafeNormalize(centre - cam.Position, -MathX.Right),
-            out cam.Yaw, out cam.Pitch);
+        // Flatten every frame of the turn into camera-basis coordinates once. Horizontal position
+        // is symmetric over a full turn, so the spin axis is already the best horizontal centre;
+        // the vertical one is not, because the camera looks down and each pose projects a
+        // different amount of the subject's depth onto the screen's vertical axis.
+        int count = hull.Length * TurntableFrames;
+        var lateral = new float[count];
+        var vertical = new float[count];
+        var depth = new float[count];
+        int n = 0;
+        for (int frame = 0; frame < TurntableFrames; frame++)
+        {
+            Matrix4x4 spin = Matrix4x4.CreateRotationY(frame * MathX.TwoPi / TurntableFrames);
+            foreach (Vector3 point in hull)
+            {
+                Vector3 offset = Vector3.Transform(point * modelScale, spin);
+                lateral[n] = MathF.Abs(Vector3.Dot(offset, right));
+                vertical[n] = Vector3.Dot(offset, up);
+                depth[n] = Vector3.Dot(offset, forward);
+                n++;
+            }
+        }
+
+        // Distance needed for a given camera height. Floored clear of the near plane so an empty
+        // mesh cannot put the camera inside itself.
+        float Required(float lift)
+        {
+            float d = 0.25f;
+            for (int i = 0; i < count; i++)
+            {
+                d = MathF.Max(d, lateral[i] / tanX - depth[i]);
+                d = MathF.Max(d, MathF.Abs(vertical[i] - lift) / tanY - depth[i]);
+            }
+            return d;
+        }
+
+        // Required() is a maximum of functions linear in lift, so it is convex: ternary search
+        // finds the height that lets the camera come closest, which is the framing that fills the
+        // most frame. Centring on the subject's own mid-height instead leaves the tightest pose
+        // hanging off one edge with dead space opposite.
+        float low = float.MaxValue, high = float.MinValue;
+        for (int i = 0; i < count; i++)
+        {
+            low = MathF.Min(low, vertical[i]);
+            high = MathF.Max(high, vertical[i]);
+        }
+        if (count == 0) { low = high = 0f; }
+        for (int i = 0; i < 48 && high - low > 1e-4f; i++)
+        {
+            float a = low + (high - low) / 3f, b = high - (high - low) / 3f;
+            if (Required(a) < Required(b)) high = b; else low = a;
+        }
+        float height = (low + high) * 0.5f;
+        float distance = Required(height);
+
+        cam.Position = centre + dir * distance + up * height;
+        MathX.YawPitchFromDir(MathX.SafeNormalize(forward, -MathX.Right), out cam.Yaw, out cam.Pitch);
         cam.Roll = 0f;
         cam.Update(aspect);
         return cam;

@@ -850,6 +850,54 @@ public sealed class MeshBuilder
         return (lo, hi);
     }
 
+    /// <summary>
+    /// The vertices that sit furthest out in each of <paramref name="directions"/> evenly spread
+    /// directions — a stand-in for the convex hull, small enough to keep around.
+    /// </summary>
+    /// <remarks>
+    /// Framing a turntable on the axis-aligned box wastes a third of the frame, because the box's
+    /// corners are empty air: a tank's box is as wide as its gun is long and as tall as its
+    /// turret, but nothing occupies the front-top corner. Fitting these support points instead
+    /// puts the subject's real silhouette against the frame edge.
+    /// </remarks>
+    public Vector3[] SupportCloud(int directions = 256)
+    {
+        if (_vertices.Count == 0) return [];
+
+        // Fibonacci sphere: evenly spread directions without clustering at the poles.
+        var probes = new Vector3[directions];
+        float golden = MathF.PI * (3f - MathF.Sqrt(5f));
+        for (int i = 0; i < directions; i++)
+        {
+            float y = 1f - 2f * (i + 0.5f) / directions;
+            float r = MathF.Sqrt(MathF.Max(0f, 1f - y * y));
+            float a = golden * i;
+            probes[i] = new Vector3(MathF.Cos(a) * r, y, MathF.Sin(a) * r);
+        }
+
+        // One pass over the vertices, updating every direction's running best. The transpose of
+        // this — rescanning the whole mesh once per direction — walks megabytes of vertex data
+        // hundreds of times over; the probe arrays here stay in cache instead.
+        var best = new int[directions];
+        var bestDot = new float[directions];
+        Array.Fill(bestDot, float.MinValue);
+        for (int v = 0; v < _vertices.Count; v++)
+        {
+            Vector3 p = _vertices[v].Position;
+            for (int i = 0; i < directions; i++)
+            {
+                float d = Vector3.Dot(p, probes[i]);
+                if (d > bestDot[i]) { bestDot[i] = d; best[i] = v; }
+            }
+        }
+
+        var picked = new HashSet<int>(best);
+        var cloud = new Vector3[picked.Count];
+        int n = 0;
+        foreach (int index in picked) cloud[n++] = _vertices[index].Position;
+        return cloud;
+    }
+
     public (Vertex[] Vertices, uint[] Indices, MeshSection[] Sections) Build()
     {
         var sections = new List<MeshSection>();

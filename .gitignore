@@ -9,6 +9,9 @@ artifacts/
 
 # Generated at runtime
 screenshots/
+# Per-frame PNGs the capture harnesses write and then delete; a crashed or
+# interrupted run leaves them behind and they must never reach a commit.
+docs/*/.capture/
 *.ico
 !src/Unreal99/Assets/Unreal99.ico
 

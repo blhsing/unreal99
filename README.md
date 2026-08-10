@@ -10,6 +10,44 @@
 
 ---
 
+## 目錄
+
+- [執行](#執行)
+  - [圖形化安裝程式](#圖形化安裝程式)
+  - [命令列安裝](#命令列安裝)
+  - [1.0.1 發行下載](#101-發行下載)
+  - [命令列參數](#命令列參數)
+- [競技場](#競技場)
+- [支配佔領](#支配佔領)
+  - [電腦對手的戰術](#電腦對手的戰術)
+  - [控制點必須放在走得到的地方](#控制點必須放在走得到的地方)
+- [攻堅模式](#攻堅模式)
+  - [電腦對手的戰術](#電腦對手的戰術-1)
+- [突擊模式](#突擊模式)
+  - [電腦對手的戰術](#電腦對手的戰術-2)
+- [載具](#載具)
+  - [載具一覽](#載具一覽)
+  - [電腦對手怎麼開](#電腦對手怎麼開)
+- [武器指南](#武器指南)
+- [多滑鼠．獨立按鍵配置](#多滑鼠獨立按鍵配置)
+  - [預設按鍵配置](#預設按鍵配置)
+  - [載具操作](#載具操作)
+  - [通用按鍵](#通用按鍵)
+- [設定與存檔](#設定與存檔)
+  - [設定持久化](#設定持久化)
+  - [隊伍與個別電腦難度](#隊伍與個別電腦難度)
+  - [存檔與讀檔](#存檔與讀檔)
+  - [示範模式](#示範模式)
+  - [選單操作](#選單操作)
+- [專案結構](#專案結構)
+  - [繪圖](#繪圖)
+  - [效能](#效能)
+  - [程序化內容](#程序化內容)
+  - [遊戲性](#遊戲性)
+- [說明](#說明)
+
+---
+
 ## 執行
 
 ```bash
@@ -93,7 +131,7 @@ artifacts\installer\Unreal99Installer.exe --help
 | `--nohud` | 隱藏介面與第一人稱槍枝，用於擷取文件用畫面 |
 | `--weaponshot N` | 強制裝備第 N 把武器，只隱藏 HUD 而保留第一人稱武器，用於擷取武器指南 |
 | `--weaponfootage N primary|secondary|both 路徑` | 在哥德庭園的實戰場景輸出第 N 把武器的 30 格動態畫面 |
-| `--weaponturntable N 路徑` | 以玩家接近拾取物的俯視角度，輸出第 N 把武器的 36 格 360° 旋轉畫面 |
+| `--weaponturntable N 路徑` | 在白底攝影棚輸出第 N 把武器的 36 格 360° 旋轉畫面，取景由包圍盒算出 |
 | `--vehicleturntable N 路徑` | 以遊戲正式網格輸出第 N 種載具的 36 格 360° 旋轉畫面 |
 | `--vehicletest` | 讓神級正式電腦依序駕駛十七種載具，驗證登乘、前進、轉向與導航復原 |
 | `--moderulestest` | 無視窗驗證攻堅節點、核心與突擊兩回合勝負規則 |
@@ -311,59 +349,41 @@ HUD 中央的目標卡顯示目前目標名稱、回合、自己是進攻或防�
 UT2004 與 UT3 引進的**十七種載具全部實作**，**且只在攻堅與突擊模式中出現**——同一張圖用死亡
 競賽載入時不會生成任何載具。按 `F`（玩家一）上下車；多人座載具的乘客座位各自獨立瞄準與開火。
 
-| 系列 | 載具 | 運動方式 | 座位 | 特徵 |
-| --- | --- | --- | --- | --- |
-| Axon | Scorpion | 輪型 | 1 | 快速偵察車 |
-| Axon | Hellbender | 輪型 | 3 | **駕駛無武裝**，火力全在後兩座 |
-| Axon | Goliath | 輪型 | 2 | 主戰車，主砲＋車頂機槍 |
-| Axon | Leviathan | 輪型 | 5 | 移動堡壘；架設後開火離子砲 |
-| Axon | Paladin | 輪型 | 1 | 可展開能量護盾吸收傷害 |
-| Axon | SPMA | 輪型 | 2 | 自走砲，需架設 |
-| Axon | Manta | 氣墊 | 1 | 雙電漿砲，可俯衝輾壓 |
-| Axon | Raptor | 飛行 | 1 | 戰機 |
-| Axon | Cicada | 飛行 | 2 | 武裝直升機 |
-| — | Ion Tank | 輪型 | 1 | 離子戰車（原作僅 AS-Glacier） |
-| Necris | Viper | 氣墊 | 1 | 可**自爆** |
-| Necris | Scavenger | 步行 | 1 | 三足能量球 |
-| Necris | Nemesis | 履帶 | 1 | 可升降砲塔的變形戰車 |
-| Necris | Nightshade | 氣墊 | 1 | **靜止時光學迷彩** |
-| Necris | Fury | 飛行 | 1 | 高速攔截機 |
-| Necris | Darkwalker | 步行 | 2 | 三足重型步行機 |
-| — | Hoverboard | 氣墊 | 1 | 純交通工具，**無武裝、不輾壓**、全場最快 |
-
-### 360° 遊戲內載具指南
+### 載具一覽
 
 以下不是概念圖；每段動畫都由遊戲的 `--vehicleturntable` 模式提交正式 `VehicleModels` 網格、比例與
-材質，以固定三分之四俯視鏡頭逐 10° 擷取，共 36 格。名稱與用途先列於每格，再顯示完整旋轉外形。
+材質，以固定三分之四俯視鏡頭逐 10° 擷取，共 36 格。取景由網格輪廓繞旋轉軸算出，因此砲管與
+步行腿都完整入鏡，同時盡量填滿畫面。完整命令與人工驗收程序見
+[載具旋轉展示擷取文件](docs/vehicle-turntable-capture.md)。
 
 <table>
 <tr>
-<td width="50%"><b>Scorpion · 蠍式突擊車</b><br>單座高速輪型偵察車；能量索炮與近身刀刃適合快速奪點。<br><br><img src="docs/vehicles/scorpion-turntable.webp" width="100%"></td>
-<td width="50%"><b>Hellbender · 地獄犬</b><br>三座輪型支援車；駕駛無武裝，後兩座負責天雷與遠距雷射。<br><br><img src="docs/vehicles/hellbender-turntable.webp" width="100%"></td>
+<td width="50%"><img src="docs/vehicles/scorpion-turntable.webp" width="100%"><br><b>Scorpion · 蠍式突擊車</b><br>Axon　輪型　1 座<br>快速偵察車；能量索炮與兩側近身刀刃適合搶點。</td>
+<td width="50%"><img src="docs/vehicles/hellbender-turntable.webp" width="100%"><br><b>Hellbender · 地獄犬</b><br>Axon　輪型　3 座<br><b>駕駛無武裝</b>；火力全在後兩座的天雷與遠距雷射。</td>
 </tr><tr>
-<td><b>Goliath · 歌利亞</b><br>雙座主戰車；重型主砲保持遠距，車頂機槍壓制步兵。<br><br><img src="docs/vehicles/goliath-turntable.webp" width="100%"></td>
-<td><b>Leviathan · 利維坦</b><br>五座移動堡壘；抵達陣地後架設，主駕駛改用離子砲。<br><br><img src="docs/vehicles/leviathan-turntable.webp" width="100%"></td>
+<td><img src="docs/vehicles/goliath-turntable.webp" width="100%"><br><b>Goliath · 歌利亞</b><br>Axon　履帶　2 座<br>主戰車；主砲保持遠距，車頂機槍壓制步兵。</td>
+<td><img src="docs/vehicles/leviathan-turntable.webp" width="100%"><br><b>Leviathan · 利維坦</b><br>Axon　輪型　5 座<br>移動堡壘；抵達陣地後架設，主駕駛改用離子砲。</td>
 </tr><tr>
-<td><b>Paladin · 聖騎士</b><br>單座重裝支援車；可展開能量護盾替隊友吸收正面火力。<br><br><img src="docs/vehicles/paladin-turntable.webp" width="100%"></td>
-<td><b>SPMA · 自走砲</b><br>雙座遠程砲車；以拋物線重砲越過掩體，乘客座提供天雷防禦。<br><br><img src="docs/vehicles/spma-turntable.webp" width="100%"></td>
+<td><img src="docs/vehicles/paladin-turntable.webp" width="100%"><br><b>Paladin · 聖騎士</b><br>Axon　履帶　1 座<br>重裝支援車；可展開能量護盾替隊友吸收正面火力。</td>
+<td><img src="docs/vehicles/spma-turntable.webp" width="100%"><br><b>SPMA · 自走砲</b><br>Axon　輪型　2 座<br>遠程砲車，需架設；以拋物線重砲越過掩體。</td>
 </tr><tr>
-<td><b>Manta · 曼塔</b><br>單座高速氣墊艇；雙電漿砲與俯衝輾壓適合貼近突襲。<br><br><img src="docs/vehicles/manta-turntable.webp" width="100%"></td>
-<td><b>Raptor · 猛禽</b><br>單座飛行戰機；可自由爬升俯衝，以電漿與火箭攻擊地空目標。<br><br><img src="docs/vehicles/raptor-turntable.webp" width="100%"></td>
+<td><img src="docs/vehicles/manta-turntable.webp" width="100%"><br><b>Manta · 曼塔</b><br>Axon　氣墊　1 座<br>高速氣墊艇；雙電漿砲，可俯衝輾壓。</td>
+<td><img src="docs/vehicles/raptor-turntable.webp" width="100%"><br><b>Raptor · 猛禽</b><br>Axon　飛行　1 座<br>戰機；可自由爬升俯衝，以電漿與飛彈攻擊地空目標。</td>
 </tr><tr>
-<td><b>Cicada · 蟬式武裝機</b><br>雙座飛行支援載具；駕駛發射火箭，乘客以獨立砲塔掩護。<br><br><img src="docs/vehicles/cicada-turntable.webp" width="100%"></td>
-<td><b>Ion Tank · 離子戰車</b><br>單座重型輪車；慢速但以長程高傷離子砲控制開闊地。<br><br><img src="docs/vehicles/ion-tank-turntable.webp" width="100%"></td>
+<td><img src="docs/vehicles/cicada-turntable.webp" width="100%"><br><b>Cicada · 蟬式武裝機</b><br>Axon　飛行　2 座<br>武裝直升機；駕駛發射飛彈，乘客以腹部砲塔掩護。</td>
+<td><img src="docs/vehicles/ion-tank-turntable.webp" width="100%"><br><b>Ion Tank · 離子戰車</b><br>履帶　1 座<br>慢速但以長程高傷離子砲控制開闊地（原作僅 AS-Glacier）。</td>
 </tr><tr>
-<td><b>Viper · 蝰蛇</b><br>單座 Necris 氣墊艇；高速電漿突襲，必要時可自爆衝入目標。<br><br><img src="docs/vehicles/viper-turntable.webp" width="100%"></td>
-<td><b>Scavenger · 掠奪者</b><br>單座三足快速步行機；近距光束與捲球衝撞用於突破狹道。<br><br><img src="docs/vehicles/scavenger-turntable.webp" width="100%"></td>
+<td><img src="docs/vehicles/viper-turntable.webp" width="100%"><br><b>Viper · 蝰蛇</b><br>Necris　氣墊　1 座<br>高速電漿突襲；必要時可<b>自爆</b>衝入目標。</td>
+<td><img src="docs/vehicles/scavenger-turntable.webp" width="100%"><br><b>Scavenger · 掠奪者</b><br>Necris　步行　1 座<br>三足能量球；近距光束與捲球衝撞用於突破狹道。</td>
 </tr><tr>
-<td><b>Nemesis · 復仇者</b><br>單座履帶變形戰車；砲塔可升高取得射界，也可下沉躲進掩體。<br><br><img src="docs/vehicles/nemesis-turntable.webp" width="100%"></td>
-<td><b>Nightshade · 夜影</b><br>單座隱形氣墊支援車；靜止時啟動光學迷彩，投放區域拒止武器。<br><br><img src="docs/vehicles/nightshade-turntable.webp" width="100%"></td>
+<td><img src="docs/vehicles/nemesis-turntable.webp" width="100%"><br><b>Nemesis · 復仇者</b><br>Necris　履帶　1 座<br>變形戰車；砲塔可升高取得射界，也可下沉躲進掩體。</td>
+<td><img src="docs/vehicles/nightshade-turntable.webp" width="100%"><br><b>Nightshade · 夜影</b><br>Necris　氣墊　1 座<br><b>靜止時光學迷彩</b>；投放區域拒止武器。</td>
 </tr><tr>
-<td><b>Fury · 狂怒</b><br>單座高速攔截機；以長程光束獵殺飛行與地面目標。<br><br><img src="docs/vehicles/fury-turntable.webp" width="100%"></td>
-<td><b>Darkwalker · 暗黑行者</b><br>雙座三足重型步行機；高車體越過障礙，以雙光束壓制戰線。<br><br><img src="docs/vehicles/darkwalker-turntable.webp" width="100%"></td>
+<td><img src="docs/vehicles/fury-turntable.webp" width="100%"><br><b>Fury · 狂怒</b><br>Necris　飛行　1 座<br>高速攔截機；以長程光束獵殺飛行與地面目標。</td>
+<td><img src="docs/vehicles/darkwalker-turntable.webp" width="100%"><br><b>Darkwalker · 暗黑行者</b><br>Necris　步行　2 座<br>三足重型步行機；高車體越過障礙，以雙光束壓制戰線。</td>
 </tr><tr>
-<td><b>Hoverboard · 氣墊滑板</b><br>單座無武裝個人交通工具；快速穿越戰場，到達目標即下車。<br><br><img src="docs/vehicles/hoverboard-turntable.webp" width="100%"></td>
-<td><b>可重建、可驗證</b><br>完整命令、編號、輸出格式與人工驗收程序見 <a href="docs/vehicle-turntable-capture.md">載具旋轉展示擷取文件</a>。</td>
+<td><img src="docs/vehicles/hoverboard-turntable.webp" width="100%"><br><b>Hoverboard · 氣墊滑板</b><br>氣墊　1 座<br>純交通工具，<b>無武裝、不輾壓</b>、全場最快；到達目標即下車。</td>
+<td></td>
 </tr>
 </table>
 
@@ -392,38 +412,38 @@ UT2004 與 UT3 引進的**十七種載具全部實作**，**且只在攻堅與�
 **哥德庭園實戰**。擷取流程會在開闊、可直視的場地放入一名會移動、瞄準及還擊的真實電腦敵人，
 避免立柱或轉角遮住交戰；文件攝影玩家則保持無敵，防止擷取途中死亡或被爆炸推離鏡位。每把武器
 都分別展示主要與次要用法，包括真實的後座、槍口火光、充能、光束、投射物與爆炸；每把武器
-另有從玩家接近地面拾取物時常見的俯視角度拍攝、繞行完整一周的 360° 動態展示。主要射擊使用
-滑鼠左鍵，次要射擊使用滑鼠右鍵。
+另有一段白底的 360° 模型展示：畫面裡只有武器本身，取景由網格輪廓繞旋轉軸算出，所以整枝
+武器都在框內並盡量填滿。主要射擊使用滑鼠左鍵，次要射擊使用滑鼠右鍵。
 
 <table>
 <tr>
-<td width="50%"><b>1 · 衝擊錘</b><br>主要：按住蓄力後近身重擊。<br>次要：快速揮擊。<br>無需彈藥；適合貼身反擊與最後手段。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/impact-hammer-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/impact-hammer-secondary.webp" width="100%"><br><b>360° 地面拾取展示</b><br><img src="docs/weapons/impact-hammer-turntable.webp" width="100%"></td>
-<td width="50%"><b>2 · 執法者手槍</b><br>主要：穩定的單發即時命中。<br>次要：射速更快，但散佈更大。<br>中近距離可靠的出生武器。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/enforcer-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/enforcer-secondary.webp" width="100%"><br><b>360° 地面拾取展示</b><br><img src="docs/weapons/enforcer-turntable.webp" width="100%"></td>
+<td width="50%"><b>1 · 衝擊錘</b><br>主要：按住蓄力後近身重擊。<br>次要：快速揮擊。<br>無需彈藥；適合貼身反擊與最後手段。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/impact-hammer-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/impact-hammer-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/impact-hammer-turntable.webp" width="100%"></td>
+<td width="50%"><b>2 · 執法者手槍</b><br>主要：穩定的單發即時命中。<br>次要：射速更快，但散佈更大。<br>中近距離可靠的出生武器。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/enforcer-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/enforcer-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/enforcer-turntable.webp" width="100%"></td>
 </tr>
 <tr>
-<td><b>3 · 生化步槍</b><br>主要：連射會濺射的生化凝膠。<br>次要：按住蓄積大型高傷害凝膠。<br>用於封鎖門口、轉角與狹窄通道。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/bio-rifle-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/bio-rifle-secondary.webp" width="100%"><br><b>360° 地面拾取展示</b><br><img src="docs/weapons/bio-rifle-turntable.webp" width="100%"></td>
-<td><b>4 · 震盪步槍</b><br>主要：精準的遠距能量光束。<br>次要：發射較慢的震盪球。<br>用主要光束擊中自己的震盪球可引發震盪連鎖。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/shock-rifle-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/shock-rifle-secondary.webp" width="100%"><br><b>360° 地面拾取展示</b><br><img src="docs/weapons/shock-rifle-turntable.webp" width="100%"></td>
+<td><b>3 · 生化步槍</b><br>主要：連射會濺射的生化凝膠。<br>次要：按住蓄積大型高傷害凝膠。<br>用於封鎖門口、轉角與狹窄通道。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/bio-rifle-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/bio-rifle-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/bio-rifle-turntable.webp" width="100%"></td>
+<td><b>4 · 震盪步槍</b><br>主要：精準的遠距能量光束。<br>次要：發射較慢的震盪球。<br>用主要光束擊中自己的震盪球可引發震盪連鎖。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/shock-rifle-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/shock-rifle-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/shock-rifle-turntable.webp" width="100%"></td>
 </tr>
 <tr>
-<td><b>5 · 脈衝步槍</b><br>主要：高速連射電漿彈。<br>次要：近距離持續能量束。<br>追蹤走位中的敵人時尤其有效。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/pulse-gun-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/pulse-gun-secondary.webp" width="100%"><br><b>360° 地面拾取展示</b><br><img src="docs/weapons/pulse-gun-turntable.webp" width="100%"></td>
-<td><b>6 · 撕裂者</b><br>主要：發射可在牆面反彈的刀刃。<br>次要：發射具有爆炸範圍的刀刃。<br>可利用轉角與反彈路線打擊掩體後方。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/ripper-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/ripper-secondary.webp" width="100%"><br><b>360° 地面拾取展示</b><br><img src="docs/weapons/ripper-turntable.webp" width="100%"></td>
+<td><b>5 · 脈衝步槍</b><br>主要：高速連射電漿彈。<br>次要：近距離持續能量束。<br>追蹤走位中的敵人時尤其有效。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/pulse-gun-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/pulse-gun-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/pulse-gun-turntable.webp" width="100%"></td>
+<td><b>6 · 撕裂者</b><br>主要：發射可在牆面反彈的刀刃。<br>次要：發射具有爆炸範圍的刀刃。<br>可利用轉角與反彈路線打擊掩體後方。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/ripper-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/ripper-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/ripper-turntable.webp" width="100%"></td>
 </tr>
 <tr>
-<td><b>7 · 速射機槍</b><br>主要：較精準的高速連射。<br>次要：極高射速、較大散佈。<br>持續壓制中近距離目標。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/minigun-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/minigun-secondary.webp" width="100%"><br><b>360° 地面拾取展示</b><br><img src="docs/weapons/minigun-turntable.webp" width="100%"></td>
-<td><b>8 · 破片加農砲</b><br>主要：一次散射九枚高速破片。<br>次要：拋射會爆炸的破片砲彈。<br>近距離正面命中具有極強爆發力。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/flak-cannon-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/flak-cannon-secondary.webp" width="100%"><br><b>360° 地面拾取展示</b><br><img src="docs/weapons/flak-cannon-turntable.webp" width="100%"></td>
+<td><b>7 · 速射機槍</b><br>主要：較精準的高速連射。<br>次要：極高射速、較大散佈。<br>持續壓制中近距離目標。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/minigun-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/minigun-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/minigun-turntable.webp" width="100%"></td>
+<td><b>8 · 破片加農砲</b><br>主要：一次散射九枚高速破片。<br>次要：拋射會爆炸的破片砲彈。<br>近距離正面命中具有極強爆發力。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/flak-cannon-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/flak-cannon-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/flak-cannon-turntable.webp" width="100%"></td>
 </tr>
 <tr>
-<td><b>9 · 火箭發射器</b><br>主要：直線飛行的高傷害火箭。<br>次要：受重力影響、可越過障礙的榴彈。<br>瞄準敵人腳下，以爆炸範圍封鎖退路。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/rocket-launcher-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/rocket-launcher-secondary.webp" width="100%"><br><b>360° 地面拾取展示</b><br><img src="docs/weapons/rocket-launcher-turntable.webp" width="100%"></td>
-<td><b>狙擊步槍</b><br>主要：高傷害、零散佈的遠距射擊。<br>次要：啟用放大瞄準。<br>制高點與跨場通道上的首選。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/sniper-rifle-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/sniper-rifle-secondary.webp" width="100%"><br><b>360° 地面拾取展示</b><br><img src="docs/weapons/sniper-rifle-turntable.webp" width="100%"></td>
+<td><b>9 · 火箭發射器</b><br>主要：直線飛行的高傷害火箭。<br>次要：受重力影響、可越過障礙的榴彈。<br>瞄準敵人腳下，以爆炸範圍封鎖退路。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/rocket-launcher-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/rocket-launcher-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/rocket-launcher-turntable.webp" width="100%"></td>
+<td><b>狙擊步槍</b><br>主要：高傷害、零散佈的遠距射擊。<br>次要：啟用放大瞄準。<br>制高點與跨場通道上的首選。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/sniper-rifle-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/sniper-rifle-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/sniper-rifle-turntable.webp" width="100%"></td>
 </tr>
 <tr>
-<td><b>0 · 救世主核彈</b><br>主要：發射大範圍核彈頭。<br>次要：速度較慢，但爆炸半徑與傷害更高。<br>極稀有；發射前先確認自己有安全距離。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/redeemer-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/redeemer-secondary.webp" width="100%"><br><b>360° 地面拾取展示</b><br><img src="docs/weapons/redeemer-turntable.webp" width="100%"></td>
+<td><b>0 · 救世主核彈</b><br>主要：發射大範圍核彈頭。<br>次要：速度較慢，但爆炸半徑與傷害更高。<br>極稀有；發射前先確認自己有安全距離。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/redeemer-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/redeemer-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/redeemer-turntable.webp" width="100%"></td>
 <td><br><b>切換提示</b><br>數字鍵 1～9 選擇衝擊錘至火箭發射器，0 選擇救世主；Q／E 或滑鼠滾輪循環切換。狙擊步槍可用循環切換或自行綁定快捷鍵。</td>
 </tr>
 </table>
 
 圖庫可由 [`docs/capture-weapons.ps1`](docs/capture-weapons.ps1) 重新擷取；腳本會為每把武器產生
-主要／次要射擊的 30 格循環 WebP 與 36 格 360° 地面拾取展示，並在輸出後驗證動畫格數與尺寸。流程使用實際
+主要／次要射擊的 30 格循環 WebP 與 36 格 360° 模型展示，並在輸出後驗證動畫格數與尺寸。流程使用實際
 關卡、武器模擬和電腦控制器，確保文件展示的永遠是目前引擎實際執行的戰鬥效果。實戰動畫與
 旋轉展示的完整環境、取景方式、局部重建、畫面驗收與版本控制程序見
 [`docs/weapon-footage-capture.md`](docs/weapon-footage-capture.md)。
@@ -467,7 +487,7 @@ Windows 通常會列舉十幾個「幽靈」HID 裝置，因此配對採用**實
 
 | 操作 | 說明 |
 | --- | --- |
-| 上下載具 | 玩家一 `F`、玩家二 `Enter`、玩家三 `K` |
+| 上下載具 | 玩家一 `F`、玩家二 `Enter`、玩家三 `K`、玩家四 `Enter`（玩家四預設使用方向鍵配置） |
 | 前進／後退 | 移動鍵的前後（`W`／`S`）＝油門與倒車 |
 | 轉向 | 移動鍵的左右（`A`／`D`）＝方向盤；輪型與履帶載具靠轉向瞄準車體固定武器 |
 | 爬升／下降 | `Space`／蹲下鍵。**僅飛行載具**（Raptor、Cicada、Fury）；氣墊載具按跳躍可短暫抬升 |
@@ -652,8 +672,8 @@ src/Unreal99.Installer/
   艦體、有膛口制退器的砲管、由厚變薄的機翼。兩者都會依**折角判定**（夾角超過約 35° 視為硬邊）
   分裂法線，因此機械加工的肩線是銳利的，圓弧的地方才平滑——少了這一步，砲管會像骨頭。
 * **武器** — 十一把全部以程式建模，統一以 -Z 為前方的區域座標系，因此同一份網格可同時用於
-  第一人稱視角、第三人稱持槍與道具展示台。武器整場比賽都佔著三分之一的畫面，因此細節預算
-  最高：握把、機匣、彈匣、瞄準鏡與膛口都是掃掠或車削出來的實體，不是方塊堆疊。
+  第一人稱視角、第三人稱持槍與道具展示台。武器整場比賽都掛在畫面一角，是玩家看得最久的模型，
+  因此細節預算最高：握把、機匣、彈匣、瞄準鏡與膛口都是掃掠或車削出來的實體，不是方塊堆疊。
 * **載具** — 十七種全部以程式建模，以 **+Z 為前方**（與物理的行進方向一致）。裝甲車輛使用
   帶折角的斜甲截面、砲塔環與含抽煙器和膛口制退器的砲管，履帶是含負重輪、主動輪與惰輪的
   完整行走裝置；飛行載具使用翼型掃掠的機翼與座艙罩；Necris 載具則是反曲膝關節的步行腿。

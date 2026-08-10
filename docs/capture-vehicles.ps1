@@ -75,7 +75,16 @@ for ($vehicle = $StartVehicle; $vehicle -le $EndVehicle; $vehicle++) {
     $slug = $slugs[$vehicle]
     $frames = Join-Path $temporaryRoot $slug
     $destination = Join-Path $outputPath ($slug + "-turntable.webp")
-    Invoke-GameCapture @("--vehicleturntable", $vehicle, $frames)
+    # Verify the frames before converting: a failed framebuffer read-back leaves zero-byte PNGs
+    # behind, which is rare but clears on a retry.
+    for ($attempt = 1; $attempt -le 3; $attempt++) {
+        Remove-CaptureDirectory $frames
+        Invoke-GameCapture @("--vehicleturntable", $vehicle, $frames)
+        $captured = @(Get-ChildItem -LiteralPath $frames -Filter "*.png" -ErrorAction SilentlyContinue)
+        if ($captured.Count -eq 36 -and @($captured | Where-Object { $_.Length -eq 0 }).Count -eq 0) { break }
+        if ($attempt -eq 3) { throw "Capture kept producing empty frames for $slug" }
+        Write-Host "  capture produced empty frames; retrying ($attempt/3)"
+    }
     & $pythonCommand $webpBuilder --input $frames --output $destination `
         --expected-frames 36 --quality 78 --alpha
     if ($LASTEXITCODE -ne 0) { throw "WebP conversion failed for $slug" }
