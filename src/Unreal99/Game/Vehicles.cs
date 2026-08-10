@@ -390,7 +390,9 @@ public sealed class VehicleDef
 
         All[(int)VehicleKind.Nemesis] = new VehicleDef
         {
-            Kind = VehicleKind.Nemesis, Name = Loc.VehNemesis, Motion = VehicleMotion.Walker,
+            // Tracked, not legged: the original is a low transforming tank whose turret rises
+            // and hunkers. Building it as a walker made it read as a Scavenger with a gun.
+            Kind = VehicleKind.Nemesis, Name = Loc.VehNemesis, Motion = VehicleMotion.Wheeled,
             Health = 1200f, MaxSpeed = 15f, Acceleration = 16f, TurnRate = 1.2f,
             HalfExtents = new Vector3(1.8f, 1.6f, 2.6f), Tint = new Vector3(0.32f, 0.36f, 0.42f),
             Seats =

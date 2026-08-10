@@ -123,7 +123,7 @@ for ($weapon = $StartWeapon; $weapon -le $EndWeapon; $weapon++) {
         $turntableDestination = Join-Path $outputPath ($slug + "-turntable.webp")
         Invoke-GameCapture @("--weaponturntable", $weapon, $turntableFrames)
         & $pythonCommand $webpBuilder --input $turntableFrames --output $turntableDestination `
-            --expected-frames 36 --quality 78
+            --expected-frames 36 --quality 78 --alpha
         if ($LASTEXITCODE -ne 0) { throw "Turntable WebP conversion failed for $slug" }
     }
 

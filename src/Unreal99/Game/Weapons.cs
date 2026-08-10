@@ -84,7 +84,7 @@ public static class Weapons
             FpOffset = new Vector3(0.185f, -0.260f, -0.38f), FpScale = 0.86f,
             // The head, not a muzzle: this is where the swing originates from. Kept in step with
             // the model, which now ends at -0.379 rather than the old -0.53.
-            MuzzleLocal = new Vector3(0, 0.045f, -0.38f),
+            MuzzleLocal = new Vector3(0, 0.045f, -0.365f),
             Primary = new FireDef
             {
                 Mode = FireMode.Melee, Damage = 42f, Interval = 0.85f, Range = 3.0f, Shots = 1,
@@ -106,7 +106,7 @@ public static class Weapons
             Tint = new Vector3(1f, 0.86f, 0.55f),
             BotPreference = 0.4f,
             IdealRangeMax = 32f,
-            MuzzleLocal = new Vector3(0, 0.015f, -0.34f),
+            MuzzleLocal = new Vector3(0, 0.070f, -0.285f),
             FpOffset = new Vector3(0.165f, -0.225f, -0.36f), FpScale = 0.86f,
             Primary = new FireDef
             {
@@ -131,7 +131,7 @@ public static class Weapons
             Tint = new Vector3(0.45f, 1f, 0.25f),
             BotPreference = 0.75f,
             IdealRangeMin = 2f, IdealRangeMax = 26f,
-            MuzzleLocal = new Vector3(0, 0.03f, -0.58f),
+            MuzzleLocal = new Vector3(0, 0.050f, -0.580f),
             Primary = new FireDef
             {
                 Mode = FireMode.Projectile, Projectile = ProjectileKind.BioGlob, Damage = 22f,
@@ -157,7 +157,7 @@ public static class Weapons
             Tint = new Vector3(0.55f, 0.35f, 1f),
             BotPreference = 1.25f,
             IdealRangeMax = 90f,
-            MuzzleLocal = new Vector3(0, 0.02f, -0.66f),
+            MuzzleLocal = new Vector3(0, 0.050f, -0.640f),
             Primary = new FireDef
             {
                 Mode = FireMode.Hitscan, Damage = 42f, Interval = 0.65f, Spread = 0f, Shots = 1,
@@ -181,7 +181,7 @@ public static class Weapons
             Tint = new Vector3(0.35f, 1f, 0.55f),
             BotPreference = 0.95f,
             IdealRangeMax = 40f,
-            MuzzleLocal = new Vector3(0, 0.02f, -0.62f),
+            MuzzleLocal = new Vector3(0, 0.050f, -0.575f),
             Primary = new FireDef
             {
                 Mode = FireMode.Projectile, Projectile = ProjectileKind.PlasmaBolt, Damage = 17f,
@@ -205,7 +205,7 @@ public static class Weapons
             Tint = new Vector3(0.85f, 0.95f, 1f),
             BotPreference = 0.9f,
             IdealRangeMax = 45f,
-            MuzzleLocal = new Vector3(0, 0.02f, -0.56f),
+            MuzzleLocal = new Vector3(0, 0.046f, -0.480f),
             Primary = new FireDef
             {
                 Mode = FireMode.Projectile, Projectile = ProjectileKind.RipperBlade, Damage = 34f,
@@ -232,7 +232,7 @@ public static class Weapons
             BotPreference = 1.1f,
             IdealRangeMax = 55f,
             SpinUp = true,
-            MuzzleLocal = new Vector3(0, 0.02f, -0.72f),
+            MuzzleLocal = new Vector3(0, 0.050f, -0.730f),
             FpOffset = new Vector3(0.190f, -0.255f, -0.52f), FpScale = 0.76f,
             Primary = new FireDef
             {
@@ -257,7 +257,7 @@ public static class Weapons
             Tint = new Vector3(1f, 0.55f, 0.15f),
             BotPreference = 1.35f,
             IdealRangeMax = 20f,
-            MuzzleLocal = new Vector3(0, 0.03f, -0.6f),
+            MuzzleLocal = new Vector3(0, 0.055f, -0.595f),
             FpOffset = new Vector3(0.180f, -0.250f, -0.48f), FpScale = 0.78f,
             Primary = new FireDef
             {
@@ -283,7 +283,7 @@ public static class Weapons
             Tint = new Vector3(1f, 0.6f, 0.2f),
             BotPreference = 1.6f,
             IdealRangeMin = 5f, IdealRangeMax = 60f,
-            MuzzleLocal = new Vector3(0, 0.04f, -0.66f),
+            MuzzleLocal = new Vector3(0, 0.062f, -0.655f),
             FpOffset = new Vector3(0.190f, -0.255f, -0.50f), FpScale = 0.76f,
             Primary = new FireDef
             {
@@ -310,7 +310,7 @@ public static class Weapons
             Tint = new Vector3(0.8f, 0.9f, 1f),
             BotPreference = 1.2f,
             IdealRangeMin = 12f, IdealRangeMax = 200f,
-            MuzzleLocal = new Vector3(0, 0.02f, -0.8f),
+            MuzzleLocal = new Vector3(0, 0.048f, -0.785f),
             FpOffset = new Vector3(0.165f, -0.220f, -0.56f), FpScale = 0.72f,
             Primary = new FireDef
             {
@@ -336,7 +336,7 @@ public static class Weapons
             BotPreference = 3.0f,
             IdealRangeMin = 14f, IdealRangeMax = 150f,
             SwitchTime = 0.7f,
-            MuzzleLocal = new Vector3(0, 0.04f, -0.9f),
+            MuzzleLocal = new Vector3(0, 0.060f, -0.870f),
             FpOffset = new Vector3(0.205f, -0.275f, -0.62f), FpScale = 0.68f,
             Primary = new FireDef
             {
@@ -369,258 +369,4 @@ public static class Weapons
         WeaponKind.PulseGun, WeaponKind.Ripper, WeaponKind.Minigun, WeaponKind.FlakCannon,
         WeaponKind.RocketLauncher, WeaponKind.SniperRifle, WeaponKind.Redeemer,
     ];
-}
-
-/// <summary>
-/// Procedurally built weapon meshes. Each is modelled in a local frame where -Z is forward,
-/// +Y is up and the origin sits at the grip, so the same mesh works for the first-person
-/// view and for the third-person model held in the character's right hand.
-/// </summary>
-public sealed class WeaponModels : IDisposable
-{
-    private readonly Mesh[] _meshes = new Mesh[(int)WeaponKind.Count];
-    private readonly MeshSection[][] _sections = new MeshSection[(int)WeaponKind.Count][];
-
-    public Mesh MeshFor(WeaponKind k) => _meshes[(int)k];
-    public MeshSection[] SectionsFor(WeaponKind k) => _sections[(int)k];
-
-    public WeaponModels(GL gl)
-    {
-        for (int i = 0; i < (int)WeaponKind.Count; i++)
-        {
-            var mb = new MeshBuilder { WorldUv = false, Material = (int)MatId.WeaponMetal };
-            Build((WeaponKind)i, mb);
-            mb.RecalculateTangents();
-            var (v, ind, s) = mb.Build();
-            _meshes[i] = Mesh.CreateStatic<Vertex>(gl, v, ind, VertexLayouts.Static);
-            _sections[i] = s;
-        }
-    }
-
-    private static void Grip(MeshBuilder mb, float length = 0.20f, float z = 0.06f)
-    {
-        mb.Material = (int)MatId.TechPanelDark;
-        mb.AddBox(new Vector3(0, -length * 0.5f, z), new Vector3(0.032f, length * 0.5f, 0.05f));
-        mb.AddBox(new Vector3(0, -0.02f, z - 0.075f), new Vector3(0.026f, 0.022f, 0.055f));
-    }
-
-    /// <summary>
-    /// Cylinder lying along the weapon's forward axis (-Z). MeshBuilder builds cylinders along
-    /// +Y, so everything barrel-shaped goes through here to get rotated into place.
-    /// <paramref name="rearRadius"/> is the breech end, <paramref name="frontRadius"/> the muzzle.
-    /// </summary>
-    private static void Barrel(MeshBuilder mb, Vector3 center, float rearRadius, float frontRadius,
-        float length, int segments = 10)
-    {
-        mb.PushTransform(Matrix4x4.CreateRotationX(-MathX.HalfPi) * Matrix4x4.CreateTranslation(center));
-        mb.AddCylinder(Vector3.Zero, rearRadius, frontRadius, length, segments);
-        mb.PopTransform();
-    }
-
-    /// <summary>Ring encircling the forward axis: muzzle brakes, barrel clamps, collars.</summary>
-    private static void Collar(MeshBuilder mb, Vector3 center, float major, float minor, int segments = 14)
-    {
-        mb.PushTransform(Matrix4x4.CreateRotationX(-MathX.HalfPi) * Matrix4x4.CreateTranslation(center));
-        mb.AddTorus(Vector3.Zero, major, minor, segments, 6);
-        mb.PopTransform();
-    }
-
-    /// <summary>Disc facing along the forward axis: rotor plates, blade magazines.</summary>
-    private static void Disc(MeshBuilder mb, Vector3 center, float radius, float thickness, int segments = 14)
-    {
-        mb.PushTransform(Matrix4x4.CreateRotationX(-MathX.HalfPi) * Matrix4x4.CreateTranslation(center));
-        mb.AddCylinder(Vector3.Zero, radius, radius, thickness, segments);
-        mb.PopTransform();
-    }
-
-    private static void Build(WeaponKind kind, MeshBuilder mb)
-    {
-        switch (kind)
-        {
-            case WeaponKind.ImpactHammer:
-                // A pneumatic hammer, not a gun. The first version was a long slim body with a
-                // forward cylinder and a small muzzle plate, which is a gun silhouette however
-                // it is textured. What makes this read as a hammer is proportion: a stubby body,
-                // exposed piston rods, and a percussion head far wider than anything behind it.
-                Grip(mb, 0.22f, 0.03f);
-                mb.Material = (int)MatId.WeaponMetal;
-                // Compact housing sitting straight on the grip.
-                mb.AddBox(new Vector3(0, 0.045f, -0.07f), new Vector3(0.058f, 0.062f, 0.12f));
-                // Pressure bottle along the top.
-                Barrel(mb, new Vector3(0, 0.125f, -0.06f), 0.042f, 0.042f, 0.19f, 12);
-                // Twin piston rods carrying the head, deliberately left exposed.
-                mb.Material = (int)MatId.Trim;
-                foreach (float rodX in new[] { -0.055f, 0.055f })
-                    Barrel(mb, new Vector3(rodX, 0.045f, -0.245f), 0.016f, 0.016f, 0.12f, 8);
-                // The head flares to a touch wider than the flak cannon's muzzle — the widest
-                // thing in the arsenal, but only just. A first attempt at 0.15 was two thirds
-                // wider again and swallowed a quarter of the screen.
-                mb.Material = (int)MatId.WeaponMetal;
-                Barrel(mb, new Vector3(0, 0.045f, -0.325f), 0.072f, 0.100f, 0.06f, 12);
-                mb.Material = (int)MatId.Trim;
-                Collar(mb, new Vector3(0, 0.045f, -0.367f), 0.104f, 0.024f);
-                mb.Material = (int)MatId.EnergyPanel;
-                mb.AddBox(new Vector3(0, 0.168f, -0.06f), new Vector3(0.020f, 0.008f, 0.075f));
-                break;
-
-            case WeaponKind.Enforcer:
-                Grip(mb, 0.17f, 0.045f);
-                mb.Material = (int)MatId.WeaponMetal;
-                mb.AddBox(new Vector3(0, 0.045f, -0.09f), new Vector3(0.030f, 0.048f, 0.145f));
-                Barrel(mb, new Vector3(0, 0.055f, -0.28f), 0.021f, 0.019f, 0.20f);
-                mb.Material = (int)MatId.Trim;
-                mb.AddBox(new Vector3(0, 0.095f, -0.16f), new Vector3(0.008f, 0.010f, 0.05f));
-                mb.Material = (int)MatId.TechPanelDark;
-                mb.AddBox(new Vector3(0, 0.012f, -0.055f), new Vector3(0.020f, 0.028f, 0.05f));
-                break;
-
-            case WeaponKind.BioRifle:
-                Grip(mb, 0.20f, 0.06f);
-                mb.Material = (int)MatId.RustMetal;
-                mb.AddBox(new Vector3(0, 0.04f, -0.16f), new Vector3(0.055f, 0.06f, 0.24f));
-                Barrel(mb, new Vector3(0, 0.05f, -0.46f), 0.055f, 0.045f, 0.24f, 12);
-                mb.Material = (int)MatId.Flesh;
-                mb.AddSphere(new Vector3(0.0f, 0.125f, -0.10f), 0.075f, 8, 12);
-                mb.AddSphere(new Vector3(0.0f, 0.115f, 0.02f), 0.055f, 8, 12);
-                mb.Material = (int)MatId.EnergyPanel;
-                Barrel(mb, new Vector3(0, 0.05f, -0.60f), 0.036f, 0.030f, 0.05f, 10);
-                mb.Material = (int)MatId.Trim;
-                mb.AddBox(new Vector3(0, 0.05f, -0.34f), new Vector3(0.062f, 0.065f, 0.022f));
-                break;
-
-            case WeaponKind.ShockRifle:
-                Grip(mb, 0.19f, 0.07f);
-                mb.Material = (int)MatId.WeaponMetal;
-                mb.AddBox(new Vector3(0, 0.045f, -0.18f), new Vector3(0.042f, 0.055f, 0.28f));
-                Barrel(mb, new Vector3(0, 0.05f, -0.52f), 0.042f, 0.048f, 0.30f, 12);
-                mb.Material = (int)MatId.EnergyPanel;
-                Barrel(mb, new Vector3(0, 0.05f, -0.68f), 0.036f, 0.030f, 0.06f, 12);
-                mb.AddBox(new Vector3(0.045f, 0.05f, -0.30f), new Vector3(0.006f, 0.016f, 0.14f));
-                mb.AddBox(new Vector3(-0.045f, 0.05f, -0.30f), new Vector3(0.006f, 0.016f, 0.14f));
-                mb.Material = (int)MatId.Trim;
-                Collar(mb, new Vector3(0, 0.05f, -0.62f), 0.055f, 0.012f);
-                mb.Material = (int)MatId.TechPanelDark;
-                mb.AddBox(new Vector3(0, 0.115f, -0.20f), new Vector3(0.024f, 0.024f, 0.13f));
-                break;
-
-            case WeaponKind.PulseGun:
-                Grip(mb, 0.20f, 0.07f);
-                mb.Material = (int)MatId.WeaponMetal;
-                mb.AddBox(new Vector3(0, 0.05f, -0.18f), new Vector3(0.05f, 0.06f, 0.27f));
-                for (int i = 0; i < 3; i++)
-                {
-                    float a = i / 3f * MathX.TwoPi;
-                    Barrel(mb, new Vector3(MathF.Cos(a) * 0.035f, 0.05f + MathF.Sin(a) * 0.035f, -0.50f),
-                        0.018f, 0.018f, 0.28f, 8);
-                }
-                mb.Material = (int)MatId.EnergyPanel;
-                Barrel(mb, new Vector3(0, 0.05f, -0.58f), 0.052f, 0.045f, 0.07f, 12);
-                mb.AddBox(new Vector3(0, 0.115f, -0.22f), new Vector3(0.030f, 0.010f, 0.16f));
-                mb.Material = (int)MatId.Trim;
-                Collar(mb, new Vector3(0, 0.05f, -0.40f), 0.062f, 0.014f);
-                break;
-
-            case WeaponKind.Ripper:
-                Grip(mb, 0.19f, 0.055f);
-                mb.Material = (int)MatId.WeaponMetal;
-                mb.AddBox(new Vector3(0, 0.045f, -0.16f), new Vector3(0.058f, 0.05f, 0.24f));
-                mb.AddBox(new Vector3(0, 0.045f, -0.44f), new Vector3(0.075f, 0.028f, 0.14f));
-                mb.Material = (int)MatId.Trim;
-                // Blade magazine: a disc standing proud of the receiver.
-                mb.AddCylinder(new Vector3(0, 0.115f, -0.14f), 0.062f, 0.062f, 0.028f, 14);
-                mb.Material = (int)MatId.EnergyPanel;
-                mb.AddBox(new Vector3(0.076f, 0.045f, -0.44f), new Vector3(0.006f, 0.020f, 0.12f));
-                mb.AddBox(new Vector3(-0.076f, 0.045f, -0.44f), new Vector3(0.006f, 0.020f, 0.12f));
-                break;
-
-            case WeaponKind.Minigun:
-                Grip(mb, 0.20f, 0.10f);
-                mb.Material = (int)MatId.WeaponMetal;
-                mb.AddBox(new Vector3(0, 0.05f, -0.14f), new Vector3(0.06f, 0.065f, 0.24f));
-                for (int i = 0; i < 6; i++)
-                {
-                    float a = i / 6f * MathX.TwoPi;
-                    Barrel(mb, new Vector3(MathF.Cos(a) * 0.045f, 0.05f + MathF.Sin(a) * 0.045f, -0.52f),
-                        0.014f, 0.014f, 0.42f, 8);
-                }
-                mb.Material = (int)MatId.TechPanelDark;
-                Disc(mb, new Vector3(0, 0.05f, -0.31f), 0.072f, 0.07f);
-                Disc(mb, new Vector3(0, 0.05f, -0.72f), 0.066f, 0.05f);
-                mb.Material = (int)MatId.Trim;
-                mb.AddBox(new Vector3(0.075f, 0.02f, -0.10f), new Vector3(0.022f, 0.055f, 0.10f));
-                mb.Material = (int)MatId.RustMetal;
-                mb.AddBox(new Vector3(-0.085f, 0.03f, 0.0f), new Vector3(0.035f, 0.06f, 0.09f));
-                break;
-
-            case WeaponKind.FlakCannon:
-                Grip(mb, 0.20f, 0.09f);
-                mb.Material = (int)MatId.RustMetal;
-                mb.AddBox(new Vector3(0, 0.05f, -0.14f), new Vector3(0.065f, 0.07f, 0.24f));
-                // Flared muzzle: narrow at the breech, wide at the mouth.
-                Barrel(mb, new Vector3(0, 0.055f, -0.46f), 0.052f, 0.088f, 0.30f, 12);
-                mb.Material = (int)MatId.TechPanelDark;
-                Disc(mb, new Vector3(0, 0.055f, -0.30f), 0.082f, 0.06f);
-                mb.Material = (int)MatId.Trim;
-                Collar(mb, new Vector3(0, 0.055f, -0.60f), 0.092f, 0.016f);
-                mb.Material = (int)MatId.WeaponMetal;
-                mb.AddBox(new Vector3(0.070f, 0.11f, -0.12f), new Vector3(0.018f, 0.030f, 0.10f));
-                mb.AddBox(new Vector3(-0.070f, 0.11f, -0.12f), new Vector3(0.018f, 0.030f, 0.10f));
-                break;
-
-            case WeaponKind.RocketLauncher:
-                Grip(mb, 0.20f, 0.10f);
-                mb.Material = (int)MatId.WeaponMetal;
-                mb.AddBox(new Vector3(0, 0.05f, -0.12f), new Vector3(0.055f, 0.06f, 0.22f));
-                for (int i = 0; i < 3; i++)
-                {
-                    float a = i / 3f * MathX.TwoPi + MathX.HalfPi;
-                    Barrel(mb, new Vector3(MathF.Cos(a) * 0.055f, 0.06f + MathF.Sin(a) * 0.055f, -0.46f),
-                        0.042f, 0.042f, 0.44f, 10);
-                }
-                mb.Material = (int)MatId.TechPanelDark;
-                Disc(mb, new Vector3(0, 0.06f, -0.26f), 0.098f, 0.07f);
-                mb.Material = (int)MatId.Trim;
-                Disc(mb, new Vector3(0, 0.06f, -0.66f), 0.098f, 0.05f);
-                mb.Material = (int)MatId.EnergyPanel;
-                mb.AddBox(new Vector3(0, 0.135f, -0.12f), new Vector3(0.024f, 0.010f, 0.08f));
-                break;
-
-            case WeaponKind.SniperRifle:
-                Grip(mb, 0.19f, 0.08f);
-                mb.Material = (int)MatId.TechPanelDark;
-                mb.AddBox(new Vector3(0, 0.04f, -0.06f), new Vector3(0.036f, 0.055f, 0.22f));
-                mb.AddBox(new Vector3(0, 0.005f, 0.14f), new Vector3(0.032f, 0.045f, 0.09f));
-                mb.Material = (int)MatId.WeaponMetal;
-                Barrel(mb, new Vector3(0, 0.05f, -0.50f), 0.022f, 0.020f, 0.62f);
-                mb.AddBox(new Vector3(0, 0.115f, -0.16f), new Vector3(0.026f, 0.028f, 0.16f));
-                mb.Material = (int)MatId.Glass;
-                Disc(mb, new Vector3(0, 0.115f, -0.325f), 0.024f, 0.012f, 12);
-                mb.Material = (int)MatId.Trim;
-                Collar(mb, new Vector3(0, 0.115f, -0.32f), 0.030f, 0.008f, 12);
-                mb.AddBox(new Vector3(0, 0.05f, -0.80f), new Vector3(0.028f, 0.028f, 0.03f));
-                break;
-
-            case WeaponKind.Redeemer:
-                Grip(mb, 0.21f, 0.12f);
-                mb.Material = (int)MatId.TechPanelDark;
-                Barrel(mb, new Vector3(0, 0.06f, -0.28f), 0.10f, 0.10f, 0.66f, 14);
-                mb.Material = (int)MatId.Trim;
-                Barrel(mb, new Vector3(0, 0.06f, -0.66f), 0.10f, 0.055f, 0.16f, 14);
-                Collar(mb, new Vector3(0, 0.06f, -0.10f), 0.105f, 0.016f, 16);
-                Collar(mb, new Vector3(0, 0.06f, -0.44f), 0.105f, 0.016f, 16);
-                mb.Material = (int)MatId.Lava;
-                Barrel(mb, new Vector3(0, 0.06f, -0.755f), 0.052f, 0.030f, 0.05f, 12);
-                mb.Material = (int)MatId.EnergyPanel;
-                mb.AddBox(new Vector3(0, 0.175f, -0.24f), new Vector3(0.035f, 0.012f, 0.20f));
-                mb.Material = (int)MatId.WeaponMetal;
-                mb.AddBox(new Vector3(0.105f, 0.02f, -0.10f), new Vector3(0.020f, 0.05f, 0.12f));
-                mb.AddBox(new Vector3(-0.105f, 0.02f, -0.10f), new Vector3(0.020f, 0.05f, 0.12f));
-                break;
-        }
-    }
-
-    public void Dispose()
-    {
-        foreach (var m in _meshes) m?.Dispose();
-    }
 }

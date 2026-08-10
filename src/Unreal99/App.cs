@@ -1993,15 +1993,17 @@ public sealed class App : IDisposable
                 float yaw = _vehicleTurntableCaptured / (float)turntableFrames * MathX.TwoPi;
                 _world.SubmitVehicleTurntable(_scene, (VehicleKind)_vehicleTurntableCapture,
                     VehicleTurntableBase, yaw);
+                _scene.StudioPlate = true;
             }
             else if (_weaponTurntableDirectory != null)
             {
-                _level.Environment.ApplyTo(_scene);
-                _level.Submit(_scene, _world.Materials, _world.Time);
+                // Studio plate: the subject alone, no arena and no sky, so the exported frame can
+                // carry a real alpha channel rather than a blue backdrop.
                 const int turntableFrames = 36;
                 float yaw = _weaponTurntableCaptured / (float)turntableFrames * MathX.TwoPi;
                 _world.SubmitWeaponTurntable(_scene, (WeaponKind)_weaponProfileCapture,
                     WeaponTurntableBase, yaw);
+                _scene.StudioPlate = true;
             }
             else
             {
@@ -2029,7 +2031,9 @@ public sealed class App : IDisposable
 
         EnsurePresentFrame();
         _presentFrame.Bind();
-        _gl.ClearColor(0f, 0f, 0f, 1f);
+        // A studio plate starts fully transparent; the silhouette pass below stamps the subject
+        // back into alpha once the frame has been composited.
+        _gl.ClearColor(0f, 0f, 0f, _scene.StudioPlate ? 0f : 1f);
         _gl.Clear(ClearBufferMask.ColorBufferBit | ClearBufferMask.DepthBufferBit);
 
         for (int i = 0; i < viewCount; i++)
@@ -2045,6 +2049,8 @@ public sealed class App : IDisposable
 
             var rect = viewports[Math.Min(i, viewports.Length - 1)];
             _renderer.RenderView(i, _cameras[i], _scene, rect, fx, _presentFrame);
+            if (_scene.StudioPlate)
+                _renderer.RenderSilhouetteAlpha(_cameras[i], _scene, rect, _presentFrame);
         }
 
         // --- HUD per view ---
@@ -2110,33 +2116,31 @@ public sealed class App : IDisposable
         {
             if (_vehicleTurntableCapture >= 0)
             {
-                VehicleDef def = VehicleDef.Get((VehicleKind)_vehicleTurntableCapture);
-                Vector3 vehicle = VehicleTurntableBase + new Vector3(0f, def.HalfExtents.Y, 0f);
-                if ((VehicleKind)_vehicleTurntableCapture == VehicleKind.Darkwalker)
-                    vehicle.Y += def.HalfExtents.Y * 0.65f;
-                float radius = MathF.Max(def.HalfExtents.X, def.HalfExtents.Z);
-                if ((VehicleKind)_vehicleTurntableCapture == VehicleKind.Darkwalker)
-                    radius *= 1.35f;
-                cam.Position = vehicle + new Vector3(radius * 2.6f + 3f,
-                    def.HalfExtents.Y * 1.25f + 2.5f, radius * 2.2f + 2f);
-                Vector3 vehicleLook = MathX.SafeNormalize(vehicle - cam.Position, -MathX.Right);
-                MathX.YawPitchFromDir(vehicleLook, out cam.Yaw, out cam.Pitch);
-                cam.Roll = 0f;
-                cam.FovY = VerticalFov(40f, aspect);
-                cam.Update(aspect);
-                return cam;
+                var kind = (VehicleKind)_vehicleTurntableCapture;
+                var (lo, hi) = _world.VehicleMeshes.BoundsFor(kind);
+                Vector3 origin = VehicleTurntableBase
+                    + new Vector3(0f, VehicleDef.Get(kind).HalfExtents.Y, 0f);
+                return FrameSubject(cam, origin, lo, hi, 1f, aspect, 34f);
             }
+
             bool turntable = _weaponTurntableDirectory != null;
-            Vector3 weapon = turntable
-                ? WeaponTurntableBase + new Vector3(0f, 0.55f, 0f)
-                : pawn.Position + new Vector3(0f, 0.55f, 0f);
-            cam.Position = weapon + (turntable
-                ? new Vector3(3.4f, 2.15f, 3.0f)
-                : new Vector3(3.2f, 0.12f, 0f));
+            if (turntable)
+            {
+                var (lo, hi) = _world.WeaponMeshes.BoundsFor((WeaponKind)_weaponProfileCapture);
+                Vector3 origin = WeaponTurntableBase + new Vector3(0f, 0.55f, 0f);
+                // The pickup pedestal sits on the ground below the weapon; include it so the
+                // subject is centred on what is actually in frame, not on the weapon alone.
+                lo = Vector3.Min(lo * 1.25f, new Vector3(-0.35f, -0.60f, -0.35f));
+                hi = Vector3.Max(hi * 1.25f, new Vector3(0.35f, 0f, 0.35f));
+                return FrameSubject(cam, origin, lo, hi, 1f, aspect, 32f);
+            }
+
+            Vector3 weapon = pawn.Position + new Vector3(0f, 0.55f, 0f);
+            cam.Position = weapon + new Vector3(3.2f, 0.12f, 0f);
             Vector3 look = MathX.SafeNormalize(weapon - cam.Position, -MathX.Right);
             MathX.YawPitchFromDir(look, out cam.Yaw, out cam.Pitch);
             cam.Roll = 0f;
-            cam.FovY = VerticalFov(turntable ? 38f : 42f, aspect);
+            cam.FovY = VerticalFov(42f, aspect);
             cam.Update(aspect);
             return cam;
         }
@@ -2881,6 +2885,46 @@ public sealed class App : IDisposable
         Directory.CreateDirectory(dir);
         string path = Path.Combine(dir, $"unreal99_{DateTime.Now:yyyyMMdd_HHmmss_fff}.png");
         _pendingScreenshots.Add(path);
+    }
+
+    /// <summary>
+    /// Places a documentation camera so the subject is centred and fully inside the frame,
+    /// whatever its shape. The distance comes from the subject's own bounding sphere and the
+    /// camera's field of view rather than from hand-tuned offsets — a Goliath's gun, a
+    /// Darkwalker's legs and a hoverboard all differ by an order of magnitude in size, and every
+    /// per-vehicle fudge factor that tried to cover that range clipped something.
+    /// </summary>
+    private static Camera FrameSubject(Camera cam, Vector3 origin, Vector3 min, Vector3 max,
+        float modelScale, float aspect, float fovDegrees)
+    {
+        Vector3 centre = origin + (min + max) * 0.5f * modelScale;
+        Vector3 half = (max - min) * 0.5f * modelScale;
+
+        // Three-quarter view from slightly above: the angle that reads a silhouette best.
+        Vector3 dir = Vector3.Normalize(new Vector3(0.80f, 0.42f, 0.66f));
+
+        cam.FovY = VerticalFov(fovDegrees, aspect);
+        float halfFovY = cam.FovY * 0.5f;
+        float halfFovX = MathF.Atan(MathF.Tan(halfFovY) * aspect);
+
+        // Fit width and height separately. A bounding sphere would be safe but wasteful: a tank
+        // is four times longer than it is tall, and fitting its diagonal into the short axis
+        // leaves the subject swimming in empty frame. The subject spins, so the horizontal
+        // extent is the worst-case XZ radius; the vertical extent is the height plus whatever
+        // that radius contributes once the camera is looking down at it.
+        float spinRadius = MathF.Max(0.02f, MathF.Sqrt(half.X * half.X + half.Z * half.Z));
+        float tilt = MathF.Asin(MathX.Clamp(dir.Y, -1f, 1f));
+        float verticalExtent = MathF.Max(0.02f,
+            half.Y * MathF.Cos(tilt) + spinRadius * MathF.Sin(tilt));
+        float distance = MathF.Max(
+            spinRadius / MathF.Tan(halfFovX),
+            verticalExtent / MathF.Tan(halfFovY)) * 1.14f;
+        cam.Position = centre + dir * distance;
+        MathX.YawPitchFromDir(MathX.SafeNormalize(centre - cam.Position, -MathX.Right),
+            out cam.Yaw, out cam.Pitch);
+        cam.Roll = 0f;
+        cam.Update(aspect);
+        return cam;
     }
 
     private unsafe void SaveScreenshot(string path, bool quiet = false, bool copyToClipboard = false)

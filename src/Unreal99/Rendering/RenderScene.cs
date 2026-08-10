@@ -69,6 +69,13 @@ public sealed class RenderScene
 
     public float Time;
 
+    /// <summary>
+    /// Documentation turntables: draw the subject alone against nothing. Suppresses the sky, and
+    /// tells the renderer to stamp the subject's silhouette into the alpha channel so the exported
+    /// frame can be composited over any page background.
+    /// </summary>
+    public bool StudioPlate;
+
     public void Clear()
     {
         Opaque.Clear();

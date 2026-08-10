@@ -77,7 +77,7 @@ for ($vehicle = $StartVehicle; $vehicle -le $EndVehicle; $vehicle++) {
     $destination = Join-Path $outputPath ($slug + "-turntable.webp")
     Invoke-GameCapture @("--vehicleturntable", $vehicle, $frames)
     & $pythonCommand $webpBuilder --input $frames --output $destination `
-        --expected-frames 36 --quality 78
+        --expected-frames 36 --quality 78 --alpha
     if ($LASTEXITCODE -ne 0) { throw "WebP conversion failed for $slug" }
     Write-Host "Captured $slug 360-degree turntable"
 }

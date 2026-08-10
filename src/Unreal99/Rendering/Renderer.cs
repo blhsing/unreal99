@@ -157,6 +157,7 @@ public sealed class Renderer : IDisposable
 
     private readonly Shader _world, _worldSkinned, _shadow, _shadowSkinned, _sky;
     private readonly Shader _ssao, _blur, _boxBlur, _bright, _streak, _godRay, _composite, _fxaa, _blit;
+    private readonly Shader _silhouette;
     private readonly Mesh _skyBox;
     private readonly uint _emptyVao;
     private readonly TextureCube _envMap;
@@ -205,6 +206,7 @@ public sealed class Renderer : IDisposable
         _composite = new Shader(gl, "composite", Shaders.FullscreenVert, Shaders.CompositeFrag);
         _fxaa = new Shader(gl, "fxaa", Shaders.FullscreenVert, Shaders.FxaaFrag);
         _blit = new Shader(gl, "blit", Shaders.FullscreenVert, Shaders.BlitFrag);
+        _silhouette = new Shader(gl, "silhouette", Shaders.SilhouetteVert, Shaders.SilhouetteFrag);
 
         _emptyVao = gl.GenVertexArray();
 
@@ -495,6 +497,46 @@ public sealed class Renderer : IDisposable
         TriangleCount += (dc.IndexCount > 0 ? dc.IndexCount : dc.Mesh.IndexCount) / 3;
     }
 
+    /// <summary>
+    /// Stamps the subject's coverage into the alpha channel of an already composited frame.
+    ///
+    /// The post chain writes alpha 1 everywhere — bloom, composite and FXAA all output an opaque
+    /// vec4 — so a transparent-background export cannot simply fall out of the normal path. This
+    /// re-draws the same geometry writing nothing but alpha, which gives an exact silhouette
+    /// without colour-keying a flat backdrop (and therefore without fringing on the edges).
+    /// </summary>
+    public void RenderSilhouetteAlpha(in Camera camera, RenderScene scene, ViewportRect rect,
+        Framebuffer output)
+    {
+        if (output != null) output.Bind(setViewport: false);
+        else Framebuffer.BindDefault(_gl);
+        _gl.Viewport(rect.X, rect.Y, (uint)rect.Width, (uint)rect.Height);
+
+        _gl.Disable(EnableCap.Blend);
+        _gl.Disable(EnableCap.DepthTest);
+        _gl.DepthMask(false);
+        // Alpha only: the colour already on the target is the finished, tone-mapped image.
+        _gl.ColorMask(false, false, false, true);
+
+        _silhouette.Use();
+        foreach (var dc in scene.Opaque)
+        {
+            if (dc.FirstPerson) continue;
+            _silhouette.Set("uMvp", dc.Transform * camera.ViewProj);
+            DrawGeometry(dc);
+        }
+        foreach (var dc in scene.Transparent)
+        {
+            if (dc.FirstPerson) continue;
+            _silhouette.Set("uMvp", dc.Transform * camera.ViewProj);
+            DrawGeometry(dc);
+        }
+
+        _gl.ColorMask(true, true, true, true);
+        _gl.Enable(EnableCap.DepthTest);
+        _gl.DepthMask(true);
+    }
+
     /// <summary>Renders one player's view into <paramref name="rect"/> of the default framebuffer.</summary>
     public void RenderView(int viewIndex, in Camera camera, RenderScene scene, ViewportRect rect, ViewEffects fx,
         Framebuffer output = null)
@@ -531,8 +573,9 @@ public sealed class Renderer : IDisposable
         }
 
         // The sky shader is expensive (procedural clouds and stars), so it runs last and only
-        // where geometry left the depth buffer untouched.
-        DrawSky(camera, scene);
+        // where geometry left the depth buffer untouched. A studio plate has no sky at all —
+        // the background is meant to end up transparent.
+        if (!scene.StudioPlate) DrawSky(camera, scene);
 
         RenderViewModel(viewIndex, camera, scene, nLights, rect.Aspect);
 

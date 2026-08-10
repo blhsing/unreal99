@@ -288,6 +288,7 @@ public sealed class GameWorld
     public MaterialLibrary Materials => _renderer.Materials;
     public CharacterModel Character => _character;
     public WeaponModels WeaponMeshes => _weaponModels;
+    public VehicleModels VehicleMeshes => _vehicleModels;
 
     /// <summary>Raised whenever something should make a noise; the audio layer subscribes.</summary>
     public Action<SoundId, Vector3, float> OnSound;
@@ -1044,6 +1045,15 @@ public sealed class GameWorld
             Particles.BloodSpray(point, -dir, 1.4f);
             Particles.EnergyBurst(point, new Vector3(0.6f, 0.85f, 1f), 0.7f);
             OnSound?.Invoke(SoundId.HammerHit, point, 1f);
+        }
+        // A demolition tool has to be able to demolish things. Without this a bot reduced to the
+        // hammer stands next to a generator swinging at it forever, and a player doing the same
+        // gets no feedback at all.
+        else if (HitStructures(pawn, origin, dir, maxDist, fire.Damage * damageScale,
+                     new Vector3(0.7f, 0.85f, 1f)))
+        {
+            pawn.ShotsFired++;
+            OnSound?.Invoke(SoundId.HammerHit, origin + dir * MathF.Min(maxDist, fire.Range), 1f);
         }
         else if (worldHit.Hit)
         {
@@ -2378,9 +2388,13 @@ public sealed class GameWorld
 
         v.SeatCooldown[seat] = fire.Interval;
         Vector3 origin = v.SeatWorld(seat) + new Vector3(0f, 0.4f, 0f);
+        // A turret aims where its occupant looks, in the pawn's view convention. A hull-mounted
+        // weapon aims where the vehicle is pointed — and the vehicle's forward is +Z in model
+        // space, the opposite of the pawn convention, so it needs the half turn. Without it a
+        // Manta's plasma cannons fired out of the back of the vehicle.
         Vector3 aim = seatDef.Turret
             ? MathX.DirFromYawPitch(v.SeatYaw[seat], v.SeatPitch[seat])
-            : MathX.DirFromYawPitch(v.Yaw, v.SeatPitch[seat]);
+            : MathX.DirFromYawPitch(v.Yaw + MathX.Pi, v.SeatPitch[seat]);
 
         switch (fire.Mode)
         {
@@ -2933,6 +2947,20 @@ public sealed class GameWorld
     public void SubmitWeaponTurntable(RenderScene scene, WeaponKind weapon, Vector3 groundPosition,
         float yaw)
     {
+        // Studio lighting, matching the vehicle plate. With no arena and no sky there is nothing
+        // else lighting the subject, so the key and ambient have to carry it on their own.
+        scene.SunDirection = Vector3.Normalize(new Vector3(-0.45f, -0.72f, -0.38f));
+        scene.SunColor = new Vector3(4.6f, 4.4f, 4.1f);
+        scene.AmbientSky = new Vector3(0.74f, 0.76f, 0.80f);
+        scene.AmbientGround = new Vector3(0.38f, 0.38f, 0.40f);
+        scene.SkyTop = new Vector3(0.015f, 0.028f, 0.065f);
+        scene.SkyHorizon = new Vector3(0.10f, 0.16f, 0.26f);
+        scene.SkyGround = new Vector3(0.025f, 0.03f, 0.045f);
+        scene.StarStrength = 0f;
+        scene.CloudStrength = 0f;
+        scene.EnvIntensity = 0.85f;
+        scene.FogDensity = 0f;
+
         Vector3 weaponPosition = groundPosition + new Vector3(0f, 0.55f, 0f);
         Matrix4x4 weaponTransform = Matrix4x4.CreateScale(1.25f)
             * Matrix4x4.CreateRotationY(yaw)
@@ -3147,9 +3175,9 @@ public sealed class GameWorld
         float yaw)
     {
         scene.SunDirection = Vector3.Normalize(new Vector3(-0.45f, -0.72f, -0.38f));
-        scene.SunColor = new Vector3(3.6f, 3.4f, 3.15f);
-        scene.AmbientSky = new Vector3(0.20f, 0.27f, 0.39f);
-        scene.AmbientGround = new Vector3(0.07f, 0.08f, 0.11f);
+        scene.SunColor = new Vector3(4.6f, 4.4f, 4.1f);
+        scene.AmbientSky = new Vector3(0.70f, 0.72f, 0.78f);
+        scene.AmbientGround = new Vector3(0.34f, 0.34f, 0.38f);
         scene.SkyTop = new Vector3(0.015f, 0.028f, 0.065f);
         scene.SkyHorizon = new Vector3(0.10f, 0.16f, 0.26f);
         scene.SkyGround = new Vector3(0.025f, 0.03f, 0.045f);
@@ -3162,9 +3190,9 @@ public sealed class GameWorld
         {
             // Its nearly black body sits one full hull-height above the feet. Give that unique
             // silhouette enough fill to read against the studio sky without changing gameplay.
-            scene.AmbientSky = new Vector3(0.42f, 0.50f, 0.68f);
-            scene.AmbientGround = new Vector3(0.16f, 0.18f, 0.24f);
-            scene.SunColor = new Vector3(5.0f, 4.8f, 4.5f);
+            scene.AmbientSky = new Vector3(0.86f, 0.88f, 0.94f);
+            scene.AmbientGround = new Vector3(0.42f, 0.43f, 0.48f);
+            scene.SunColor = new Vector3(5.6f, 5.4f, 5.1f);
         }
         Vector3 position = groundPosition + new Vector3(0f, def.HalfExtents.Y, 0f);
         Matrix4x4 transform = Matrix4x4.CreateRotationY(yaw) * Matrix4x4.CreateTranslation(position);

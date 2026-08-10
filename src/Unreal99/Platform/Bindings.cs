@@ -108,8 +108,10 @@ public sealed class BindingProfile
             p[GameAction.MoveLeft] = InputBinding.OnKey(Key.G);
             p[GameAction.MoveRight] = InputBinding.OnKey(Key.J);
             p[GameAction.Jump] = InputBinding.OnKey(Key.M);
-            p[GameAction.UseVehicle] = InputBinding.OnKey(Key.N);
             p[GameAction.Crouch] = InputBinding.OnKey(Key.N);
+            // Not N — that is this player's crouch — and not F or Enter, which belong to players
+            // one and two on the same shared keyboard. K sits beside the YGHJ cluster and is free.
+            p[GameAction.UseVehicle] = InputBinding.OnKey(Key.K);
             p[GameAction.NextWeapon] = InputBinding.OnKey(Key.U);
             p[GameAction.PrevWeapon] = InputBinding.OnKey(Key.T);
             p[GameAction.Scoreboard] = InputBinding.OnKey(Key.B);
@@ -147,7 +149,7 @@ public sealed class BindingProfile
             (GameAction.PrevWeapon, Key.T), (GameAction.NextWeapon, Key.U),
             (GameAction.Jump, Key.M), (GameAction.Crouch, Key.N),
             (GameAction.Scoreboard, Key.B),
-            (GameAction.UseVehicle, Key.F),
+            (GameAction.UseVehicle, Key.K),
         ];
         bool passed = p3[GameAction.Fire] == InputBinding.OnMouse(0)
             && p3[GameAction.AltFire] == InputBinding.OnMouse(1);
@@ -218,6 +220,7 @@ public static class BindingNames
         GameAction.NextWeapon => "下一把武器",
         GameAction.PrevWeapon => "上一把武器",
         GameAction.Scoreboard => "計分板",
+        GameAction.UseVehicle => "上下載具",
         >= GameAction.Weapon1 and <= GameAction.Weapon10 => $"武器 {action - GameAction.Weapon1 + 1}",
         _ => "",
     };

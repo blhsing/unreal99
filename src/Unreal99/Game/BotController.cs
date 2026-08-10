@@ -458,8 +458,14 @@ public sealed class BotController : Controller
         input.Move = move;
 
         // --- firing ---
+        // A distant enemy does not outrank the generator you are standing next to. Only someone
+        // close enough to actually threaten you takes priority over the objective; without this
+        // an attacker under long-range harassment never once shoots the thing it came to break.
+        bool enemyPressing = targetVisible && target != null
+            && Vector3.Distance(pawn.Position, target.Position) < 18f;
         if (targetVisible && _reactionTimer <= 0f && target != null
-            && !_specialTraversalLock && !_jumpPadFlight)
+            && !_specialTraversalLock && !_jumpPadFlight
+            && (enemyPressing || !HasObjectiveToShoot(world)))
             DecideFire(world, target, ref input);
         else if (!_specialTraversalLock && !_jumpPadFlight)
             ShootObjective(world, ref input, dt);
@@ -1828,10 +1834,16 @@ public sealed class BotController : Controller
 
         // A destroy objective is shot, so stopping at weapon range is correct; the other kinds
         // need a body inside the ring. The standoff has to clear a rocket's own blast radius,
-        // or the bot spends the fight blowing itself up against the thing it is attacking.
+        // or the bot spends the fight blowing itself up against the thing it is attacking —
+        // but a bot down to the hammer has to walk right up to it instead.
+        bool ranged = HasUsableRangedWeapon(Pawn);
         float radius = objective.Kind == ObjectiveKind.Destroy
-            ? MathF.Max(objective.Radius + 6f, 10f)
+            ? (ranged ? MathF.Max(objective.Radius + 6f, 10f) : 1.6f)
             : MathF.Max(0.8f, objective.Radius * 0.6f);
+
+        // Hold position at weapon range and let ShootObjective do the work. Earlier attempts to
+        // make the bot circle while it fired traded a stall on one map for oscillation on
+        // another: the decks these objectives sit on are too narrow for a useful orbit.
         return SetPreciseGoal(nav, objective.Position, objective: true, radius: radius, refresh: 1.0f);
     }
 
@@ -1841,6 +1853,34 @@ public sealed class BotController : Controller
     /// that only ever fires at pawns walks all the way to a generator and then stands admiring
     /// it, which is exactly what happened before this existed.
     /// </summary>
+    /// <summary>
+    /// Whether this bot currently has a mode objective worth shooting at all. Used to decide
+    /// whether a far-off enemy is worth turning away for.
+    /// </summary>
+    private bool HasObjectiveToShoot(GameWorld world)
+    {
+        if (Pawn.Team == Team.None) return false;
+        switch (world.Mode.Kind)
+        {
+            case GameModeKind.Assault:
+            {
+                var o = world.Assault.CurrentObjective;
+                return o is { Kind: ObjectiveKind.Destroy } && Pawn.Team == world.Assault.Attackers
+                    && Vector3.Distance(Pawn.Position, o.Position) < 40f;
+            }
+            case GameModeKind.Onslaught:
+            {
+                int i = world.Onslaught.NextObjectiveFor(Pawn.Team, Pawn.Position);
+                if (i < 0) return false;
+                var node = world.Onslaught.Nodes[i];
+                if (!node.IsCore && node.Team == Team.None) return false;
+                return Vector3.Distance(Pawn.Position, node.Position) < 55f;
+            }
+            default:
+                return false;
+        }
+    }
+
     private void ShootObjective(GameWorld world, ref PawnInput input, float dt)
     {
         if (Pawn.Team == Team.None) return;
@@ -1856,7 +1896,9 @@ public sealed class BotController : Controller
                 if (objective == null || objective.Kind != ObjectiveKind.Destroy) return;
                 if (Pawn.Team != world.Assault.Attackers) return;
                 aimAt = objective.Position + MathX.Up * 1.5f;
-                reach = 40f;
+                // Never further than the equipped weapon can actually reach: a hammer swung at a
+                // generator forty metres away accomplishes nothing but looking foolish.
+                reach = ObjectiveReach(Pawn, 40f);
                 break;
             }
             case GameModeKind.Onslaught:
@@ -1870,7 +1912,7 @@ public sealed class BotController : Controller
                 support = !node.IsCore && node.Team == Team.None
                     && node.BuildingFor == Pawn.Team;
                 aimAt = node.Position + MathX.Up * 2.4f;
-                reach = support ? Weapons.Get(WeaponKind.PulseGun).Alt.Range : 55f;
+                reach = support ? Weapons.Get(WeaponKind.PulseGun).Alt.Range : ObjectiveReach(Pawn, 55f);
                 break;
             }
             default:
@@ -1880,6 +1922,7 @@ public sealed class BotController : Controller
         Vector3 eye = Pawn.EyePosition;
         Vector3 delta = aimAt - eye;
         float distance = delta.Length();
+
         if (distance > reach || distance < 0.2f) return;
         if (support && Pawn.Weapon != WeaponKind.PulseGun)
         {
@@ -1891,7 +1934,8 @@ public sealed class BotController : Controller
         // Never rocket something you are standing next to. Onslaught in particular wants bots
         // right on top of a node to build it, and a splash weapon fired from there costs more
         // health than the shot is worth.
-        float splash = Pawn.WeaponDef.Primary.SplashRadius;
+        if (SwitchIfDryAgainstObjective(ref input)) return;
+        float splash = ObjectiveFire(Pawn).SplashRadius;
         if (splash > 0f && distance < splash + 2f) return;
         Vector3 dir = delta / distance;
         // Do not shoot through the map: the line has to be clear or the shot is wasted, and on
@@ -1906,9 +1950,59 @@ public sealed class BotController : Controller
         // Only pull the trigger once actually pointed at it, so the first shots do not spray.
         if (MathF.Abs(MathX.WrapAngle(yaw - Pawn.Yaw)) < 0.14f && MathF.Abs(pitch - Pawn.Pitch) < 0.14f)
         {
-            if (support) input.AltFire = true;
+            if (support || UseAltAgainstObjectives(Pawn)) input.AltFire = true;
             else input.Fire = true;
         }
+    }
+
+    /// <summary>
+    /// Which of a weapon's two modes a bot should use on a structure. A charged mode only fires
+    /// when the trigger is *released*, so a bot that simply holds fire down charges forever and
+    /// never lands a blow — against a target that cannot dodge, the uncharged mode is both
+    /// simpler and better.
+    /// </summary>
+    private static bool UseAltAgainstObjectives(Pawn pawn)
+    {
+        var def = pawn.WeaponDef;
+        return def.Primary.Chargeable && !def.Alt.Chargeable && def.Alt.Interval > 0f
+            && (def.Alt.AmmoCost == 0 || pawn.AmmoFor(pawn.Weapon) >= def.Alt.AmmoCost);
+    }
+
+    private static FireDef ObjectiveFire(Pawn pawn)
+        => UseAltAgainstObjectives(pawn) ? pawn.WeaponDef.Alt : pawn.WeaponDef.Primary;
+
+    /// <summary>
+    /// How far this weapon can usefully engage a structure. <see cref="FireDef.Range"/> only
+    /// bounds the modes that trace a line; a projectile weapon leaves it at zero, so clamping
+    /// against it unconditionally would silently stop the bot ever firing a rocket or a flak
+    /// shell at anything.
+    /// </summary>
+    private static float ObjectiveReach(Pawn pawn, float cap)
+    {
+        var fire = ObjectiveFire(pawn);
+        bool traces = fire.Mode is FireMode.Hitscan or FireMode.Beam or FireMode.Melee;
+        return traces && fire.Range > 0f ? MathF.Min(cap, fire.Range) : cap;
+    }
+
+    /// <summary>
+    /// Falls back to the hammer when the equipped weapon is dry. A structure does not shoot back,
+    /// so an empty flak cannon held against a generator is strictly worse than walking up and
+    /// hitting it.
+    /// </summary>
+    private bool SwitchIfDryAgainstObjective(ref PawnInput input)
+    {
+        var fire = ObjectiveFire(Pawn);
+        if (fire.AmmoCost <= 0 || Pawn.AmmoFor(Pawn.Weapon) >= fire.AmmoCost) return false;
+        for (int i = (int)WeaponKind.Count - 1; i >= 0; i--)
+        {
+            var kind = (WeaponKind)i;
+            if (!Pawn.HasWeapon[i] || kind == Pawn.Weapon) continue;
+            var candidate = Weapons.Get(kind);
+            if (candidate.Primary.AmmoCost > 0 && Pawn.AmmoFor(kind) < candidate.Primary.AmmoCost) continue;
+            input.WeaponSelect = i;
+            return true;
+        }
+        return false;
     }
 
     /// <summary>
@@ -2207,7 +2301,18 @@ public sealed class BotController : Controller
         nav.QueryRadius(point, range, _navScratch);
         if (_navScratch.Count == 0) return false;
 
-        float angle = step++ * 2.3999632f + Pawn.Id * 0.71f;
+        // Advance around the point from wherever the bot already stands rather than jumping to an
+        // unrelated bearing. A golden-angle hop of ~137° reads as pacing back and forth — and on a
+        // narrow deck, where only a couple of nodes qualify, it degenerates into a shuttle that
+        // the oscillation detector rightly flags. A steady 60° step is an orbit.
+        Vector3 bearing = (Pawn.Position - point).FlatXZ();
+        float current = bearing.LengthSquared() > 0.04f
+            ? MathF.Atan2(bearing.Z, bearing.X)
+            : Pawn.Id * 0.71f;
+        // Direction of travel is fixed per bot, so two defenders circle opposite ways.
+        float sweep = ((Pawn.Id & 1) == 0 ? 1f : -1f) * 1.05f;
+        float angle = current + sweep;
+        step++;
         Vector3 desired = point + new Vector3(MathF.Cos(angle) * range * 0.65f, 0f,
             MathF.Sin(angle) * range * 0.65f);
         int best = -1;

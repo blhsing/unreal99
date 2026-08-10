@@ -249,7 +249,9 @@ public static partial class Maps
         const float Quay = 6f;          // dock level
         const float WaterTop = 1.6f;
         const float MainDeck = 11f;
-        const float TopDeck = 18f;
+        // Deliberately only 5.5 m above the main deck. At seven metres a step off the edge lands
+        // right on the fall-damage threshold, so anyone already wounded died walking downstairs.
+        const float TopDeck = 16.5f;
 
         // --- the harbour basin, with the dock on one side and the ship on the other ---
         b.Solid(new Vector3(-90f, -10f, -60f), new Vector3(90f, -1.5f, 60f), MatId.Rock, true, 0.5f);
@@ -355,8 +357,10 @@ public static partial class Maps
             doorCenter: 0f, doorWidth: 8f, doorHeight: 4.4f, material: MatId.RustMetal, alongX: false);
         b.AddLight(new Vector3(Stern + 12f, MainDeck + 5f, 0f), new Vector3(0.9f, 0.6f, 0.4f), 20f, 4f);
 
+        // Toughest single objective in the game — but not so tough that one attacker who has
+        // fought their way aboard on a light loadout can never finish it.
         b.AddObjective(new Vector3(Stern + 8f, MainDeck, 0f), Loc.ObjCompressor, ObjectiveKind.Destroy,
-            radius: 3.6f, health: 1100f, unlocksSpawnGroup: 1);
+            radius: 3.6f, health: 700f, unlocksSpawnGroup: 1);
 
         // --- the superstructure and control room, holding objective 2 ---
         b.Solid(new Vector3(40f, MainDeck, -11f), new Vector3(60f, TopDeck, 11f), MatId.ArmorPlate, true, 0.7f);
@@ -373,7 +377,7 @@ public static partial class Maps
 
         // The ladders the original uses are jump pads here: a 7m climb has no nav route otherwise.
         for (int s = -1; s <= 1; s += 2)
-            b.AddJumpPad(new Vector3(37f, MainDeck + 0.1f, s * 7f), new Vector3(45f, TopDeck + 2.2f, s * 6f),
+            b.AddJumpPad(new Vector3(37f, MainDeck + 0.1f, s * 7f), new Vector3(45f, TopDeck + 1.4f, s * 6f),
                 new Vector3(0.5f, 0.8f, 1f));
         b.Lift(new Vector3(62f, MainDeck, -3f), new Vector3(66f, MainDeck + 0.4f, 3f), new Vector3(0f, TopDeck - MainDeck, 0f), MatId.MetalGrate, 6f);
 
@@ -404,6 +408,12 @@ public static partial class Maps
         b.Weapon(new Vector3(-64f, Quay + 0.8f, -10f), WeaponKind.RocketLauncher);
         b.Weapon(new Vector3(-60f, Quay + 0.8f, 12f), WeaponKind.Minigun);
         b.Weapon(new Vector3(Stern + 16f, MainDeck + 0.8f, 8f), WeaponKind.ShockRifle);
+        // Resupply beside the forward attacker spawn. An attacker who fought their way aboard
+        // arrives empty; without this the aft cabin is where the assault quietly dies.
+        b.Weapon(new Vector3(Stern + 12f, MainDeck + 0.8f, -7f), WeaponKind.Minigun);
+        b.Ammo(new Vector3(Stern + 10f, MainDeck + 0.7f, -8f), AmmoKind.FlakShells);
+        b.Ammo(new Vector3(Stern + 14f, MainDeck + 0.7f, -8f), AmmoKind.MinigunBullets);
+        b.Ammo(new Vector3(Stern + 12f, MainDeck + 0.7f, 6f), AmmoKind.Rockets);
         b.Weapon(new Vector3(32f, MainDeck + 0.8f, -12f), WeaponKind.FlakCannon);
         b.Weapon(new Vector3(66f, MainDeck + 0.8f, 0f), WeaponKind.RocketLauncher);
         b.Weapon(new Vector3(50f, TopDeck + 0.8f, -6f), WeaponKind.SniperRifle);

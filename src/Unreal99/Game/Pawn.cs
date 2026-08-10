@@ -428,7 +428,9 @@ public sealed class Pawn
             events.Landed = true;
             events.LandingSpeed = result.LandingSpeed;
             LandBlend = MathX.Saturate(result.LandingSpeed / 14f);
-            float fall = Physics.FallDamage(result.LandingSpeed);
+            // Water breaks a fall. Without this a dive off a ship's rail into the harbour is
+            // lethal, which is neither what the genre does nor what any player expects.
+            float fall = InWater ? 0f : Physics.FallDamage(result.LandingSpeed);
             if (fall > 0f) events.FallDamage = fall;
         }
 

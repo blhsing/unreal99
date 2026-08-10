@@ -17,6 +17,13 @@ def main() -> int:
     parser.add_argument("--duration", type=int, default=67, help="Milliseconds per frame")
     parser.add_argument("--quality", type=int, default=72)
     parser.add_argument("--expected-frames", type=int, default=30)
+    parser.add_argument(
+        "--alpha",
+        action="store_true",
+        help="Keep the capture's alpha channel so the clip has a transparent background. "
+        "Turntables are rendered as studio plates and use this; action footage is a real "
+        "arena scene and must stay opaque.",
+    )
     args = parser.parse_args()
 
     sources = sorted(args.input.glob("*.png"))
@@ -25,13 +32,19 @@ def main() -> int:
     if len(sources) != args.expected_frames:
         parser.error(f"expected {args.expected_frames} PNG frames in {args.input}, found {len(sources)}")
 
+    mode = "RGBA" if args.alpha else "RGB"
+    background = (0, 0, 0, 0) if args.alpha else "black"
+
     frames: list[Image.Image] = []
     try:
         for source in sources:
             with Image.open(source) as image:
-                frame = image.convert("RGB")
+                frame = image.convert(mode)
+                # Downscaling a hard-edged studio plate is what feathers the silhouette: the
+                # renderer writes coverage as a binary mask, and LANCZOS turns that into a
+                # properly anti-aliased alpha edge at the published size.
                 frame.thumbnail((args.width, args.height), Image.Resampling.LANCZOS)
-                canvas = Image.new("RGB", (args.width, args.height), "black")
+                canvas = Image.new(mode, (args.width, args.height), background)
                 canvas.paste(frame, ((args.width - frame.width) // 2, (args.height - frame.height) // 2))
                 frame.close()
                 frames.append(canvas)
@@ -49,6 +62,9 @@ def main() -> int:
             # method 6's visual quality at this small README resolution.
             method=4,
             minimize_size=True,
+            # Lossless keeps the alpha edge crisp; lossy WebP quantises it into a halo.
+            lossless=args.alpha,
+            exact=args.alpha,
         )
     finally:
         for frame in frames:

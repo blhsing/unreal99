@@ -850,4 +850,22 @@ public static class Shaders
         uniform sampler2D uTex;
         void main() { oColor = vec4(texture(uTex, vUv).rgb, 1.0); }
         """;
+
+    // ---------------------------------------------------------------- silhouette (studio alpha)
+
+    /// <summary>
+    /// Positions only. Used to stamp a subject's coverage into the alpha channel of an already
+    /// composited frame, so a documentation turntable can be exported with a real transparent
+    /// background instead of being keyed out of a flat colour afterwards.
+    /// </summary>
+    public const string SilhouetteVert = Header + """
+        layout(location = 0) in vec3 aPos;
+        uniform mat4 uMvp;
+        void main() { gl_Position = uMvp * vec4(aPos, 1.0); }
+        """;
+
+    public const string SilhouetteFrag = Header + """
+        out vec4 oColor;
+        void main() { oColor = vec4(0.0, 0.0, 0.0, 1.0); }
+        """;
 }

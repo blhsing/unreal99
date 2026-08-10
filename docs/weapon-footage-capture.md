@@ -53,18 +53,26 @@ README 只引用 WebP 成品；`.capture` 下的 PNG 是可重新產生的暫存
 
 1. 遊戲以固定 1600×900 視窗進入 Stalwart，建立一名本機玩家且不加入電腦玩家；HUD、第一人稱
    手臂、粒子與特效不會混入畫面。
-2. Stalwart 的真實環境、地板幾何、材質與光照仍由正常 `Level.Submit` 路徑算圖。展示位置固定在
-   世界座標 `(10, 0.05, -8)`，避免牆、道具或角色遮住武器。
+2. **旋轉展示是去背的攝影棚畫面**：不算圖關卡幾何，也不算圖天空，畫面清空為完全透明。
+   展示位置仍固定在世界座標 `(10, 0.05, -8)`，但那只是為了讓陰影與拾取台落在合理位置。
 3. `GameWorld.SubmitWeaponTurntable` 取得與實際武器拾取物相同的 `Mesh`、`MeshSection` 和材質，
    保持遊戲中可辨認的直立姿態，以 `1.25` 倍縮放放在地面上方 0.55 m。武器下方也使用遊戲中每個
    `WeaponPickup` 實際繪製的環形拾取台，沒有文件專用替身模型。
-4. 固定攝影機位於武器中心的相對座標 `(3.4, 2.15, 3.0)`，直接注視武器中心，視野 38°。這是玩家
-   接近地面拾取物時常見的三分之四俯視角度，可以同時看清頂面、側面、握把與拾取台。
+4. 攝影機由**網格實際包圍盒**決定取景，不再使用手調的相對座標：`App.FrameSubject` 以三分之四
+   俯視角度（方向 `(0.80, 0.42, 0.66)`）站在能同時容下旋轉半徑與高度的距離上。用碰撞盒或固定
+   偏移都會夾到東西——歌利亞的砲管、暗行者的腿、救世主的發射管長度差了一個數量級。
 5. 武器每格繞世界 Y 軸旋轉 10°。捕捉從 0° 到 350° 共 36 格；每四個 60 Hz 模擬 tick 直接讀取
    一次 OpenGL framebuffer，所以成品約為 15 fps。350° 回到 0° 仍是相同的 10° 步幅，循環不會
    在接縫停頓或重複同一角度。
-6. 武器色調的主燈與暖色輪廓燈仍走遊戲 renderer、陰影與 PBR 材質。`build-weapon-webp.py` 以
-   `--expected-frames 36 --quality 78` 轉成 640×360 循環 WebP，並重新開啟成品驗證尺寸與格數。
+6. 光照為攝影棚打光（`SubmitWeaponTurntable` / `SubmitVehicleTurntable` 各自設定），但仍走遊戲
+   的 renderer、陰影與 PBR 材質。沒有天空就沒有環境補光，所以主燈與環境光都比對戰中亮。
+7. **透明背景怎麼來的**：後製鏈（bloom、composite、FXAA）一律輸出 alpha 1，因此透明度不可能
+   直接從正常路徑掉出來。改為在合成完成後，用 `Renderer.RenderSilhouetteAlpha` 把同一批幾何
+   再畫一次，只寫入 alpha 通道。這樣得到的是精確的輪廓遮罩，不需要把純色背景去背，邊緣也
+   不會有殘留色暈。1600×900 的硬邊遮罩縮到 640×360 時自然形成平滑的 alpha 邊緣。
+8. `build-weapon-webp.py` 以 `--expected-frames 36 --quality 78 --alpha` 轉成 640×360 循環 WebP。
+   `--alpha` 會保留 alpha 並改用無損編碼——有損 WebP 會把 alpha 邊緣量化成光暈。實戰動畫是
+   真實場景，不加 `--alpha`，維持不透明。
 
 直接擷取火箭發射器的 36 張來源 PNG：
 
@@ -79,7 +87,7 @@ dotnet .\src\Unreal99\bin\Release\net10.0\Unreal99.dll `
 python .\docs\build-weapon-webp.py `
   --input .\artifacts\rocket-turntable\frames `
   --output .\artifacts\rocket-launcher-turntable.webp `
-  --expected-frames 36 --quality 78
+  --expected-frames 36 --quality 78 --alpha
 ```
 
 正式重建火箭發射器的旋轉展示，不重拍已存在的實戰動畫：

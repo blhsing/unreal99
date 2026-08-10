@@ -480,6 +480,265 @@ public sealed class MeshBuilder
             }
     }
 
+    // ------------------------------------------------------------------ swept surfaces
+
+    /// <summary>
+    /// One slice of a <see cref="AddLoft"/> sweep: where the cross-section sits, how big it is
+    /// there, and how far it is twisted about the sweep axis.
+    /// </summary>
+    public readonly record struct LoftStation(Vector3 Center, Vector2 Scale, float Roll = 0f)
+    {
+        public LoftStation(Vector3 center, float scale, float roll = 0f)
+            : this(center, new Vector2(scale, scale), roll) { }
+    }
+
+    /// <summary>
+    /// Sweeps a closed 2D cross-section through a series of stations and stitches the result into
+    /// a surface. This is the primitive that stops everything looking like a stack of crates: a
+    /// hull that tapers toward the nose, a barrel that flares at the muzzle and a wing that thins
+    /// toward its tip are all the same operation with different station lists.
+    ///
+    /// The section is given in its own XY plane. At each station it is scaled, rolled about the
+    /// sweep direction, and placed at that station's centre; the sweep direction is taken from the
+    /// neighbouring centres, so a curved run of stations bends the section along with it.
+    ///
+    /// A station whose scale is zero collapses to a point, which is how a sweep is closed off with
+    /// a rounded nose rather than a flat lid.
+    /// </summary>
+    public void AddLoft(ReadOnlySpan<Vector2> section, ReadOnlySpan<LoftStation> stations,
+        bool capStart = true, bool capEnd = true, uint? color = null)
+    {
+        if (section.Length < 3 || stations.Length < 2) return;
+        uint col = color ?? Color;
+        int srcN = section.Length;
+        int baseIdx = _vertices.Count;
+
+        // Expand the section so that every sharp corner carries two normals. A faceted section —
+        // a hexagonal strut, a keel with a chined side — must keep its edges; only gentle turns
+        // such as a fillet's arc get smoothed together.
+        var srcIndex = new List<int>(srcN * 2);
+        var useIncoming = new List<bool>(srcN * 2);
+        for (int i = 0; i < srcN; i++)
+        {
+            Vector2 inEdge = section[i] - section[(i + srcN - 1) % srcN];
+            Vector2 outEdge = section[(i + 1) % srcN] - section[i];
+            Vector2 nIn = MathX.SafeNormalize(new Vector2(inEdge.Y, -inEdge.X), Vector2.UnitY);
+            Vector2 nOut = MathX.SafeNormalize(new Vector2(outEdge.Y, -outEdge.X), Vector2.UnitY);
+            bool smooth = Vector2.Dot(nIn, nOut) > CreaseCos;
+            srcIndex.Add(i); useIncoming.Add(true);
+            if (!smooth) { srcIndex.Add(i); useIncoming.Add(false); }
+        }
+        int n = srcIndex.Count;
+
+        // U follows distance around the section and V distance along the sweep, both measured on
+        // the *scaled* section. Measuring the unscaled one would give a one-metre fairing and a
+        // ten-metre hull the same texture density, which is exactly how procedural panelling
+        // ends up looking like giant stripes on the small parts.
+        Span<float> perim = n < 256 ? stackalloc float[n + 1] : new float[n + 1];
+        float sweepV = 0f;
+        for (int s = 0; s < stations.Length; s++)
+        {
+            var st = stations[s];
+            Vector3 tangent = s == 0 ? stations[1].Center - stations[0].Center
+                : s == stations.Length - 1 ? stations[s].Center - stations[s - 1].Center
+                : stations[s + 1].Center - stations[s - 1].Center;
+            tangent = MathX.SafeNormalize(tangent, MathX.Forward);
+            // Keep the section's "up" as close to world up as the tangent allows, so a hull built
+            // from symmetric sections stays symmetric instead of slowly rolling along its length.
+            Vector3 right = MathX.SafeNormalize(Vector3.Cross(MathX.Up, tangent), MathX.Right);
+            Vector3 up = Vector3.Cross(tangent, right);
+            if (st.Roll != 0f)
+            {
+                float c = MathF.Cos(st.Roll), sn = MathF.Sin(st.Roll);
+                (right, up) = (right * c + up * sn, up * c - right * sn);
+            }
+            if (s > 0) sweepV += Vector3.Distance(stations[s].Center, stations[s - 1].Center);
+
+            perim[0] = 0f;
+            for (int i = 0; i < n; i++)
+            {
+                Vector2 a = section[srcIndex[i]] * st.Scale;
+                Vector2 b = section[srcIndex[(i + 1) % n]] * st.Scale;
+                perim[i + 1] = perim[i] + Vector2.Distance(a, b);
+            }
+
+            for (int i = 0; i <= n; i++)
+            {
+                int k = i % n;
+                int si = srcIndex[k];
+                Vector2 p = section[si] * st.Scale;
+                Vector3 pos = st.Center + right * p.X + up * p.Y;
+
+                // Outward direction from whichever of the two adjoining edges this copy belongs
+                // to. Smooth corners emitted once average both; creases keep their own.
+                Vector2 prev = section[(si + srcN - 1) % srcN] * st.Scale;
+                Vector2 next = section[(si + 1) % srcN] * st.Scale;
+                Vector2 nIn = MathX.SafeNormalize(new Vector2((p - prev).Y, -(p - prev).X), Vector2.UnitY);
+                Vector2 nOut = MathX.SafeNormalize(new Vector2((next - p).Y, -(next - p).X), Vector2.UnitY);
+                bool split = k + 1 < n && srcIndex[k + 1] == si || k > 0 && srcIndex[k - 1] == si;
+                Vector2 outward = !split
+                    ? MathX.SafeNormalize(nIn + nOut, nOut)
+                    : useIncoming[k] ? nIn : nOut;
+                Vector3 nrm = right * outward.X + up * outward.Y;
+
+                // Tilt by how fast the sweep is growing or shrinking here — without that a taper
+                // shades like a cylinder and the nose cone looks flat.
+                float grow = 0f;
+                int sa = Math.Max(0, s - 1), sb = Math.Min(stations.Length - 1, s + 1);
+                float run = Vector3.Distance(stations[sb].Center, stations[sa].Center);
+                if (run > 1e-5f)
+                {
+                    Vector2 pa = section[si] * stations[sa].Scale;
+                    Vector2 pb = section[si] * stations[sb].Scale;
+                    grow = (Vector2.Dot(pb, outward) - Vector2.Dot(pa, outward)) / run;
+                }
+                nrm = MathX.SafeNormalize(nrm - tangent * grow, nrm);
+
+                AddVertex(pos, nrm, tangent, new Vector2(perim[i], sweepV), col);
+            }
+        }
+
+        int stride = n + 1;
+        for (int s = 0; s < stations.Length - 1; s++)
+        {
+            bool degenerateA = stations[s].Scale.LengthSquared() < 1e-10f;
+            bool degenerateB = stations[s + 1].Scale.LengthSquared() < 1e-10f;
+            for (int i = 0; i < n; i++)
+            {
+                uint i0 = (uint)(baseIdx + s * stride + i);
+                uint i1 = (uint)(baseIdx + s * stride + i + 1);
+                uint i2 = (uint)(baseIdx + (s + 1) * stride + i + 1);
+                uint i3 = (uint)(baseIdx + (s + 1) * stride + i);
+                // A collapsed ring makes one of the two triangles degenerate; emit only the other.
+                if (degenerateA) Tri(i0, i2, i3);
+                else if (degenerateB) Tri(i0, i1, i2);
+                else Quad(i0, i1, i2, i3);
+            }
+        }
+
+        if (capStart && stations[0].Scale.LengthSquared() > 1e-10f)
+            CapRing(section, stations[0], stations[1].Center - stations[0].Center, true, col);
+        if (capEnd && stations[^1].Scale.LengthSquared() > 1e-10f)
+            CapRing(section, stations[^1], stations[^1].Center - stations[^2].Center, false, col);
+    }
+
+    private void CapRing(ReadOnlySpan<Vector2> section, in LoftStation st, Vector3 sweep, bool start, uint col)
+    {
+        Vector3 tangent = MathX.SafeNormalize(sweep, MathX.Forward);
+        Vector3 right = MathX.SafeNormalize(Vector3.Cross(MathX.Up, tangent), MathX.Right);
+        Vector3 up = Vector3.Cross(tangent, right);
+        if (st.Roll != 0f)
+        {
+            float c = MathF.Cos(st.Roll), sn = MathF.Sin(st.Roll);
+            (right, up) = (right * c + up * sn, up * c - right * sn);
+        }
+        Vector3 nrm = start ? -tangent : tangent;
+
+        int n = section.Length;
+        uint centre = AddVertex(st.Center, nrm, right, new Vector2(0, 0), col);
+        Span<uint> ring = n <= 64 ? stackalloc uint[n] : new uint[n];
+        for (int i = 0; i < n; i++)
+        {
+            Vector2 p = section[i] * st.Scale;
+            ring[i] = AddVertex(st.Center + right * p.X + up * p.Y, nrm, right, p, col);
+        }
+        for (int i = 0; i < n; i++)
+        {
+            uint a = ring[i], b = ring[(i + 1) % n];
+            if (start) Tri(centre, a, b); else Tri(centre, b, a);
+        }
+    }
+
+    /// <summary>
+    /// Revolves a 2D profile — pairs of (radius, height) — around the +Y axis. Barrels with real
+    /// muzzle brakes, wheel hubs, engine bells and cockpit domes are all one call rather than a
+    /// stack of cylinders with visible seams.
+    /// </summary>
+    /// <summary>
+    /// Above this angle between adjacent profile segments the surface is treated as a hard edge
+    /// and the normal is split. Without it a muzzle brake or a machined shoulder shades as a
+    /// smooth bulge, which is what makes a gun barrel look like a bone.
+    /// </summary>
+    private const float CreaseCos = 0.82f;      // ~35 degrees
+
+    public void AddLathe(ReadOnlySpan<Vector2> profile, Vector3 center, int segments = 20,
+        bool capBottom = true, bool capTop = true, uint? color = null)
+    {
+        if (profile.Length < 2) return;
+        uint col = color ?? Color;
+        segments = Math.Max(3, segments);
+        int rows = profile.Length;
+
+        // Per-segment normals in the profile plane; a ring is emitted for each side of every
+        // segment, so a crease simply gets two rings at the same position with different normals.
+        Span<Vector2> segNormal = rows <= 64 ? stackalloc Vector2[rows - 1] : new Vector2[rows - 1];
+        for (int r = 0; r < rows - 1; r++)
+        {
+            Vector2 d = profile[r + 1] - profile[r];
+            segNormal[r] = MathX.SafeNormalize(new Vector2(d.Y, -d.X), Vector2.UnitX);
+        }
+
+        int stride = segments + 1;
+        for (int r = 0; r < rows - 1; r++)
+        {
+            // Smooth against the neighbouring segment only when the turn is gentle.
+            Vector2 nA = segNormal[r], nB = segNormal[r];
+            if (r > 0 && Vector2.Dot(segNormal[r - 1], segNormal[r]) > CreaseCos)
+                nA = MathX.SafeNormalize(segNormal[r - 1] + segNormal[r], segNormal[r]);
+            if (r + 1 < rows - 1 && Vector2.Dot(segNormal[r], segNormal[r + 1]) > CreaseCos)
+                nB = MathX.SafeNormalize(segNormal[r] + segNormal[r + 1], segNormal[r]);
+
+            int ringBase = _vertices.Count;
+            EmitLatheRing(profile[r], nA, center, segments, col);
+            EmitLatheRing(profile[r + 1], nB, center, segments, col);
+
+            bool zeroA = profile[r].X < 1e-5f, zeroB = profile[r + 1].X < 1e-5f;
+            if (zeroA && zeroB) continue;
+            for (int s = 0; s < segments; s++)
+            {
+                uint i0 = (uint)(ringBase + s);
+                uint i1 = (uint)(ringBase + s + 1);
+                uint i2 = (uint)(ringBase + stride + s + 1);
+                uint i3 = (uint)(ringBase + stride + s);
+                if (zeroA) Tri(i0, i2, i3);
+                else if (zeroB) Tri(i0, i1, i2);
+                else Quad(i0, i1, i2, i3);
+            }
+        }
+
+        if (capBottom && profile[0].X > 1e-5f) LatheCap(profile[0], center, segments, false, col);
+        if (capTop && profile[^1].X > 1e-5f) LatheCap(profile[^1], center, segments, true, col);
+    }
+
+    private void EmitLatheRing(Vector2 pr, Vector2 rn, Vector3 center, int segments, uint col)
+    {
+        for (int s = 0; s <= segments; s++)
+        {
+            float a = s / (float)segments * MathX.TwoPi;
+            float ca = MathF.Cos(a), sa = MathF.Sin(a);
+            Vector3 pos = center + new Vector3(ca * pr.X, pr.Y, sa * pr.X);
+            Vector3 nrm = MathX.SafeNormalize(new Vector3(ca * rn.X, rn.Y, sa * rn.X), MathX.Up);
+            AddVertex(pos, nrm, new Vector3(-sa, 0, ca), new Vector2(a * MathF.Max(pr.X, 0.01f), pr.Y), col);
+        }
+    }
+
+    private void LatheCap(Vector2 rim, Vector3 center, int segments, bool top, uint col)
+    {
+        Vector3 nrm = top ? MathX.Up : MathX.Down;
+        Vector3 c = center + new Vector3(0, rim.Y, 0);
+        uint mid = AddVertex(c, nrm, MathX.Right, Vector2.Zero, col);
+        for (int s = 0; s < segments; s++)
+        {
+            float a0 = s / (float)segments * MathX.TwoPi;
+            float a1 = (s + 1) / (float)segments * MathX.TwoPi;
+            Vector3 p0 = c + new Vector3(MathF.Cos(a0) * rim.X, 0, MathF.Sin(a0) * rim.X);
+            Vector3 p1 = c + new Vector3(MathF.Cos(a1) * rim.X, 0, MathF.Sin(a1) * rim.X);
+            uint v0 = AddVertex(p0, nrm, MathX.Right, new Vector2(p0.X, p0.Z), col);
+            uint v1 = AddVertex(p1, nrm, MathX.Right, new Vector2(p1.X, p1.Z), col);
+            if (top) Tri(mid, v0, v1); else Tri(mid, v1, v0);
+        }
+    }
+
     // ------------------------------------------------------------------ post-processing
 
     /// <summary>Recomputes tangents from UV derivatives; call after building with generic polygons.</summary>
@@ -573,6 +832,23 @@ public sealed class MeshBuilder
     }
 
     // ------------------------------------------------------------------ output
+
+    /// <summary>
+    /// Axis-aligned bounds of everything built so far. Documentation cameras frame from this
+    /// rather than from a gameplay collision box: a tank's gun and a walker's legs stick well
+    /// outside their collision extents, and framing on the box clips them out of the shot.
+    /// </summary>
+    public (Vector3 Min, Vector3 Max) Bounds()
+    {
+        if (_vertices.Count == 0) return (Vector3.Zero, Vector3.Zero);
+        Vector3 lo = new(float.MaxValue), hi = new(float.MinValue);
+        foreach (var v in _vertices)
+        {
+            lo = Vector3.Min(lo, v.Position);
+            hi = Vector3.Max(hi, v.Position);
+        }
+        return (lo, hi);
+    }
 
     public (Vertex[] Vertices, uint[] Indices, MeshSection[] Sections) Build()
     {
