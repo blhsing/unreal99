@@ -75,6 +75,7 @@ public sealed class App : IDisposable
     private readonly Dictionary<int, float> _autoShotTravelDistances = new();
     private readonly Dictionary<int, float> _autoShotStallTimes = new();
     private readonly Dictionary<int, float> _autoShotLongestStalls = new();
+    private readonly Dictionary<int, int> _autoShotLastShotsFired = new();
     private readonly Dictionary<int, TraversalMetrics> _traversalMetrics = new();
     private bool _traversalTest;
     private bool _autoStartMatch;
@@ -89,6 +90,10 @@ public sealed class App : IDisposable
     private string _weaponTurntableDirectory;
     private int _weaponTurntableFrame;
     private int _weaponTurntableCaptured;
+    private int _vehicleTurntableCapture = -1;
+    private string _vehicleTurntableDirectory;
+    private int _vehicleTurntableFrame;
+    private int _vehicleTurntableCaptured;
     private int _weaponFootageMode = -1;
     private bool _weaponFootageBothModes;
     private string _weaponFootageDirectory;
@@ -101,6 +106,7 @@ public sealed class App : IDisposable
     // Clear floor in Stalwart's main hall. The offset camera remains inside the room while the
     // weapon is viewed from the same elevated three-quarter angle as an approaching player.
     private static readonly Vector3 WeaponTurntableBase = new(10f, 0.05f, -8f);
+    private static readonly Vector3 VehicleTurntableBase = new(10f, 0.05f, -8f);
 
     /// <summary>Non-zero when an automated behavioral gate fails.</summary>
     public int ExitCode { get; private set; }
@@ -153,8 +159,8 @@ public sealed class App : IDisposable
         options.Title = Loc.WindowTitle;
         options.API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.Default,
             new APIVersion(3, 3));
-        options.VSync = !_traversalTest && _weaponFootageMode < 0
-            && _weaponTurntableDirectory == null;
+        options.VSync = !_traversalTest && !_vehicleTest && _weaponFootageMode < 0
+            && _weaponTurntableDirectory == null && _vehicleTurntableDirectory == null;
         options.PreferredDepthBufferBits = 24;
         options.PreferredStencilBufferBits = 0;
         options.WindowBorder = WindowBorder.Resizable;
@@ -331,6 +337,20 @@ public sealed class App : IDisposable
                     _noHud = true;
                     i += 2;
                     break;
+                case "--vehicleturntable" when i + 2 < args.Length:
+                    _vehicleTurntableCapture = MathX.Clamp(
+                        int.TryParse(args[i + 1], out int turntableVehicle) ? turntableVehicle : 0,
+                        0, (int)VehicleKind.Count - 1);
+                    _vehicleTurntableDirectory = args[i + 2];
+                    _menu.Map = MapId.Stalwart;
+                    _menu.LocalPlayers = 1;
+                    _menu.BotCount = 0;
+                    _cliOverrides.UnionWith(["map", "players", "bots"]);
+                    _autoStartMatch = true;
+                    _windowed = true;
+                    _noHud = true;
+                    i += 2;
+                    break;
                 case "--flycam" when i + 4 < args.Length:
                     // Explicit fly-by framing: radius, camera height, orbit angle, look-at height.
                     // One automatic orbit cannot frame seventeen very differently shaped arenas,
@@ -359,10 +379,22 @@ public sealed class App : IDisposable
                     i++;
                     break;
                 case "--vehicletest":
-                    // Boards a bot into every vehicle in turn and checks it actually moves.
+                    // Boards the production Godlike autopilot into every vehicle in turn and
+                    // checks that its real steering can translate and turn each motion solver.
                     _vehicleTest = true;
                     _windowed = true;
                     _autoStartMatch = true;
+                    _demoMode = true;
+                    _menu.Map = MapId.Torlan;
+                    _menu.ModeKind = GameModeKind.Onslaught;
+                    _menu.LocalPlayers = 1;
+                    _menu.BotCount = 0;
+                    _menu.DemoSkill = 5;
+                    _menu.FragLimit = 0;
+                    _menu.TimeLimitMinutes = 0;
+                    _menu.RespawnDelaySeconds = 0;
+                    _cliOverrides.UnionWith(["map", "mode", "players", "bots", "demoskill",
+                        "frags", "time", "respawn"]);
                     break;
                 case "--savetest":
                     // Round-trips settings and a saved match without needing anyone to drive menus.
@@ -560,7 +592,7 @@ public sealed class App : IDisposable
         _menu.OnDeleteSlot = DeleteSlot;
 
         LoadUserSettings();
-        if (_traversalTest || _weaponFootageMode >= 0) _window.VSync = false;
+        if (_traversalTest || _vehicleTest || _weaponFootageMode >= 0) _window.VSync = false;
         RefreshSaveSlots();
     }
 
@@ -1217,7 +1249,8 @@ public sealed class App : IDisposable
         // Behavioral suites use the production update/render path but advance it at a stable
         // 60 Hz without waiting for wall-clock VSync. This makes long all-map runs practical
         // while preserving the same per-tick physics and bot decisions as normal gameplay.
-        if (_traversalTest || _weaponFootageMode >= 0 || _weaponTurntableDirectory != null)
+        if (_traversalTest || _vehicleTest || _weaponFootageMode >= 0 || _weaponTurntableDirectory != null
+            || _vehicleTurntableDirectory != null)
             dt = 1f / 60f;
         _time += dt;
         if (_audio != null) _audio.Time = _time;
@@ -1270,6 +1303,7 @@ public sealed class App : IDisposable
         HandleAutoScreenshot();
         HandleWeaponFootageCapture();
         HandleWeaponTurntableCapture();
+        HandleVehicleTurntableCapture();
         _input.EndFrame(dt);
     }
 
@@ -1574,8 +1608,9 @@ public sealed class App : IDisposable
                 _state = AppState.Playing;
                 // Automated traversal runs must never capture or warp the user's real desktop
                 // cursor. Their local player is bot-driven and has no need for mouse-look.
-                if (_traversalTest || _saveTest || _weaponFootageMode >= 0
-                    || _weaponTurntableDirectory != null || _autoShotFrames >= 0)
+                if (_traversalTest || _vehicleTest || _saveTest || _weaponFootageMode >= 0
+                    || _weaponTurntableDirectory != null || _vehicleTurntableDirectory != null
+                    || _autoShotFrames >= 0)
                     _input.SetPointerMode(InputSystem.PointerMode.Normal);
                 else
                     _input.SetMouseCapture(true);
@@ -1946,13 +1981,20 @@ public sealed class App : IDisposable
         var viewports = ComputeViewports(viewCount, Width, Height, _menu.VerticalSplit);
 
         _scene.Clear();
-        if (_weaponProfileCapture >= 0 && _players.Count > 0)
+        if ((_weaponProfileCapture >= 0 || _vehicleTurntableCapture >= 0) && _players.Count > 0)
         {
             // Match updates can still emit ambient arena particles; exclude them from the clean
             // capture plate so only the intended live weapon scene is visible.
             _renderer.Particles.Clear();
             _renderer.Effects.Clear();
-            if (_weaponTurntableDirectory != null)
+            if (_vehicleTurntableDirectory != null)
+            {
+                const int turntableFrames = 36;
+                float yaw = _vehicleTurntableCaptured / (float)turntableFrames * MathX.TwoPi;
+                _world.SubmitVehicleTurntable(_scene, (VehicleKind)_vehicleTurntableCapture,
+                    VehicleTurntableBase, yaw);
+            }
+            else if (_weaponTurntableDirectory != null)
             {
                 _level.Environment.ApplyTo(_scene);
                 _level.Submit(_scene, _world.Materials, _world.Time);
@@ -2063,8 +2105,27 @@ public sealed class App : IDisposable
         cam.Near = 0.055f;
         cam.Far = 600f;
 
-        if (_weaponProfileCapture >= 0 && controller.PlayerIndex == 0)
+        if ((_weaponProfileCapture >= 0 || _vehicleTurntableCapture >= 0)
+            && controller.PlayerIndex == 0)
         {
+            if (_vehicleTurntableCapture >= 0)
+            {
+                VehicleDef def = VehicleDef.Get((VehicleKind)_vehicleTurntableCapture);
+                Vector3 vehicle = VehicleTurntableBase + new Vector3(0f, def.HalfExtents.Y, 0f);
+                if ((VehicleKind)_vehicleTurntableCapture == VehicleKind.Darkwalker)
+                    vehicle.Y += def.HalfExtents.Y * 0.65f;
+                float radius = MathF.Max(def.HalfExtents.X, def.HalfExtents.Z);
+                if ((VehicleKind)_vehicleTurntableCapture == VehicleKind.Darkwalker)
+                    radius *= 1.35f;
+                cam.Position = vehicle + new Vector3(radius * 2.6f + 3f,
+                    def.HalfExtents.Y * 1.25f + 2.5f, radius * 2.2f + 2f);
+                Vector3 vehicleLook = MathX.SafeNormalize(vehicle - cam.Position, -MathX.Right);
+                MathX.YawPitchFromDir(vehicleLook, out cam.Yaw, out cam.Pitch);
+                cam.Roll = 0f;
+                cam.FovY = VerticalFov(40f, aspect);
+                cam.Update(aspect);
+                return cam;
+            }
             bool turntable = _weaponTurntableDirectory != null;
             Vector3 weapon = turntable
                 ? WeaponTurntableBase + new Vector3(0f, 0.55f, 0f)
@@ -2247,7 +2308,8 @@ public sealed class App : IDisposable
     /// </summary>
     private void DrawVersionLabel()
     {
-        if (_weaponGuideCapture >= 0 || _weaponProfileCapture >= 0 || _traversalTest) return;
+        if (_weaponGuideCapture >= 0 || _weaponProfileCapture >= 0
+            || _vehicleTurntableCapture >= 0 || _traversalTest) return;
         const float size = 22f;
         const float margin = 12f;
         float measured = _fonts.Measure(_hud.FaceRegular, size, Loc.GameVersionLabel);
@@ -2334,63 +2396,116 @@ public sealed class App : IDisposable
 
     private bool _vehicleTest;
     private int _vehicleTestFrame;
+    private int _vehicleTestKind = -1;
+    private int _vehicleTestKindFrame;
+    private Vehicle _vehicleUnderTest;
+    private Vector3 _vehicleTestPrevious;
+    private float _vehicleTestPath;
+    private float _vehicleTestStartYaw;
+    private readonly float[] _vehicleTestDistances = new float[(int)VehicleKind.Count];
+    private readonly float[] _vehicleTestTurns = new float[(int)VehicleKind.Count];
+    private readonly bool[] _vehicleTestBoarded = new bool[(int)VehicleKind.Count];
 
     /// <summary>
-    /// Drives <c>--vehicletest</c>: spawns one of every vehicle, boards a pawn into each, holds
-    /// the throttle down and reports how far each one actually travelled. A vehicle that reads
-    /// as "working" but never moves is the failure this is here to catch — and the four motion
-    /// solvers fail in different ways, so each kind is checked rather than one representative.
+    /// Drives <c>--vehicletest</c>: the real Godlike <see cref="BotController"/> is boarded into
+    /// each vehicle on Torlan and allowed to pursue the live Onslaught objective. Both translation
+    /// and steering are measured. This exercises objective choice, boarding, path steering and
+    /// the four production motion solvers together instead of calling <c>Vehicle.Move</c> directly.
     /// </summary>
     private void UpdateVehicleSelfTest()
     {
         _vehicleTestFrame++;
         if (_state != AppState.Playing || _world?.Level == null) return;
 
-        const int Settle = 40;
-        const int Run = 150;
+        const int Settle = 24;
+        const int RunPerKind = 180;
+        if (_vehicleTestFrame < Settle) return;
 
-        if (_vehicleTestFrame == Settle)
+        if (_vehicleTestKind < 0 || _vehicleTestKindFrame >= RunPerKind)
         {
-            // Park one of every kind in a line clear of the arena's own vehicles.
+            if (_vehicleTestKind >= 0 && _vehicleUnderTest != null)
+            {
+                int finished = _vehicleTestKind;
+                _vehicleTestDistances[finished] = _vehicleTestPath;
+                _vehicleTestTurns[finished] = MathF.Abs(MathX.WrapAngle(
+                    _vehicleUnderTest.Yaw - _vehicleTestStartYaw));
+            }
+
+            _vehicleTestKind++;
+            if (_vehicleTestKind >= (int)VehicleKind.Count)
+            {
+                Console.WriteLine("──── 電腦載具操控自我測試 ────");
+                int passed = 0;
+                for (int k = 0; k < (int)VehicleKind.Count; k++)
+                {
+                    VehicleDef def = VehicleDef.Get((VehicleKind)k);
+                    bool ok = _vehicleTestBoarded[k] && _vehicleTestDistances[k] > 3f
+                        && _vehicleTestTurns[k] > 0.12f;
+                    if (ok) passed++;
+                    Console.WriteLine($"VEHICLE_AI_CASE {def.Name} {(ok ? "PASS" : "FAIL")} " +
+                        $"motion={def.Motion} boarded={_vehicleTestBoarded[k]} " +
+                        $"path={_vehicleTestDistances[k]:F2} turn={_vehicleTestTurns[k]:F3}");
+                }
+                int failed = (int)VehicleKind.Count - passed;
+                Console.WriteLine($"VEHICLE_AI_TEST {(failed == 0 ? "PASS" : "FAIL")} " +
+                    $"passed={passed} failed={failed}");
+                ExitCode = failed == 0 ? 0 : 3;
+                _window.Close();
+                return;
+            }
+
+            Pawn pawn = _players[0].Pawn;
+            if (pawn.InVehicle) _world.ExitVehicle(pawn);
             _world.Vehicles.Clear();
             _world.NextVehicleId = 1;
-            Vector3 origin = _world.Level.Center + new Vector3(0f, 2f, 0f);
-            for (int k = 0; k < (int)VehicleKind.Count; k++)
+            _world.Mode.State = MatchState.InProgress;
+            _world.Mode.TimeRemaining = 0f;
+            _world.ResumeCountdown = 0f;
+            // Give every kind the same live front. A fast vehicle can otherwise activate a node
+            // that changes the following kind's destination, making this supposedly deterministic
+            // gate depend on test order.
+            _world.Onslaught.ResetRound(swapSides: false);
+
+            VehicleKind kind = (VehicleKind)_vehicleTestKind;
+            VehicleDef definition = VehicleDef.Get(kind);
+            float y = definition.Motion == VehicleMotion.Air
+                ? 14f : definition.HalfExtents.Y + 0.25f;
+            // Torlan's first red objective is roughly 74 m from this clear base apron. That lies
+            // beyond even Leviathan/SPMA's 55 m artillery hold, so heavy vehicles must approach
+            // and turn before deploying instead of correctly parking at frame zero.
+            Vector3 start = new(-108f, y, 0f);
+            var vehicle = new Vehicle { Id = _world.NextVehicleId++, SpawnTeam = Team.Red };
+            vehicle.Configure(kind, start, 0f);
+            vehicle.SpawnTeam = Team.Red;
+            vehicle.Team = Team.Red;
+            _world.Vehicles.Add(vehicle);
+
+            pawn.Team = Team.Red;
+            pawn.Alive = true;
+            pawn.Position = start;
+            pawn.Velocity = Vector3.Zero;
+            pawn.Yaw = pawn.Pitch = 0f;
+            if (_players[0].AutoPilot is { } pilot)
             {
-                var v = new Vehicle { Id = _world.NextVehicleId++ };
-                v.Configure((VehicleKind)k, origin + new Vector3((k - 8) * 7f, 0f, 0f), 0f);
-                _world.Vehicles.Add(v);
-                _vehicleTestStart[k] = v.Position;
+                pilot.Pawn = pawn;
+                pilot.OnSpawned(_world);
             }
+            _vehicleTestBoarded[_vehicleTestKind] = _world.EnterVehicle(pawn, vehicle);
+            _vehicleUnderTest = vehicle;
+            _vehicleTestPrevious = vehicle.Position;
+            _vehicleTestStartYaw = vehicle.Yaw;
+            _vehicleTestPath = 0f;
+            _vehicleTestKindFrame = 0;
             return;
         }
 
-        // Hold the throttle for every vehicle, whether or not anyone is aboard.
-        if (_vehicleTestFrame > Settle && _vehicleTestFrame < Settle + Run)
+        _vehicleTestKindFrame++;
+        if (_vehicleUnderTest != null)
         {
-            foreach (var v in _world.Vehicles)
-                v.Move(_world.Level, new Vector2(0f, 1f), false, false, 1f / 60f);
-            return;
+            _vehicleTestPath += Vector3.Distance(_vehicleUnderTest.Position, _vehicleTestPrevious);
+            _vehicleTestPrevious = _vehicleUnderTest.Position;
         }
-
-        if (_vehicleTestFrame != Settle + Run) return;
-
-        Console.WriteLine("──── 載具自我測試 ────");
-        int moved = 0, stuck = 0;
-        foreach (var v in _world.Vehicles)
-        {
-            float travelled = Vector3.Distance(v.Position, _vehicleTestStart[(int)v.Kind]);
-            bool ok = travelled > 3f;
-            if (ok) moved++; else stuck++;
-            Console.WriteLine($"  {v.Def.Name,-12} {v.Def.Motion,-8} 座位 {v.Def.SeatCount}  " +
-                              $"位移 {travelled,6:0.0} m  {(ok ? "通過" : "未移動")}");
-        }
-        Console.WriteLine($"  結果: {moved} 種可移動、{stuck} 種未移動（共 {(int)VehicleKind.Count} 種）");
-        Console.WriteLine("──────────────────────");
-        _window.Close();
     }
-
-    private readonly Vector3[] _vehicleTestStart = new Vector3[(int)VehicleKind.Count];
 
     // ---------------------------------------------------------------- save/load self-test
 
@@ -2605,6 +2720,7 @@ public sealed class App : IDisposable
             if (pawn is not { Alive: true })
             {
                 _autoShotLastPositions.Remove(pawnId);
+                _autoShotLastShotsFired.Remove(pawnId);
                 _autoShotStallTimes[pawnId] = 0f;
                 if (_traversalMetrics.TryGetValue(pawnId, out TraversalMetrics deadMetrics))
                 {
@@ -2619,6 +2735,7 @@ public sealed class App : IDisposable
             if (!_autoShotLastPositions.TryGetValue(pawnId, out Vector3 previous))
             {
                 _autoShotLastPositions[pawnId] = pawn.Position;
+                _autoShotLastShotsFired[pawnId] = pawn.ShotsFired;
                 continue;
             }
 
@@ -2628,9 +2745,15 @@ public sealed class App : IDisposable
             _autoShotTravelDistances[pawnId] = _autoShotTravelDistances.GetValueOrDefault(pawnId) + distance;
 
             // Horizontal distance remains the useful map-traversal metric, but a pawn riding a
-            // lift or moving through a low-gravity arc is not stationary. Use full spatial speed
-            // for stall detection so only genuine zero-motion spans fail the automation gate.
-            float stall = delta.Length() / MathF.Max(dt, 1e-4f) < 0.20f
+            // lift or moving through a low-gravity arc is not stationary. Firing also represents
+            // productive play: Assault bots deliberately hold a safe firing position while they
+            // destroy a compressor, and counting that as a navigation stall produced a false
+            // failure even as objective health fell. Only genuine zero-motion, zero-action spans
+            // accumulate stationary time.
+            int previousShots = _autoShotLastShotsFired.GetValueOrDefault(pawnId, pawn.ShotsFired);
+            bool fired = pawn.ShotsFired > previousShots;
+            _autoShotLastShotsFired[pawnId] = pawn.ShotsFired;
+            float stall = !fired && delta.Length() / MathF.Max(dt, 1e-4f) < 0.20f
                 ? _autoShotStallTimes.GetValueOrDefault(pawnId) + dt
                 : 0f;
             _autoShotStallTimes[pawnId] = stall;
@@ -2948,6 +3071,31 @@ public sealed class App : IDisposable
         _window.Close();
     }
 
+    /// <summary>Captures a seamless 36-frame revolution of a production vehicle mesh.</summary>
+    private void HandleVehicleTurntableCapture()
+    {
+        if (_vehicleTurntableDirectory == null || _vehicleTurntableCapture < 0
+            || _state != AppState.Playing || _world == null || _world.ResumeCountdown > 0f
+            || _world.Mode.State == MatchState.Warmup) return;
+
+        const int captureEvery = 4;
+        const int frameCount = 36;
+        _vehicleTurntableFrame++;
+        if ((_vehicleTurntableFrame - 1) % captureEvery != 0) return;
+
+        Directory.CreateDirectory(_vehicleTurntableDirectory);
+        string path = Path.Combine(_vehicleTurntableDirectory,
+            $"{_vehicleTurntableCaptured:D3}.png");
+        SaveScreenshot(path, quiet: true);
+        _vehicleTurntableCaptured++;
+        if (_vehicleTurntableCaptured < frameCount) return;
+
+        Console.WriteLine($"載具旋轉展示擷取完成: " +
+                          $"{VehicleDef.Get((VehicleKind)_vehicleTurntableCapture).Name} · " +
+                          $"{frameCount} 畫格 · 360°");
+        _window.Close();
+    }
+
     private void FinishTraversalTest()
     {
         bool allPassed = true;
@@ -2993,6 +3141,17 @@ public sealed class App : IDisposable
                     failures.Add($"control-points<{controlPointCount}");
                 if (_world.Mode.DominationScores[0] + _world.Mode.DominationScores[1] <= 0.01f)
                     failures.Add("domination-score=0");
+            }
+            if (_world.Mode.Kind == GameModeKind.Onslaught)
+            {
+                if (_world.OnslaughtNodeCaptures <= 0) failures.Add("onslaught-node-captures=0");
+                if (_world.VehicleBoardings <= 0) failures.Add("vehicle-boardings=0");
+            }
+            if (_world.Mode.Kind == GameModeKind.Assault)
+            {
+                if (_world.AssaultObjectiveCompletions <= 0) failures.Add("assault-objectives=0");
+                if (_world.Level.VehicleSpawns.Count > 0 && _world.VehicleBoardings <= 0)
+                    failures.Add("vehicle-boardings=0");
             }
             bool passed = failures.Count == 0;
             allPassed &= passed;
@@ -3048,6 +3207,15 @@ public sealed class App : IDisposable
                 ControlPointCaptures = _world.ControlPointCaptures.ToArray(),
                 DominationScoreRed = MathF.Round(_world.Mode.DominationScores[0], 2),
                 DominationScoreBlue = MathF.Round(_world.Mode.DominationScores[1], 2),
+                VehicleBoardings = _world.VehicleBoardings,
+                VehicleKindsDriven = _world.VehicleKindsDriven.Select(k => k.ToString()).Order().ToArray(),
+                OnslaughtNodeCaptures = _world.OnslaughtNodeCaptures,
+                OnslaughtNodesHeldRed = _world.Onslaught?.NodesHeldBy(Team.Red) ?? 0,
+                OnslaughtNodesHeldBlue = _world.Onslaught?.NodesHeldBy(Team.Blue) ?? 0,
+                AssaultObjectiveCompletions = _world.AssaultObjectiveCompletions,
+                AssaultRoundsCompleted = _world.AssaultRoundsCompleted,
+                AssaultRound = _world.Assault?.Round ?? 0,
+                AssaultCompletedObjectives = _world.Assault?.CompletedCount ?? 0,
             };
             Console.WriteLine("TRAVERSAL_RESULT " + JsonSerializer.Serialize(result));
         }

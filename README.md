@@ -94,6 +94,9 @@ artifacts\installer\Unreal99Installer.exe --help
 | `--weaponshot N` | 強制裝備第 N 把武器，只隱藏 HUD 而保留第一人稱武器，用於擷取武器指南 |
 | `--weaponfootage N primary|secondary|both 路徑` | 在哥德庭園的實戰場景輸出第 N 把武器的 30 格動態畫面 |
 | `--weaponturntable N 路徑` | 以玩家接近拾取物的俯視角度，輸出第 N 把武器的 36 格 360° 旋轉畫面 |
+| `--vehicleturntable N 路徑` | 以遊戲正式網格輸出第 N 種載具的 36 格 360° 旋轉畫面 |
+| `--vehicletest` | 讓神級正式電腦依序駕駛十七種載具，驗證登乘、前進、轉向與導航復原 |
+| `--moderulestest` | 無視窗驗證攻堅節點、核心與突擊兩回合勝負規則 |
 | `--loadslot N` | 直接從第 N 個存檔位接續對戰 |
 | `--weapon N` | 強制玩家一持有指定武器，用於檢視第一人稱模型 |
 | `--savetest` | 存檔與設定的往返自我測試（寫入、讀回、還原到實際世界並比對） |
@@ -250,10 +253,15 @@ UT2004 引進的模式，本作依原作規則實作。全場是一張**能量�
 * **連線規則就是這個模式的全部**。一個節點只有在**至少一條連線通往我方已啟用的節點**時才能
   建造或攻擊；核心只有在敵方持有與它直接相連的節點時才會暴露。因此戰線只能一節一節推進，
   無法直接衝向對方核心——沒有這條規則，攻堅模式就只是多幾個點的支配佔領。
-* 站在中立節點上會逐步建造（約六秒），站在敵方節點上則是先拆到中立才能重建，不能直接覆寫。
+* 踏上可連結的中立節點會**啟動約六秒的自動建造**，離開後仍會繼續。脈衝槍次要光束在此相當於
+  原作 Link Gun，可加速建造並修復我方節點與載具；核心不能修復。敵方節點不能用身體「佔領」，
+  必須先以武器或載具摧毀到中立，再重新啟動。
 * 節點與核心也吃**武器與載具的傷害**，且不限距離。用 Goliath 或自走砲從防守圈外轟掉一個節點，
   是原作最有效的破線手段，本作照樣成立（但一樣受連線規則限制，砲兵無法越級打擊）。
-* 摧毀敵方核心即獲勝：常規時間內得 2 分，延長賽（驟死）得 1 分。
+* 啟用的節點也是該隊的重生點，並啟用附近的載具生成台；節點受攻擊時不能在該處重生。
+* 比賽**率先取得 3 分**：常規時間摧毀核心得 2 分，延長賽摧毀得 1 分，每回合後交換基地。
+  進入延長賽後兩座核心依對方控制的節點比例流失能量；控制全場的一隊不會流失，另一隊以每秒
+  最多 20 點流失，直到核心被摧毀。
 
 HUD 下方以卡片列出整條節點鏈：所屬隊伍、建造進度或剩餘耐久，**目前可攻擊的節點以金色外框標示**
 ——那圈外框就是這個模式的戰略資訊。最上方一行則直接告知核心狀態（受保護／我方暴露／敵方暴露）。
@@ -264,6 +272,7 @@ HUD 下方以卡片列出整條節點鏈：所屬隊伍、建造進度或剩餘�
 * 我方核心一旦暴露，全隊立刻回防；否則約三分之一的隊員負責防守「敵方目前打得到的」我方節點。
 * 防守者在節點周圍巡邏而不站在正中央，既不擋住佔領區也不當靶。
 * 距離超過 34 公尺才值得先去開載具，且該載具必須真的縮短行程，否則只是繞路。
+* 建造中的節點若在 26 公尺內，持有脈衝槍的電腦會切換到次要光束協助建造。
 
 ---
 
@@ -278,7 +287,8 @@ HUD 下方以卡片列出整條節點鏈：所屬隊伍、建造進度或剩餘�
 * 攻方每完成一個目標，**重生點就往前推一組**；沒有這個機制，長圖的最後一個目標打不下來。
 * 佔位型目標只要圈內有防守者就會停住進度（不會倒退）——那個貼身爭奪就是這個模式的重頭戲。
 * 第一回合結束後**攻守交換**，並以第一回合的完成時間為目標；第二回合更快才算贏，追平不算。
-  若雙方都沒打完，比完成的目標數，仍相同則和局。
+  若第一隊沒打完，第二隊一完成第一隊未完成的下一個目標就立即獲勝；時間結束仍未超過時，
+  比完成的目標數，仍相同則和局。
 * 這個模式一定有回合時限：設成「無限制」時會自動採用原作的六分鐘。沒有時鐘，攻方卡住時第一
   回合就永遠不會結束，攻守也就永遠不會交換。
 
@@ -321,6 +331,42 @@ UT2004 與 UT3 引進的**十七種載具全部實作**，**且只在攻堅與�
 | Necris | Darkwalker | 步行 | 2 | 三足重型步行機 |
 | — | Hoverboard | 氣墊 | 1 | 純交通工具，**無武裝、不輾壓**、全場最快 |
 
+### 360° 遊戲內載具指南
+
+以下不是概念圖；每段動畫都由遊戲的 `--vehicleturntable` 模式提交正式 `VehicleModels` 網格、比例與
+材質，以固定三分之四俯視鏡頭逐 10° 擷取，共 36 格。名稱與用途先列於每格，再顯示完整旋轉外形。
+
+<table>
+<tr>
+<td width="50%"><b>Scorpion · 蠍式突擊車</b><br>單座高速輪型偵察車；能量索炮與近身刀刃適合快速奪點。<br><br><img src="docs/vehicles/scorpion-turntable.webp" width="100%"></td>
+<td width="50%"><b>Hellbender · 地獄犬</b><br>三座輪型支援車；駕駛無武裝，後兩座負責天雷與遠距雷射。<br><br><img src="docs/vehicles/hellbender-turntable.webp" width="100%"></td>
+</tr><tr>
+<td><b>Goliath · 歌利亞</b><br>雙座主戰車；重型主砲保持遠距，車頂機槍壓制步兵。<br><br><img src="docs/vehicles/goliath-turntable.webp" width="100%"></td>
+<td><b>Leviathan · 利維坦</b><br>五座移動堡壘；抵達陣地後架設，主駕駛改用離子砲。<br><br><img src="docs/vehicles/leviathan-turntable.webp" width="100%"></td>
+</tr><tr>
+<td><b>Paladin · 聖騎士</b><br>單座重裝支援車；可展開能量護盾替隊友吸收正面火力。<br><br><img src="docs/vehicles/paladin-turntable.webp" width="100%"></td>
+<td><b>SPMA · 自走砲</b><br>雙座遠程砲車；以拋物線重砲越過掩體，乘客座提供天雷防禦。<br><br><img src="docs/vehicles/spma-turntable.webp" width="100%"></td>
+</tr><tr>
+<td><b>Manta · 曼塔</b><br>單座高速氣墊艇；雙電漿砲與俯衝輾壓適合貼近突襲。<br><br><img src="docs/vehicles/manta-turntable.webp" width="100%"></td>
+<td><b>Raptor · 猛禽</b><br>單座飛行戰機；可自由爬升俯衝，以電漿與火箭攻擊地空目標。<br><br><img src="docs/vehicles/raptor-turntable.webp" width="100%"></td>
+</tr><tr>
+<td><b>Cicada · 蟬式武裝機</b><br>雙座飛行支援載具；駕駛發射火箭，乘客以獨立砲塔掩護。<br><br><img src="docs/vehicles/cicada-turntable.webp" width="100%"></td>
+<td><b>Ion Tank · 離子戰車</b><br>單座重型輪車；慢速但以長程高傷離子砲控制開闊地。<br><br><img src="docs/vehicles/ion-tank-turntable.webp" width="100%"></td>
+</tr><tr>
+<td><b>Viper · 蝰蛇</b><br>單座 Necris 氣墊艇；高速電漿突襲，必要時可自爆衝入目標。<br><br><img src="docs/vehicles/viper-turntable.webp" width="100%"></td>
+<td><b>Scavenger · 掠奪者</b><br>單座三足快速步行機；近距光束與捲球衝撞用於突破狹道。<br><br><img src="docs/vehicles/scavenger-turntable.webp" width="100%"></td>
+</tr><tr>
+<td><b>Nemesis · 復仇者</b><br>單座重型步行砲台；雙電漿砲適合中遠距正面推進。<br><br><img src="docs/vehicles/nemesis-turntable.webp" width="100%"></td>
+<td><b>Nightshade · 夜影</b><br>單座隱形氣墊支援車；靜止時啟動光學迷彩，投放區域拒止武器。<br><br><img src="docs/vehicles/nightshade-turntable.webp" width="100%"></td>
+</tr><tr>
+<td><b>Fury · 狂怒</b><br>單座高速攔截機；以長程光束獵殺飛行與地面目標。<br><br><img src="docs/vehicles/fury-turntable.webp" width="100%"></td>
+<td><b>Darkwalker · 暗黑行者</b><br>雙座三足重型步行機；高車體越過障礙，以雙光束壓制戰線。<br><br><img src="docs/vehicles/darkwalker-turntable.webp" width="100%"></td>
+</tr><tr>
+<td><b>Hoverboard · 氣墊滑板</b><br>單座無武裝個人交通工具；快速穿越戰場，到達目標即下車。<br><br><img src="docs/vehicles/hoverboard-turntable.webp" width="100%"></td>
+<td><b>可重建、可驗證</b><br>完整命令、編號、輸出格式與人工驗收程序見 <a href="docs/vehicle-turntable-capture.md">載具旋轉展示擷取文件</a>。</td>
+</tr>
+</table>
+
 四種運動解算各自獨立：輪型與步行受重力並貼地（步行機的跨步高度大得多）、氣墊以阻尼彈簧維持
 離地高度因此能越過輪型過不去的坑、飛行不受重力並可自由爬升俯衝。所有載具都用同一套逐軸牆面
 解算，擦到牆會滑開而不是直接卡死。
@@ -335,7 +381,8 @@ UT2004 與 UT3 引進的**十七種載具全部實作**，**且只在攻堅與�
 * 被推進到自己交戰距離以內時會倒車拉開——步兵鑽到戰車底下時主砲根本壓不下去。
 * 可架設的載具一抵達交戰位置就架設；砲塔座位獨立瞄準，車體固定武器則必須先把車頭轉正才開火。
 * 節點與突擊目標本身就是合法射擊目標，遠距轟擊是重裝載具的主要價值。
-* 血量低於 14%、卡住超過 4.5 秒，或 Hoverboard 已抵達目的地時自動下車。
+* 地面與氣墊載具會沿導航路徑逐點轉向，不再直線撞向目標後面的牆；卡住時先倒車轉向並重算路線，
+  血量低於 14%、重算後仍卡住超過 4.5 秒，或 Hoverboard 已抵達目的地時才下車。
 
 ---
 

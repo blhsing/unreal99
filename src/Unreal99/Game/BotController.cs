@@ -210,6 +210,20 @@ public sealed class BotController : Controller
     /// <summary>How long the bot has been driving without getting anywhere, so it can bail out.</summary>
     private float _vehicleStuckTimer;
     private Vector3 _lastVehiclePosition;
+    /// <summary>
+    /// Short sliding window used to distinguish useful driving from rapid forward/reverse motion
+    /// against the same obstacle. Per-frame speed alone cannot detect that failure because the
+    /// odometer still rises while the vehicle remains inside a tiny footprint.
+    /// </summary>
+    private float _vehicleProgressTimer;
+    private float _vehicleProgressPath;
+    private Vector3 _vehicleProgressOrigin;
+    private float _vehicleRecoveryTimer;
+    private int _vehicleRecoveryAttempts;
+    private readonly List<int> _vehiclePath = new(64);
+    private int _vehiclePathCursor;
+    private float _vehiclePathTimer;
+    private Vector3 _vehiclePathDestination;
     private bool _hasGoalPosition;
     private bool _pathFound;
     private Vector3 _goalPosition;
@@ -313,6 +327,15 @@ public sealed class BotController : Controller
         _vehicleTargetId = -1;
         _vehicleBoardTimer = 0f;
         _vehicleStuckTimer = 0f;
+        _lastVehiclePosition = Pawn.Position;
+        _vehicleProgressTimer = 0f;
+        _vehicleProgressPath = 0f;
+        _vehicleProgressOrigin = Pawn.Position;
+        _vehicleRecoveryTimer = 0f;
+        _vehicleRecoveryAttempts = 0;
+        _vehiclePath.Clear();
+        _vehiclePathCursor = 0;
+        _vehiclePathTimer = 0f;
         _hasGoalPosition = false;
         _pathFound = false;
         _path.Clear();
@@ -451,12 +474,17 @@ public sealed class BotController : Controller
         {
             var wanted = world.FindVehicle(_vehicleTargetId);
             if (wanted == null || !wanted.Alive || wanted.FreeSeat() < 0) _vehicleTargetId = -1;
-            else if (Vector3.Distance(pawn.Position, wanted.Position) < 3.6f)
+            else if (world.VehicleToBoard(pawn) is { } boardable)
             {
+                _vehicleTargetId = boardable.Id;
                 input.UseVehicle = true;
                 _vehicleBoardTimer = 0.8f;
                 _vehicleStuckTimer = 0f;
-                _lastVehiclePosition = wanted.Position;
+                _lastVehiclePosition = boardable.Position;
+                _vehicleProgressOrigin = boardable.Position;
+                _vehicleProgressTimer = 0f;
+                _vehicleProgressPath = 0f;
+                _vehicleRecoveryAttempts = 0;
             }
         }
 
@@ -864,9 +892,10 @@ public sealed class BotController : Controller
         // bot. Tracking that pawn through an atrium made demo players stare almost vertically
         // into the floor while their real objective was elsewhere. Keep route awareness unless
         // the target is on a tactically relevant level; ordinary combat remains unrestricted.
-        bool targetBelowObjective = _objectiveGoal && target != null
-            && target.Position.Y + target.CurrentHeight < Pawn.Position.Y - 5f;
-        bool useTargetAim = !rearming && !targetBelowObjective && target != null
+        bool targetOffObjectiveLevel = _objectiveGoal && target != null
+            && MathF.Abs((target.Position.Y + target.CurrentHeight * 0.5f)
+                - (Pawn.Position.Y + Pawn.CurrentHeight * 0.5f)) > 5f;
+        bool useTargetAim = !rearming && !targetOffObjectiveLevel && target != null
             && (visible || world.Time - _lastSeenTargetTime < 1.6f);
 
         if (useTargetAim)
@@ -1719,6 +1748,17 @@ public sealed class BotController : Controller
 
         var node = state.Nodes[goal];
 
+        // Once a neutral pad has been activated it builds on its own. A bot without the Pulse
+        // beam should guard it while the timer runs, not stand dead still on the exact centre for
+        // six seconds. A bot that can accelerate construction deliberately remains in beam range.
+        if (!node.IsCore && node.Team == Team.None && node.BuildingFor == Pawn.Team)
+        {
+            bool canSupport = Pawn.HasWeapon[(int)WeaponKind.PulseGun]
+                && Pawn.AmmoFor(WeaponKind.PulseGun) > 0;
+            if (!canSupport)
+                return TryChoosePatrolGoal(nav, node.Position, ref _onslaughtPatrolStep, 9f);
+        }
+
         // Re-arm before setting out. A bot that walks a hundred metres to a node with an empty
         // pistol arrives as a free frag rather than a capture.
         bool noRangedAmmo = !HasUsableRangedWeapon(Pawn);
@@ -1760,6 +1800,14 @@ public sealed class BotController : Controller
 
         bool attacking = Pawn.Team == state.Attackers;
 
+        // Convoy deliberately parks transports beside the initial attackers, only about thirty
+        // metres from the first objective. Choose that nearby ride before a weapon-locker detour;
+        // after walking to the locker the vehicle is behind the bot and no longer shortens the
+        // route, so the previous 40 m threshold made the entire Assault fleet decorative.
+        float objectiveDistance = Vector3.Distance(Pawn.Position, objective.Position);
+        if (attacking && objectiveDistance > 22f
+            && TryBoardVehicle(world, nav, objective.Position)) return true;
+
         bool noRangedAmmo = !HasUsableRangedWeapon(Pawn);
         if ((noRangedAmmo || NeedsCombatResupply(Pawn)) && _objectiveRearmAttempts < 2
             && TryChoosePickupGoal(world, noRangedAmmo ? 100f : 45f, combatOnly: true))
@@ -1777,9 +1825,6 @@ public sealed class BotController : Controller
                     refresh: 0.8f);
             return TryChoosePatrolGoal(nav, objective.Position, ref _assaultPatrolStep, 14f);
         }
-
-        float distance = Vector3.Distance(Pawn.Position, objective.Position);
-        if (distance > 40f && TryBoardVehicle(world, nav, objective.Position)) return true;
 
         // A destroy objective is shot, so stopping at weapon range is correct; the other kinds
         // need a body inside the ring. The standoff has to clear a rocket's own blast radius,
@@ -1801,6 +1846,7 @@ public sealed class BotController : Controller
         if (Pawn.Team == Team.None) return;
         Vector3 aimAt;
         float reach;
+        bool support = false;
 
         switch (world.Mode.Kind)
         {
@@ -1819,10 +1865,12 @@ public sealed class BotController : Controller
                 int index = state.NextObjectiveFor(Pawn.Team, Pawn.Position);
                 if (index < 0) return;
                 var node = state.Nodes[index];
-                // Neutral ground is built by standing on it, not by shooting it.
-                if (!node.IsCore && node.Team == Team.None) return;
+                // Once a neutral pad has been activated, the Pulse beam is this game's Link Gun:
+                // it accelerates construction. Enemy structures continue to use ordinary fire.
+                support = !node.IsCore && node.Team == Team.None
+                    && node.BuildingFor == Pawn.Team;
                 aimAt = node.Position + MathX.Up * 2.4f;
-                reach = 55f;
+                reach = support ? Weapons.Get(WeaponKind.PulseGun).Alt.Range : 55f;
                 break;
             }
             default:
@@ -1833,6 +1881,13 @@ public sealed class BotController : Controller
         Vector3 delta = aimAt - eye;
         float distance = delta.Length();
         if (distance > reach || distance < 0.2f) return;
+        if (support && Pawn.Weapon != WeaponKind.PulseGun)
+        {
+            if (Pawn.HasWeapon[(int)WeaponKind.PulseGun]
+                && Pawn.AmmoFor(WeaponKind.PulseGun) > 0)
+                input.WeaponSelect = (int)WeaponKind.PulseGun;
+            return;
+        }
         // Never rocket something you are standing next to. Onslaught in particular wants bots
         // right on top of a node to build it, and a splash weapon fired from there costs more
         // health than the shot is worth.
@@ -1850,7 +1905,10 @@ public sealed class BotController : Controller
         input.Pitch = MathX.Damp(Pawn.Pitch, pitch, 9f, dt);
         // Only pull the trigger once actually pointed at it, so the first shots do not spray.
         if (MathF.Abs(MathX.WrapAngle(yaw - Pawn.Yaw)) < 0.14f && MathF.Abs(pitch - Pawn.Pitch) < 0.14f)
-            input.Fire = true;
+        {
+            if (support) input.AltFire = true;
+            else input.Fire = true;
+        }
     }
 
     /// <summary>
@@ -1878,7 +1936,14 @@ public sealed class BotController : Controller
         {
             if (!v.Alive || v.FreeSeat() < 0) continue;
             if (v.Team != Team.None && v.Team != Pawn.Team) continue;
-            float walk = Vector3.Distance(Pawn.Position, v.Position);
+            Vector3 delta = v.Position - Pawn.Position;
+            float hullRadius = MathF.Max(v.Def.HalfExtents.X, v.Def.HalfExtents.Z);
+            float horizontalGap = MathF.Max(0f, delta.FlatXZ().Length() - hullRadius);
+            float verticalGap = MathF.Max(0f, MathF.Abs(delta.Y) - v.Def.HalfExtents.Y);
+            // Parked aircraft several metres overhead are not pickups. The former centre-to-centre
+            // goal sent infantry underneath a Raptor where UseVehicle could never reach it.
+            if (verticalGap > 3.2f) continue;
+            float walk = MathF.Sqrt(horizontalGap * horizontalGap + verticalGap * verticalGap);
             if (walk > 45f) continue;
             // It has to actually shorten the journey: a vehicle behind us is a detour.
             float remaining = Vector3.Distance(v.Position, destination);
@@ -1917,6 +1982,40 @@ public sealed class BotController : Controller
             }
         }
         return target is { Alive: true } ? target.Position : world.Level.Center;
+    }
+
+    /// <summary>
+    /// Gives ground vehicles the same authored route awareness as infantry. Directly steering at
+    /// an objective worked on an empty test plane but drove tanks into the first wall on Convoy
+    /// and Frigate. Aircraft retain direct three-dimensional steering; ground/hover craft follow
+    /// ordinary nav waypoints with a size-aware arrival radius and periodic replanning.
+    /// </summary>
+    private Vector3 VehicleSteeringTarget(GameWorld world, Vehicle vehicle, Vector3 destination,
+        float dt)
+    {
+        if (vehicle.Def.Motion == VehicleMotion.Air) return destination;
+        _vehiclePathTimer -= dt;
+        bool destinationMoved = Vector3.DistanceSquared(destination, _vehiclePathDestination) > 8f * 8f;
+        if (_vehiclePathTimer <= 0f || destinationMoved || _vehiclePathCursor >= _vehiclePath.Count)
+        {
+            _vehiclePathTimer = 1.25f;
+            _vehiclePathDestination = destination;
+            _vehiclePath.Clear();
+            _vehiclePathCursor = 0;
+            NavGraph nav = world.Level.Nav;
+            int start = nav.FindNearest(vehicle.Position, 30f);
+            int goal = nav.FindNearest(destination, 30f);
+            if (start >= 0 && goal >= 0) nav.FindPathToward(start, goal, _vehiclePath);
+        }
+
+        float reach = MathF.Max(vehicle.Def.HalfExtents.X, vehicle.Def.HalfExtents.Z) + 1.6f;
+        while (_vehiclePathCursor < _vehiclePath.Count)
+        {
+            Vector3 waypoint = world.Level.Nav.Nodes[_vehiclePath[_vehiclePathCursor]].Position;
+            if ((waypoint - vehicle.Position).FlatXZ().LengthSquared() > reach * reach) return waypoint;
+            _vehiclePathCursor++;
+        }
+        return destination;
     }
 
     /// <summary>
@@ -1972,14 +2071,16 @@ public sealed class BotController : Controller
             _ => 6f,
         };
 
-        Vector3 flat = (destination - v.Position).FlatXZ();
-        float distance = flat.Length();
+        Vector3 steeringTarget = VehicleSteeringTarget(world, v, destination, dt);
+        Vector3 flat = (steeringTarget - v.Position).FlatXZ();
+        float steeringDistance = flat.Length();
+        float distance = (destination - v.Position).FlatXZ().Length();
 
         // Deployable artillery is worthless mobile and devastating parked, so deploy on arrival.
         if (def.CanDeploy && distance <= hold * 1.2f && v.Deploy <= 0f && !v.Deploying)
             input.AltFire = true;
 
-        float desiredYaw = distance > 0.01f
+        float desiredYaw = steeringDistance > 0.01f
             ? MathF.Atan2(flat.X, flat.Z)
             : v.Yaw;
         float yawError = MathX.WrapAngle(desiredYaw - v.Yaw);
@@ -2034,19 +2135,63 @@ public sealed class BotController : Controller
                 || objectiveInRange);
         }
 
-        // --- bail-out conditions ---
-        _vehicleStuckTimer = Vector3.DistanceSquared(v.Position, _lastVehiclePosition) < 0.09f
+        // --- obstacle recovery and bail-out conditions ---
+        float frameTravel = Vector3.Distance(v.Position, _lastVehiclePosition);
+        _vehicleStuckTimer = frameTravel < 0.30f
             ? _vehicleStuckTimer + dt
             : 0f;
+        _vehicleProgressTimer += dt;
+        _vehicleProgressPath += frameTravel;
         _lastVehiclePosition = v.Position;
+
+        if (_vehicleProgressTimer >= 1.5f)
+        {
+            float net = Vector3.Distance(v.Position, _vehicleProgressOrigin);
+            bool stationary = net < 1.1f;
+            bool oscillating = _vehicleProgressPath > 6f && net < 2.8f;
+            if ((stationary || oscillating) && throttle != 0f)
+            {
+                _vehicleRecoveryTimer = 1.15f;
+                _vehicleRecoveryAttempts++;
+                _vehiclePathTimer = 0f;
+            }
+            else if (net > 5f)
+            {
+                _vehicleRecoveryAttempts = 0;
+            }
+            _vehicleProgressTimer = 0f;
+            _vehicleProgressPath = 0f;
+            _vehicleProgressOrigin = v.Position;
+        }
+
+        if (_vehicleRecoveryTimer > 0f)
+        {
+            _vehicleRecoveryTimer = MathF.Max(0f, _vehicleRecoveryTimer - dt);
+            // Reverse through a fixed arc before replanning. Alternating the arc after every
+            // failed attempt prevents the same nose-first collision from repeating forever.
+            input.Move.Y = -0.85f;
+            input.Move.X = ((_vehicleRecoveryAttempts + Pawn.Id) & 1) == 0 ? 1f : -1f;
+            input.Fire = false;
+        }
 
         bool wrecked = v.Health < def.Health * 0.14f;
         bool arrivedOnTransport = def.Kind == VehicleKind.Hoverboard && distance < 8f;
-        bool jammed = _vehicleStuckTimer > 4.5f && throttle != 0f;
+        bool jammed = (_vehicleStuckTimer > 4.5f || _vehicleRecoveryAttempts >= 3)
+            && throttle != 0f;
+        if (_vehicleStuckTimer > 2.25f && _vehicleRecoveryTimer <= 0f)
+        {
+            // Give a blocked vehicle one fresh route before abandoning it. This prevents a wide
+            // craft from repeatedly dismounting at the same wall without trying the next aisle.
+            _vehiclePathTimer = 0f;
+            input.Move.Y = -0.8f;
+            input.Move.X = Pawn.Id % 2 == 0 ? 1f : -1f;
+        }
         if ((wrecked || arrivedOnTransport || jammed) && _vehicleBoardTimer <= 0f)
         {
             _vehicleBoardTimer = 0.8f;
             _vehicleStuckTimer = 0f;
+            _vehicleRecoveryTimer = 0f;
+            _vehicleRecoveryAttempts = 0;
             input.UseVehicle = true;
         }
     }

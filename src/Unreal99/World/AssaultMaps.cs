@@ -261,10 +261,15 @@ public static partial class Maps
 
         // --- the cargo bay the attackers start in, on the quay ---
         b.Solid(new Vector3(-88f, -1.5f, -34f), new Vector3(-40f, Quay, 34f), MatId.Concrete, true, 0.6f);
-        b.Room(new Vector3(-86f, Quay, -22f), new Vector3(-52f, Quay + 11f, 22f), 1.2f,
-            MatId.Concrete, MatId.TechPanelDark, MatId.Concrete, withCeiling: true, withFloor: false);
-        // An opening onto the quay rather than a sealed room.
-        b.Solid(new Vector3(-53f, Quay, -6f), new Vector3(-51f, Quay + 5f, 6f), MatId.Concrete, false, 0.6f);
+        // Build the cargo-bay shell explicitly so the east wall contains a real opening. Adding
+        // a non-colliding decorative brush over Room() does not subtract its solid wall and had
+        // trapped every attacker inside this box.
+        b.Solid(new Vector3(-86f, Quay + 9.8f, -22f), new Vector3(-52f, Quay + 11f, 22f), MatId.Concrete);
+        b.Solid(new Vector3(-86f, Quay, -22f), new Vector3(-84.8f, Quay + 11f, 22f), MatId.TechPanelDark);
+        b.Solid(new Vector3(-84.8f, Quay, -22f), new Vector3(-53.2f, Quay + 11f, -20.8f), MatId.TechPanelDark);
+        b.Solid(new Vector3(-84.8f, Quay, 20.8f), new Vector3(-53.2f, Quay + 11f, 22f), MatId.TechPanelDark);
+        b.WallWithDoor(new Vector3(-53.2f, Quay, -22f), new Vector3(-52f, Quay + 11f, 22f),
+            doorCenter: 0f, doorWidth: 12f, doorHeight: 5f, material: MatId.TechPanelDark, alongX: false);
         for (int i = 0; i < 8; i++)
             b.Solid(new Vector3(-82f + (i % 4) * 7f, Quay, -16f + (i / 4) * 26f),
                     new Vector3(-78f + (i % 4) * 7f, Quay + 3f, -12f + (i / 4) * 26f), MatId.TechPanelDark, true, 0.75f);
@@ -296,8 +301,10 @@ public static partial class Maps
                 b.Solid(new Vector3(x, Quay, s * 6f - 0.5f), new Vector3(x + 0.6f, Quay + 1.5f, s * 6f + 0.5f),
                     MatId.Trim, true, 0.85f);
         }
-        // The bridge climbs 5m over its last 20m: a 1:4 slope, inside what the nav graph routes.
-        b.Ramp(new Vector3(-8f, Quay, -6f), new Vector3(12f, MainDeck, 6f), 0, MatId.Trim, true, 0.85f);
+        // Meet the hull exactly at its stern. Extending this ramp six metres inside the solid hull
+        // buried its upper half and left a 1.7 m collision step at x=6; the nav graph correctly
+        // stopped there, making both ship objectives unreachable.
+        b.Ramp(new Vector3(-8f, Quay, -6f), new Vector3(6f, MainDeck, 6f), 0, MatId.Trim, true, 0.85f);
 
         // --- route B: the flooded passage under the hull ---
         // Down off the quay's edge, along the bottom, and up inside the hull. Slower and silent.
@@ -337,10 +344,15 @@ public static partial class Maps
         }
 
         // --- the aft cabin, holding objective 1 ---
-        b.Room(new Vector3(Stern + 2f, MainDeck, -11f), new Vector3(Stern + 22f, MainDeck + 7f, 11f), 1f,
-            MatId.ArmorPlate, MatId.RustMetal, MatId.ArmorPlate, withCeiling: true, withFloor: false);
-        b.Solid(new Vector3(Stern + 21f, MainDeck, -4f), new Vector3(Stern + 23f, MainDeck + 4.4f, 4f),
-            MatId.ArmorPlate, false, 0.7f);     // doorway forward onto the deck
+        Vector3 aftMin = new(Stern + 2f, MainDeck, -11f);
+        Vector3 aftMax = new(Stern + 22f, MainDeck + 7f, 11f);
+        b.Solid(new Vector3(aftMin.X, aftMax.Y - 1f, aftMin.Z), aftMax, MatId.ArmorPlate);
+        b.Solid(new Vector3(aftMin.X + 1f, aftMin.Y, aftMin.Z), new Vector3(aftMax.X - 1f, aftMax.Y, aftMin.Z + 1f), MatId.RustMetal);
+        b.Solid(new Vector3(aftMin.X + 1f, aftMin.Y, aftMax.Z - 1f), new Vector3(aftMax.X - 1f, aftMax.Y, aftMax.Z), MatId.RustMetal);
+        b.WallWithDoor(aftMin, new Vector3(aftMin.X + 1f, aftMax.Y, aftMax.Z),
+            doorCenter: 0f, doorWidth: 8f, doorHeight: 4.4f, material: MatId.RustMetal, alongX: false);
+        b.WallWithDoor(new Vector3(aftMax.X - 1f, aftMin.Y, aftMin.Z), aftMax,
+            doorCenter: 0f, doorWidth: 8f, doorHeight: 4.4f, material: MatId.RustMetal, alongX: false);
         b.AddLight(new Vector3(Stern + 12f, MainDeck + 5f, 0f), new Vector3(0.9f, 0.6f, 0.4f), 20f, 4f);
 
         b.AddObjective(new Vector3(Stern + 8f, MainDeck, 0f), Loc.ObjCompressor, ObjectiveKind.Destroy,
@@ -348,9 +360,15 @@ public static partial class Maps
 
         // --- the superstructure and control room, holding objective 2 ---
         b.Solid(new Vector3(40f, MainDeck, -11f), new Vector3(60f, TopDeck, 11f), MatId.ArmorPlate, true, 0.7f);
-        b.Room(new Vector3(41f, TopDeck, -9f), new Vector3(59f, TopDeck + 6f, 9f), 1f,
-            MatId.ArmorPlate, MatId.TechPanelDark, MatId.MetalGrate, withCeiling: true, withFloor: false);
-        b.Solid(new Vector3(58f, TopDeck, -3.5f), new Vector3(60f, TopDeck + 4.2f, 3.5f), MatId.ArmorPlate, false, 0.7f);
+        Vector3 controlMin = new(41f, TopDeck, -9f);
+        Vector3 controlMax = new(59f, TopDeck + 6f, 9f);
+        b.Solid(new Vector3(controlMin.X, controlMax.Y - 1f, controlMin.Z), controlMax, MatId.MetalGrate);
+        b.Solid(new Vector3(controlMin.X + 1f, controlMin.Y, controlMin.Z), new Vector3(controlMax.X - 1f, controlMax.Y, controlMin.Z + 1f), MatId.TechPanelDark);
+        b.Solid(new Vector3(controlMin.X + 1f, controlMin.Y, controlMax.Z - 1f), new Vector3(controlMax.X - 1f, controlMax.Y, controlMax.Z), MatId.TechPanelDark);
+        b.WallWithDoor(controlMin, new Vector3(controlMin.X + 1f, controlMax.Y, controlMax.Z),
+            doorCenter: 0f, doorWidth: 7f, doorHeight: 4.2f, material: MatId.TechPanelDark, alongX: false);
+        b.WallWithDoor(new Vector3(controlMax.X - 1f, controlMin.Y, controlMin.Z), controlMax,
+            doorCenter: 0f, doorWidth: 7f, doorHeight: 4.2f, material: MatId.TechPanelDark, alongX: false);
         b.AddLight(new Vector3(50f, TopDeck + 4.5f, 0f), new Vector3(0.55f, 0.75f, 1f), 22f, 4.5f);
 
         // The ladders the original uses are jump pads here: a 7m climb has no nav route otherwise.

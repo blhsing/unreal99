@@ -149,6 +149,8 @@ public static class Loc
     public const string OnsEnemyCoreExposed = "敵方核心暴露！全力進攻！";
     public const string OnsNodeBlocked = "尚未連結到我方節點";
     public const string OnsNodeUnderAttack = "節點遭受攻擊";
+    public const string OnsCoreDrain = "延長賽：核心正在流失能量";
+    public const string OnsNextRound = "核心摧毀！交換基地，下一回合開始";
 
     public const string AsAttacking = "進攻";
     public const string AsDefending = "防守";

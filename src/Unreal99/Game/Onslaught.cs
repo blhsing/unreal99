@@ -24,6 +24,8 @@ public sealed class PowerNode
     public float Built;
     /// <summary>Who is currently building it, so a contested node does not flicker.</summary>
     public Team BuildingFor = Team.None;
+    /// <summary>The player who activated the pad, retained while automatic construction runs.</summary>
+    public int BuilderPawnId = -1;
     public int[] Links = [];
 
     public bool IsActive => IsCore || (Team != Team.None && Built >= 1f);
@@ -31,14 +33,18 @@ public sealed class PowerNode
 
 public sealed class OnslaughtState
 {
+    public const int GoalScore = 3;
     public const float CoreHealth = 5000f;
     public const float NodeHealth = 2000f;
-    /// <summary>Seconds of uncontested link-gun fire to raise a neutral node from nothing.</summary>
+    public const float OvertimeCoreDrainPerSecond = 20f;
+    /// <summary>Seconds for an activated neutral pad to construct itself without link support.</summary>
     public const float BuildSeconds = 6f;
+    public const float LinkBuildEnergy = 700f;
 
     public readonly List<PowerNode> Nodes = new();
     public int RedCore = -1;
     public int BlueCore = -1;
+    public bool SidesSwapped { get; private set; }
 
     public PowerNode CoreOf(Team t)
     {
@@ -136,6 +142,7 @@ public sealed class OnslaughtState
     {
         Nodes.Clear();
         RedCore = BlueCore = -1;
+        SidesSwapped = false;
         foreach (var def in level.PowerNodes)
         {
             var node = new PowerNode
@@ -156,60 +163,99 @@ public sealed class OnslaughtState
     }
 
     /// <summary>
-    /// Builds or attacks whichever node a pawn is standing at. Neutral ground is built up,
-    /// enemy nodes are torn down first and only then rebuilt — you cannot simply overwrite
-    /// someone else's node by walking onto it, which is what separates this from Domination.
+    /// Starts another scored round. The original swaps physical sides after a reset; changing
+    /// core ownership is sufficient here because respawns and vehicle pads follow the nearest
+    /// live node instead of a permanently coloured half of the level.
     /// </summary>
-    public NodeEvent Touch(int index, Team by, float dt, out PowerNode node)
+    public void ResetRound(bool swapSides)
+    {
+        if (swapSides) SidesSwapped = !SidesSwapped;
+        RedCore = BlueCore = -1;
+        for (int i = 0; i < Nodes.Count; i++)
+        {
+            PowerNode node = Nodes[i];
+            if (node.IsCore)
+            {
+                if (swapSides) node.Team = node.Team == Team.Red ? Team.Blue : Team.Red;
+                node.Built = 1f;
+                if (node.Team == Team.Red) RedCore = i;
+                else if (node.Team == Team.Blue) BlueCore = i;
+            }
+            else
+            {
+                node.Team = Team.None;
+                node.Built = 0f;
+                node.BuildingFor = Team.None;
+                node.BuilderPawnId = -1;
+            }
+            node.Health = node.MaxHealth;
+        }
+    }
+
+    /// <summary>
+    /// Activates a reachable neutral pad. Construction then continues by itself; touching an
+    /// enemy node never damages it, because enemy infrastructure must be destroyed with weapons.
+    /// </summary>
+    public NodeEvent Touch(int index, Team by, int pawnId, out PowerNode node)
     {
         node = null;
         if (index < 0 || index >= Nodes.Count || by == Team.None) return NodeEvent.None;
         node = Nodes[index];
-
-        if (node.IsCore)
-        {
-            if (node.Team == by || !CoreVulnerable(node.Team)) return NodeEvent.None;
-            node.Health -= 260f * dt;
-            if (node.Health <= 0f) { node.Health = 0f; return NodeEvent.CoreDestroyed; }
-            return NodeEvent.Damaged;
-        }
-
+        if (node.IsCore) return NodeEvent.None;
         if (!IsReachable(index, by)) return NodeEvent.Blocked;
-
-        if (node.Team != Team.None && node.Team != by)
+        if (node.Team != Team.None) return NodeEvent.None;
+        if (node.BuildingFor != Team.None && node.BuildingFor != by) return NodeEvent.Blocked;
+        if (node.BuildingFor == Team.None)
         {
-            node.Health -= 420f * dt;
-            if (node.Health > 0f) return NodeEvent.Damaged;
-            // Torn down to neutral rather than captured outright. Clearing BuildingFor matters:
-            // a stale value would put the next team to walk on into the contested branch and
-            // leave them unable to build the node they just took down.
-            node.Team = Team.None;
-            node.Built = 0f;
-            node.BuildingFor = Team.None;
-            node.Health = node.MaxHealth;
-            return NodeEvent.Neutralised;
+            node.BuildingFor = by;
+            node.BuilderPawnId = pawnId;
+            node.Built = MathF.Max(node.Built, 0.001f);
         }
+        return NodeEvent.Building;
+    }
 
-        if (node.Team == by && node.Built >= 1f) return NodeEvent.None;
-
-        // Contested neutral ground is a tug of war, not a shared effort. Without this both sides
-        // pour progress into the same bar and it completes twice as fast for whichever team's
-        // frame happens to cross the line first.
-        if (node.Built > 0f && node.BuildingFor != Team.None && node.BuildingFor != by)
-        {
-            node.Built = MathF.Max(0f, node.Built - dt / BuildSeconds);
-            if (node.Built <= 0f) node.BuildingFor = Team.None;
-            return NodeEvent.Building;
-        }
-
-        node.BuildingFor = by;
-        node.Built += dt / BuildSeconds;
+    /// <summary>Advances one activated node's autonomous construction clock.</summary>
+    public NodeEvent TickConstruction(int index, float dt, out PowerNode node, out int builderPawnId)
+    {
+        node = null;
+        builderPawnId = -1;
+        if (index < 0 || index >= Nodes.Count || dt <= 0f) return NodeEvent.None;
+        node = Nodes[index];
+        if (node.IsCore || node.Team != Team.None || node.BuildingFor == Team.None) return NodeEvent.None;
+        if (!IsReachable(index, node.BuildingFor)) return NodeEvent.None;
+        node.Built = MathF.Min(1f, node.Built + dt / BuildSeconds);
         if (node.Built < 1f) return NodeEvent.Building;
-        node.Built = 1f;
-        node.Team = by;
+        node.Team = node.BuildingFor;
         node.BuildingFor = Team.None;
         node.Health = node.MaxHealth;
+        builderPawnId = node.BuilderPawnId;
+        node.BuilderPawnId = -1;
         return NodeEvent.Captured;
+    }
+
+    /// <summary>Pulse-beam support accelerates construction and repairs nodes, but never cores.</summary>
+    public NodeEvent Support(int index, Team by, int pawnId, float energy, out PowerNode node)
+    {
+        node = null;
+        if (index < 0 || index >= Nodes.Count || by == Team.None || energy <= 0f) return NodeEvent.None;
+        node = Nodes[index];
+        if (node.IsCore) return NodeEvent.None;
+        if (node.Team == by && node.IsActive)
+        {
+            float before = node.Health;
+            node.Health = MathF.Min(node.MaxHealth, node.Health + energy);
+            return node.Health > before ? NodeEvent.Repaired : NodeEvent.None;
+        }
+        if (node.Team != Team.None || !IsReachable(index, by)) return NodeEvent.None;
+        if (node.BuildingFor != Team.None && node.BuildingFor != by) return NodeEvent.None;
+        if (node.BuildingFor == Team.None)
+        {
+            node.BuildingFor = by;
+            node.BuilderPawnId = pawnId;
+            node.Built = MathF.Max(node.Built, 0.001f);
+        }
+        node.Built = MathF.Min(0.999f, node.Built + energy / LinkBuildEnergy);
+        return NodeEvent.Building;
     }
 
     /// <summary>
@@ -239,7 +285,11 @@ public sealed class OnslaughtState
             if (node.Built <= 0f) return NodeEvent.None;
             if (node.BuildingFor == by) return NodeEvent.None;   // do not shoot down our own work
             node.Built = MathF.Max(0f, node.Built - amount / NodeHealth);
-            if (node.Built <= 0f) node.BuildingFor = Team.None;
+            if (node.Built <= 0f)
+            {
+                node.BuildingFor = Team.None;
+                node.BuilderPawnId = -1;
+            }
             return NodeEvent.Damaged;
         }
 
@@ -249,6 +299,7 @@ public sealed class OnslaughtState
         node.Team = Team.None;
         node.Built = 0f;
         node.BuildingFor = Team.None;
+        node.BuilderPawnId = -1;
         node.Health = node.MaxHealth;
         return NodeEvent.Neutralised;
     }
@@ -267,4 +318,4 @@ public sealed class OnslaughtState
     }
 }
 
-public enum NodeEvent { None, Blocked, Building, Captured, Damaged, Neutralised, CoreDestroyed }
+public enum NodeEvent { None, Blocked, Building, Captured, Damaged, Repaired, Neutralised, CoreDestroyed }

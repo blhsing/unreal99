@@ -95,9 +95,10 @@ public sealed class GameMode
     {
         GameModeKind.CaptureTheFlag => CaptureLimit,
         GameModeKind.Domination => DominationLimit,
-        // Neither mode is raced to a number: one ends when a core falls, the other when the
-        // second round's clock beats the first. A frag limit here would end the match early.
-        GameModeKind.Onslaught or GameModeKind.Assault => 0,
+        // Onslaught is a scored multi-round match: regulation core wins are worth two points,
+        // overtime wins one, and the original default goal is three. Assault compares rounds.
+        GameModeKind.Onslaught => OnslaughtState.GoalScore,
+        GameModeKind.Assault => 0,
         _ => FragLimit,
     };
 
@@ -164,18 +165,13 @@ public sealed class GameMode
                         // ending is what turns the map around. Finishing the match here would
                         // mean the second side never gets its turn.
                         else if (Kind == GameModeKind.Assault) { }
-                        // Onslaught never draws on the clock. The original decides it on core
-                        // damage first — the side that has been beaten on has been losing — and
-                        // falls back to who holds more of the network.
+                        // Onslaught does not stop at the regulation clock. It enters core-drain
+                        // overtime; control of the network determines how quickly each core loses
+                        // energy until one is destroyed.
                         else if (Kind == GameModeKind.Onslaught)
                         {
-                            WinningTeam = ResolveOnslaughtTimedWinner(world);
-                            if (WinningTeam == Team.None && IsTied(world))
-                            {
-                                State = MatchState.Overtime;
-                                world.Broadcast(Loc.AnnOvertime, new Vector3(1f, 0.4f, 0.2f), 2.5f);
-                            }
-                            else Finish(world);
+                            State = MatchState.Overtime;
+                            world.Broadcast(Loc.AnnOvertime, new Vector3(1f, 0.4f, 0.2f), 2.5f);
                         }
                         else if (IsTied(world))
                         {
@@ -371,7 +367,8 @@ public sealed class GameMode
         {
             // A tied timed match enters sudden-death overtime. The first subsequent team score
             // breaks the tie and ends the match even when it is below the configured limit.
-            if (State == MatchState.Overtime && TeamScores[0] != TeamScores[1])
+            if (State == MatchState.Overtime && Kind != GameModeKind.Onslaught
+                && TeamScores[0] != TeamScores[1])
             {
                 WinningTeam = TeamScores[0] > TeamScores[1] ? Team.Red : Team.Blue;
                 Finish(world);
@@ -443,27 +440,6 @@ public sealed class GameMode
         int redHeld = world.ControlPointsHeldBy(Team.Red);
         int blueHeld = world.ControlPointsHeldBy(Team.Blue);
         return redHeld > blueHeld ? Team.Red : blueHeld > redHeld ? Team.Blue : Team.None;
-    }
-
-    /// <summary>
-    /// Onslaught on the clock. Core damage decides it: a side whose core has been ground down
-    /// was losing the game, whatever the node count says at the final whistle. Nodes are only
-    /// the tie-break, and a genuine dead heat goes to sudden death rather than a draw.
-    /// </summary>
-    private Team ResolveOnslaughtTimedWinner(GameWorld world)
-    {
-        if (TeamScores[0] != TeamScores[1])
-            return TeamScores[0] > TeamScores[1] ? Team.Red : Team.Blue;
-
-        var redCore = world.Onslaught.CoreOf(Team.Red);
-        var blueCore = world.Onslaught.CoreOf(Team.Blue);
-        float red = redCore?.Health ?? 0f;
-        float blue = blueCore?.Health ?? 0f;
-        if (MathF.Abs(red - blue) > 1f) return red > blue ? Team.Red : Team.Blue;
-
-        int redNodes = world.Onslaught.NodesHeldBy(Team.Red);
-        int blueNodes = world.Onslaught.NodesHeldBy(Team.Blue);
-        return redNodes > blueNodes ? Team.Red : blueNodes > redNodes ? Team.Blue : Team.None;
     }
 
     /// <summary>Players ordered for the scoreboard: score first, then fewer deaths.</summary>

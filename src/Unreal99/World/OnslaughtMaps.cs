@@ -114,14 +114,17 @@ public static partial class Maps
         int i4 = b.AddPowerNode(n4 + new Vector3(0f, 1.2f, 0f), Loc.NodeEastFlank, []);
         int i5 = b.AddPowerNode(n5 + new Vector3(0f, 1.2f, 0f), Loc.NodeEastCorner, []);
 
-        // Wire them up now that every index exists.
-        b.LinkPowerNodes(redCore, [i1, i2]);
-        b.LinkPowerNodes(i1, [redCore, i2]);
+        // Official default Torlan layout: both cores first link to their nearby prime/flank node.
+        // Between those primes are two parallel routes, one through the central tower and one
+        // around both Goliath corner nodes. This creates the original strategic choice without
+        // making any middle node directly reachable from a protected core.
+        b.LinkPowerNodes(redCore, [i2]);
+        b.LinkPowerNodes(i1, [i2, i5]);
         b.LinkPowerNodes(i2, [redCore, i1, i3]);
-        b.LinkPowerNodes(i3, [i2, i4, redCore, blueCore]);
-        b.LinkPowerNodes(i4, [blueCore, i5, i3]);
-        b.LinkPowerNodes(i5, [blueCore, i4]);
-        b.LinkPowerNodes(blueCore, [i4, i5]);
+        b.LinkPowerNodes(i3, [i2, i4]);
+        b.LinkPowerNodes(i4, [i3, i5, blueCore]);
+        b.LinkPowerNodes(i5, [i1, i4]);
+        b.LinkPowerNodes(blueCore, [i4]);
 
         foreach (var (pos, kinds) in new (Vector3, VehicleKind[])[]
                  {
@@ -257,14 +260,14 @@ public static partial class Maps
         int i2 = b.AddPowerNode(n2 + new Vector3(0f, 1.2f, 0f), Loc.NodeSouthTrail, []);
         int i3 = b.AddPowerNode(n3 + new Vector3(0f, 1.2f, 0f), Loc.NodeGrove, []);
 
-        // Both cores reach both flanks, so the map has two live routes from the first second.
-        // The centre hangs off the flanks rather than joining the cores: taking it wins you the
-        // Goliath, not a shortcut.
-        b.LinkPowerNodes(redCore, [i1, i2]);
-        b.LinkPowerNodes(blueCore, [i1, i2]);
-        b.LinkPowerNodes(i1, [redCore, blueCore, i3]);
-        b.LinkPowerNodes(i2, [redCore, blueCore, i3]);
-        b.LinkPowerNodes(i3, [i1, i2]);
+        // Official Primeval default: each core links to its own side/prime node and both cores
+        // also link directly to the contested centre. The side nodes link onward to the centre;
+        // the alternative One-Way setup is the same chain without the core-to-centre shortcuts.
+        b.LinkPowerNodes(redCore, [i1, i3]);
+        b.LinkPowerNodes(blueCore, [i2, i3]);
+        b.LinkPowerNodes(i1, [redCore, i3]);
+        b.LinkPowerNodes(i2, [blueCore, i3]);
+        b.LinkPowerNodes(i3, [redCore, blueCore, i1, i2]);
 
         foreach (var (pos, name) in new[] { (n1, "n1"), (n2, "n2") })
         {

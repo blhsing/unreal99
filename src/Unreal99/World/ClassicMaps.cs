@@ -582,7 +582,23 @@ public static partial class Maps
         b.Solid(new Vector3(4.6f, Lower, -19f), new Vector3(6f, Upper, 19f), MatId.TechWall, true, 0.7f);
 
         // --- upper deck: a catwalk spanning the whole ship, the sniper's road ---
-        b.Solid(new Vector3(-4.5f, Upper - 0.5f, -34f), new Vector3(4.5f, Upper, 34f), MatId.MetalGrate, true, 1.0f);
+        // The jump pads below launch from z=+/-12 toward z=+/-4 and cross this deck plane near
+        // z=+/-9. A single uninterrupted slab made both ballistic routes hit its underside and
+        // fall the full fourteen metres back to the lower deck. Cut two centre apertures while
+        // retaining broad side strips, so the launch is clear and the catwalk remains walkable.
+        b.Solid(new Vector3(-4.5f, Upper - 0.5f, -34f), new Vector3(4.5f, Upper, -11f),
+            MatId.MetalGrate, true, 1.0f);
+        b.Solid(new Vector3(-4.5f, Upper - 0.5f, -7f), new Vector3(4.5f, Upper, 7f),
+            MatId.MetalGrate, true, 1.0f);
+        b.Solid(new Vector3(-4.5f, Upper - 0.5f, 11f), new Vector3(4.5f, Upper, 34f),
+            MatId.MetalGrate, true, 1.0f);
+        foreach (float gapZ in new[] { -9f, 9f })
+        {
+            b.Solid(new Vector3(-4.5f, Upper - 0.5f, gapZ - 2f),
+                new Vector3(-1.6f, Upper, gapZ + 2f), MatId.MetalGrate, true, 1.0f);
+            b.Solid(new Vector3(1.6f, Upper - 0.5f, gapZ - 2f),
+                new Vector3(4.5f, Upper, gapZ + 2f), MatId.MetalGrate, true, 1.0f);
+        }
         RailRun(b, new Vector3(-4.5f, Upper, -34f), new Vector3(-4.5f, Upper, 34f));
         RailRun(b, new Vector3(4.5f, Upper, -34f), new Vector3(4.5f, Upper, 34f));
         for (int end = 0; end < 2; end++)

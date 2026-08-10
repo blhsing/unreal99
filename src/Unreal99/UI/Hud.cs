@@ -936,8 +936,9 @@ public sealed class Hud
         for (int i = 0; i < nodes.Count; i++)
         {
             var node = nodes[i];
-            Vector3 col = node.Team == Team.None
-                ? new Vector3(0.62f, 0.64f, 0.70f) : GameTypes.TeamColor(node.Team);
+            Team visibleTeam = node.Team != Team.None ? node.Team : node.BuildingFor;
+            Vector3 col = visibleTeam == Team.None
+                ? new Vector3(0.62f, 0.64f, 0.70f) : GameTypes.TeamColor(visibleTeam);
             bool reachable = node.Team != pawn.Team && world.Onslaught.IsReachable(i, pawn.Team);
             if (node.IsCore && node.Team != pawn.Team) reachable = world.Onslaught.CoreVulnerable(node.Team);
 
@@ -971,10 +972,12 @@ public sealed class Hud
         bool ourCoreExposed = world.Onslaught.CoreVulnerable(pawn.Team);
         Team enemy = pawn.Team == Team.Red ? Team.Blue : Team.Red;
         bool theirCoreExposed = world.Onslaught.CoreVulnerable(enemy);
-        string headline = ourCoreExposed ? Loc.OnsOurCoreExposed
+        string headline = world.Mode.State == MatchState.Overtime ? Loc.OnsCoreDrain
+            : ourCoreExposed ? Loc.OnsOurCoreExposed
             : theirCoreExposed ? Loc.OnsEnemyCoreExposed
             : Loc.OnsCoreShielded;
-        Vector3 headlineCol = ourCoreExposed ? new Vector3(1f, 0.45f, 0.3f)
+        Vector3 headlineCol = world.Mode.State == MatchState.Overtime ? new Vector3(1f, 0.55f, 0.25f)
+            : ourCoreExposed ? new Vector3(1f, 0.45f, 0.3f)
             : theirCoreExposed ? new Vector3(0.5f, 1f, 0.55f)
             : new Vector3(0.72f, 0.80f, 0.92f);
         ui.Text(FaceRegular, LayoutFont(14f * s), width * 0.5f, y - 28f,

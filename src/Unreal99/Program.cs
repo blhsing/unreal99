@@ -13,6 +13,7 @@ Console.WriteLine($"{Loc.GameTitle} — {Loc.GameSubtitle} · {Loc.GameVersionLa
 if (args.Contains("--install-shortcut")) return Installer.InstallStartMenuShortcut(args) ? 0 : 1;
 if (args.Contains("--uninstall-shortcut")) return Installer.UninstallStartMenuShortcut() ? 0 : 1;
 if (args.Contains("--aimtest")) return BotAimPrediction.RunSelfTest();
+if (args.Contains("--moderulestest")) return ObjectiveModeSelfTest.Run();
 if (args.Contains("--bindingtest"))
     return BindingProfile.RunSelfTest() | SettingsStore.RunPlayerThreeMigrationSelfTest();
 

@@ -38,24 +38,34 @@ SniperRifle。
 - **連結鏈規則**：要佔領中立節點或攻擊敵方節點，該節點必須連結到**己方核心**或**己方已持有的節點**。
   因此無法跳過中間節點直取遠方目標。
 - **核心只有在與它相連的節點被敵方持有時才能被攻擊**。這是整個模式的核心規則。
-- 節點可用連結槍次要射擊**治療與加速建造**。
-- 摧毀敵方核心即獲勝：正規時間內得 2 分，驟死延長賽得 1 分。
-- 載具是此模式的核心組成。
+- 觸碰可連結的中立節點只會啟動建造；之後會自動完成。連結槍次要射擊可**加速建造**，亦可治療
+  我方節點與載具，但不能治療核心。敵方節點必須先以武器摧毀到中立，不能用身體直接佔領。
+- 啟用節點提供該隊的重生點、載具與補給；節點被摧毀就失去這些功能。剛生成的敵方載具上鎖，
+  但駕駛離開後可被劫走。
+- 預設先得 3 分獲勝：正規時間內摧毀核心得 2 分，延長賽得 1 分。延長賽每秒最多扣核心 20 HP，
+  實際速率依敵方控制的非核心節點比例決定；控制全圖時己方核心不扣血。每回合後交換基地。
+- 載具是此模式的核心組成；節點生成台的所有權必須跟著最近的啟用節點變動。
 
-規則依據：[The Liandri Archives — Onslaught](https://unrealarchive.org/wikis/the-liandri-archives/Onslaught.html)
+規則依據：[UT2004 官方手冊](https://ut2.weba.ru/.ut2004_files/Manual/Manual.pdf)、
+[原作 `ONSOnslaughtGame` UnrealScript 文件](https://ericdives.com/UT2004-UnCodex/onslaught/onsonslaughtgame.html)、
+[The Liandri Archives — Onslaught](https://unrealarchive.org/wikis/the-liandri-archives/Onslaught.html)
 
 ## 突擊模式（Assault）規則
 
 - 一隊進攻、一隊防守，攻方須**依固定順序**逐一完成目標。
 - 回合結束條件：攻方在時限內完成最後一個目標（進入第二回合），或時間耗盡（攻方失敗）。
 - 第二回合攻守交換。**新攻方若以更短時間完成最後目標則獲勝**，否則落敗。
+- 若第一隊沒有完成全圖，第二隊不必空等整個時限：一完成第一隊未完成的第一個目標、也就是在
+  目標序列中取得更遠進度，便立即獲勝；兩隊同樣遠則和局。
 - 攻方每完成一個目標，通常可獲得**更靠近下一個目標的重生點**。
 
 原作地圖：UT99 為 AS-Frigate、AS-Guardia、AS-HiSpeed、AS-Mazon、AS-OceanFloor、AS-Overlord、
 AS-Rook；UT2004 為 AS-Convoy、AS-FallenCity、AS-Glacier、AS-Junkyard、AS-Mothership、
 AS-RobotFactory。
 
-規則依據：[The Liandri Archives — Assault](https://unrealarchive.org/wikis/the-liandri-archives/Assault.html)
+規則依據：[UT2004 官方手冊](https://ut2.weba.ru/.ut2004_files/Manual/Manual.pdf)、
+[原作 `ASGameInfo` UnrealScript 文件](https://www.ericdives.com/UT2004-UnCodex/ut2k4assault/asgameinfo.html)、
+[The Liandri Archives — Assault](https://unrealarchive.org/wikis/the-liandri-archives/Assault.html)
 
 ## 攻堅與突擊地圖
 
@@ -67,7 +77,9 @@ ONS-IslandHop、ONS-Tricky、ONS-Urban；XP 版另有 ONS-Aridoom、ONS-Ascendan
 
 - 乾涸的叢林邊緣，兩座基地大致對稱，中央一座通訊塔既是狙擊點也是掩體，一條乾河床橫貫戰場，
   是穿越中路的主要進攻路線。
-- **五個節點呈鏈狀**：節點 1、5 位於兩側角落，2、4 夾住中央的 3，3 同時連往兩座核心。
+- **五個節點形成兩條並行路線**：兩座核心先各自連往鄰近的主節點 2、4；兩者之間可走
+  `2 → 3 → 4` 的中央塔路線，或 `2 → 1 → 5 → 4` 的雙角落路線。這是原作 Default link setup，
+  不是把五點串成單一路徑，也不是讓中央節點直接連到受保護的核心。
 - 載具配置：每個節點與核心都有 Manta；節點 2、3、4 有 Scorpion；核心與中央塔上層有 Hellbender
   與 Raptor；角落節點 1、5 有 Goliath。追加載具為節點 2、4 的 Paladin、中央的 SPMA、核心的 Cicada。
 
@@ -81,8 +93,9 @@ AS-Mothership、AS-RobotFactory。
   生成點，兩側各放兩個醫療包，共四個。
 - 載具配置：節點 1、2 有 Manta；兩座基地與節點 1、2 有 Scorpion；Hellbender 只在基地；
   每座基地各一座能量砲塔。
-- 原文為 stub，未載明節點連線。本作採對稱解讀：兩座核心各自連往節點 1、2（兩條側翼路線），
-  節點 3 連往 1 與 2，作為爭奪中路火力的樞紐。
+- 原作 Default link setup 是：每座核心連往自己一側的主節點，**兩座核心也都直接連往中央節點**；
+  兩側主節點再分別連到中央。這讓中路從開局就是可爭奪的核心捷徑。原作 One-Way 變體則移除
+  核心到中央的兩條捷徑，只留下 `核心 → 主節點 → 中央 → 主節點 → 核心`。
 
 **AS-Convoy** 的目標序列（攻方依序完成）：伸出登艦平台 → 開啟武器艙面板 → 在艙門安置炸藥
 （需持續佔位一段時間）→ 開啟後艙門 → 啟動前方側門開關 → 跳進 Nexus 飛彈拖車 → 取出飛彈。

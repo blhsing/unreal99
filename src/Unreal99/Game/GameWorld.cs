@@ -163,12 +163,39 @@ public sealed class GameWorld
     public readonly AssaultState Assault = new();
 
     public readonly List<Vehicle> Vehicles = new(16);
+    /// <summary>Behavioral-test telemetry accumulated through production gameplay paths.</summary>
+    public int VehicleBoardings { get; private set; }
+    public readonly HashSet<VehicleKind> VehicleKindsDriven = new();
+    public int OnslaughtNodeCaptures { get; private set; }
+    public int AssaultObjectiveCompletions { get; private set; }
+    public int AssaultRoundsCompleted { get; private set; }
     public int NextVehicleId = 1;
 
     public Vehicle FindVehicle(int id)
     {
         foreach (var v in Vehicles) if (v.Id == id) return v;
         return null;
+    }
+
+    private static Team Opposite(Team team) => team switch
+    {
+        Team.Red => Team.Blue,
+        Team.Blue => Team.Red,
+        _ => Team.None,
+    };
+
+    private int NearestPowerNode(Vector3 position, float maximumDistance)
+    {
+        int best = -1;
+        float bestDistance = maximumDistance * maximumDistance;
+        for (int i = 0; i < Onslaught.Nodes.Count; i++)
+        {
+            float distance = Vector3.DistanceSquared(position, Onslaught.Nodes[i].Position);
+            if (distance >= bestDistance) continue;
+            bestDistance = distance;
+            best = i;
+        }
+        return best;
     }
 
     /// <summary>Nearest boardable vehicle within reach of a pawn on foot, or null.</summary>
@@ -180,10 +207,13 @@ public sealed class GameWorld
         {
             if (!v.Alive || v.FreeSeat() < 0) continue;
             if (v.Team != Team.None && pawn.Team != Team.None && v.Team != pawn.Team) continue;
-            float d = Vector3.DistanceSquared(v.Position, pawn.Position);
-            float radius = MathF.Max(v.Def.HalfExtents.X, v.Def.HalfExtents.Z) + reach;
-            if (d > radius * radius || d > bestDist) continue;
-            bestDist = d; best = v;
+            Vector3 delta = v.Position - pawn.Position;
+            float hullRadius = MathF.Max(v.Def.HalfExtents.X, v.Def.HalfExtents.Z);
+            float horizontalGap = MathF.Max(0f, delta.FlatXZ().Length() - hullRadius);
+            float verticalGap = MathF.Max(0f, MathF.Abs(delta.Y) - v.Def.HalfExtents.Y);
+            float surfaceDistance = horizontalGap * horizontalGap + verticalGap * verticalGap;
+            if (surfaceDistance > bestDist) continue;
+            bestDist = surfaceDistance; best = v;
         }
         return best;
     }
@@ -196,11 +226,13 @@ public sealed class GameWorld
         vehicle.Occupants[seat] = pawn.Id;
         vehicle.SeatYaw[seat] = vehicle.Yaw;
         vehicle.SeatPitch[seat] = 0f;
-        // First one aboard claims it. It stays claimed after they leave, so an abandoned tank
-        // does not immediately become a free gift to whoever walks past.
+        // First one aboard claims a neutral vehicle. Fresh team vehicles remain locked while
+        // occupied; a driver exit deliberately unlocks them below, matching Onslaught stealing.
         if (vehicle.Team == Team.None) vehicle.Team = pawn.Team;
         pawn.VehicleId = vehicle.Id;
         pawn.VehicleSeat = seat;
+        VehicleBoardings++;
+        if (seat == 0) VehicleKindsDriven.Add(vehicle.Kind);
         OnSound?.Invoke(SoundId.Respawn, vehicle.Position, 0.7f);
         return true;
     }
@@ -211,9 +243,13 @@ public sealed class GameWorld
         var v = FindVehicle(pawn.VehicleId);
         if (v != null && pawn.VehicleSeat >= 0 && pawn.VehicleSeat < v.Occupants.Length)
         {
+            bool wasDriver = pawn.VehicleSeat == 0;
             v.Occupants[pawn.VehicleSeat] = -1;
             pawn.Position = v.ExitPosition(Level.Collision);
             pawn.Velocity = v.Velocity * 0.35f;
+            // Fresh team vehicles are locked. Once a teammate has actually driven and abandoned
+            // one, it becomes stealable by either side, matching the original Onslaught rule.
+            if (wasDriver) v.Team = Team.None;
         }
         pawn.VehicleId = -1;
         pawn.VehicleSeat = -1;
@@ -287,6 +323,11 @@ public sealed class GameWorld
         FallDeaths = 0;
         LavaDeaths = 0;
         EnvironmentalDeathDetails.Clear();
+        VehicleBoardings = 0;
+        VehicleKindsDriven.Clear();
+        OnslaughtNodeCaptures = 0;
+        AssaultObjectiveCompletions = 0;
+        AssaultRoundsCompleted = 0;
 
         foreach (var p in level.Pickups)
         {
@@ -315,7 +356,25 @@ public sealed class GameWorld
         {
             var v = new Vehicle { Id = NextVehicleId++ };
             v.Configure(vs.Kind, vs.Position + new Vector3(0f, VehicleDef.Get(vs.Kind).HalfExtents.Y, 0f), vs.Yaw);
+            v.SpawnRespawnSeconds = vs.RespawnSeconds;
+            v.AuthoredSpawnTeam = vs.Team;
+            v.SpawnTeam = vs.Team;
             v.Team = vs.Team;
+            if (Mode.Kind == GameModeKind.Onslaught)
+            {
+                v.SpawnNodeIndex = NearestPowerNode(vs.Position, 48f);
+                if (v.SpawnNodeIndex >= 0)
+                {
+                    PowerNode node = Onslaught.Nodes[v.SpawnNodeIndex];
+                    v.SpawnTeam = node.Team;
+                    v.Team = node.Team;
+                    if (!node.IsActive)
+                    {
+                        v.Alive = false;
+                        v.RespawnTimer = float.PositiveInfinity;
+                    }
+                }
+            }
             Vehicles.Add(v);
         }
 
@@ -394,10 +453,18 @@ public sealed class GameWorld
         // Assault attackers come in at the furthest spawn group their progress has opened;
         // defenders always start at the back, so their group index stays at zero.
         int assaultGroup = -1;
+        Team spawnTeam = Mode.TeamBased ? pawn.Team : Team.None;
         if (Mode.Kind == GameModeKind.Assault)
+        {
             assaultGroup = pawn.Team == Assault.Attackers ? Assault.SpawnGroup : 0;
+            // Map spawn colours describe round one roles. In round two both teams use the other
+            // side's physical starts while keeping their own score/team identity.
+            if (Assault.Round == 2) spawnTeam = Opposite(spawnTeam);
+        }
 
-        var spawn = Level.PickSpawn(Rng, Mode.TeamBased ? pawn.Team : Team.None, _spawnAvoid, 9f, assaultGroup);
+        SpawnPoint spawn = Mode.Kind == GameModeKind.Onslaught
+            ? PickOnslaughtSpawn(pawn.Team, _spawnAvoid, 9f)
+            : Level.PickSpawn(Rng, spawnTeam, _spawnAvoid, 9f, assaultGroup);
         Vector3 pos = spawn.Position + new Vector3(0, 0.06f, 0);
 
         // Safety net: if the authored yaw points into a nearby wall, look at the arena instead.
@@ -423,6 +490,46 @@ public sealed class GameWorld
         Particles.EnergyBurst(pos + new Vector3(0, 1f, 0), pawn.AccentColor, 1.1f);
         OnSound?.Invoke(SoundId.Respawn, pos, 1f);
         ControllerFor(pawn)?.OnSpawned(this);
+    }
+
+    /// <summary>
+    /// Onslaught respawns only at the team's active core/nodes, and never at a node currently
+    /// taking damage. Untagged map spawns are associated with their nearest power structure.
+    /// </summary>
+    private SpawnPoint PickOnslaughtSpawn(Team team, IReadOnlyList<Vector3> avoid, float minDistance)
+    {
+        var candidates = new List<SpawnPoint>();
+        foreach (SpawnPoint spawn in Level.Spawns)
+        {
+            int index = NearestPowerNode(spawn.Position, 34f);
+            if (index < 0) continue;
+            PowerNode node = Onslaught.Nodes[index];
+            if (!node.IsActive || node.Team != team || node.Health < node.MaxHealth - 0.5f) continue;
+            bool underAttack = false;
+            foreach (Pawn other in Pawns)
+            {
+                if (!other.Alive || other.Team == Team.None || other.Team == team) continue;
+                if (Vector3.DistanceSquared(other.Position, node.Position) <= 12f * 12f)
+                {
+                    underAttack = true;
+                    break;
+                }
+            }
+            if (!underAttack) candidates.Add(spawn);
+        }
+        if (candidates.Count == 0) return Level.PickSpawn(Rng, team, avoid, minDistance);
+
+        SpawnPoint best = candidates[0];
+        float bestClearance = float.MinValue;
+        foreach (SpawnPoint candidate in candidates)
+        {
+            float clearance = avoid.Count == 0 ? 1000f : float.MaxValue;
+            foreach (Vector3 occupied in avoid)
+                clearance = MathF.Min(clearance, Vector3.Distance(candidate.Position, occupied));
+            if (clearance >= minDistance) return candidate;
+            if (clearance > bestClearance) { best = candidate; bestClearance = clearance; }
+        }
+        return best;
     }
 
     // ---------------------------------------------------------------- main update
@@ -806,7 +913,7 @@ public sealed class GameWorld
     /// pawn trace has come up empty. Returns true when something absorbed the shot.
     /// </summary>
     private bool HitStructures(Pawn shooter, Vector3 origin, Vector3 dir, float maxDist, float damage,
-        Vector3 tint)
+        Vector3 tint, bool supportFriendlyNodes = false)
     {
         var vehicle = TraceVehicles(origin, dir, maxDist, shooter, out float vDist, out Vector3 vPoint);
         int node = TraceNodes(origin, dir, maxDist, out float nDist);
@@ -814,6 +921,13 @@ public sealed class GameWorld
         if (vehicle != null && (node < 0 || vDist <= nDist))
         {
             shooter.ShotsHit++;
+            if (supportFriendlyNodes && vehicle.Team == shooter.Team)
+            {
+                vehicle.Health = MathF.Min(vehicle.Def.Health, vehicle.Health + damage);
+                Effects.AddTracer(origin, vPoint, tint, 0.04f, 0.08f);
+                Particles.EnergyBurst(vPoint, tint, 0.45f);
+                return true;
+            }
             float dmg = damage;
             if (Mode.TeamBased && vehicle.Team != Team.None && vehicle.Team == shooter.Team)
                 dmg *= Mode.FriendlyFire;
@@ -827,7 +941,9 @@ public sealed class GameWorld
         if (node >= 0 && shooter.Team != Team.None)
         {
             Vector3 point = origin + dir * nDist;
-            var evt = Onslaught.Hurt(node, shooter.Team, damage, out var hit);
+            NodeEvent evt = supportFriendlyNodes
+                ? Onslaught.Support(node, shooter.Team, shooter.Id, damage, out var hit)
+                : Onslaught.Hurt(node, shooter.Team, damage, out hit);
             Effects.AddTracer(origin, point, tint, 0.04f, 0.08f);
             if (evt == NodeEvent.None) return false;    // our own node, or an untouchable core
             shooter.ShotsHit++;
@@ -902,7 +1018,8 @@ public sealed class GameWorld
                 Damage(target, pawn, fire.Damage * 0.1f * amp, DamageType.Energy, dir);
                 Particles.BloodSpray(point, -dir, 0.3f);
             }
-            else if (!HitStructures(pawn, origin, dir, maxDist, fire.Damage * 0.1f, pawn.WeaponDef.Tint)
+            else if (!HitStructures(pawn, origin, dir, maxDist, fire.Damage * 0.1f,
+                         pawn.WeaponDef.Tint, supportFriendlyNodes: true)
                      && worldHit.Hit)
             {
                 Particles.ImpactSparks(worldHit.Point, worldHit.Normal, 0.4f, pawn.WeaponDef.Tint);
@@ -1811,9 +1928,9 @@ public sealed class GameWorld
     }
 
     /// <summary>
-    /// Onslaught. Standing at a node builds, tears down or attacks it depending on who owns it
-    /// and whether the chain reaches — the reachability test is what makes this the mode rather
-    /// than Domination with extra steps.
+    /// Onslaught. Touching a reachable neutral pad starts autonomous construction; enemy nodes
+    /// and cores take weapon damage only. In overtime each core drains in proportion to how much
+    /// of the non-core network the opposing team controls.
     /// </summary>
     private void UpdateOnslaught(float dt)
     {
@@ -1821,15 +1938,22 @@ public sealed class GameWorld
         if (Mode.State is MatchState.Warmup or MatchState.Finished) return;
         var state = Onslaught;
 
+        if (Mode.State == MatchState.Overtime && DrainOnslaughtCores(dt)) return;
+
         for (int i = 0; i < state.Nodes.Count; i++)
         {
             var node = state.Nodes[i];
+            NodeEvent construction = state.TickConstruction(i, dt, out PowerNode completed,
+                out int builderId);
+            if (construction == NodeEvent.Captured)
+            {
+                Pawn builder = FindPawn(builderId)
+                    ?? Pawns.FirstOrDefault(p => p.Team == completed.Team);
+                if (builder != null) HandleNodeEvent(construction, completed, builder);
+                ActivateNodeVehicles(i, completed.Team);
+                node = state.Nodes[i];
+            }
             float reach = node.IsCore ? 6f : 4.5f;
-
-            // Building stacks — more link guns raise a node faster, as in the original — but
-            // tearing one down does not, or four bodies standing on a 2000-point node flatten it
-            // in a second and the mode has no defence worth mounting.
-            bool hostileHandled = false;
             foreach (var pawn in Pawns)
             {
                 if (!pawn.Alive || pawn.Team == Team.None) continue;
@@ -1837,17 +1961,35 @@ public sealed class GameWorld
                 if (MathF.Abs(d.Y) > 6f) continue;
                 if (new Vector2(d.X, d.Z).LengthSquared() > reach * reach) continue;
 
-                bool hostile = node.IsCore || (node.Team != Team.None && node.Team != pawn.Team);
-                if (hostile)
-                {
-                    if (hostileHandled) continue;
-                    hostileHandled = true;
-                }
-
-                var evt = state.Touch(i, pawn.Team, dt, out var touched);
-                if (HandleNodeEvent(evt, touched, pawn)) return;
+                var evt = state.Touch(i, pawn.Team, pawn.Id, out var touched);
+                HandleNodeEvent(evt, touched, pawn);
             }
         }
+    }
+
+    private bool DrainOnslaughtCores(float dt)
+    {
+        int total = Onslaught.Nodes.Count(n => !n.IsCore);
+        if (total <= 0) return false;
+        PowerNode red = Onslaught.CoreOf(Team.Red);
+        PowerNode blue = Onslaught.CoreOf(Team.Blue);
+        if (red == null || blue == null) return false;
+        float redRate = OnslaughtState.OvertimeCoreDrainPerSecond
+            * Onslaught.NodesHeldBy(Team.Blue) / total;
+        float blueRate = OnslaughtState.OvertimeCoreDrainPerSecond
+            * Onslaught.NodesHeldBy(Team.Red) / total;
+        red.Health = MathF.Max(0f, red.Health - redRate * dt);
+        blue.Health = MathF.Max(0f, blue.Health - blueRate * dt);
+        if (red.Health > 0f && blue.Health > 0f) return false;
+
+        Team winner = red.Health <= 0f && blue.Health <= 0f
+            ? (redRate < blueRate ? Team.Red : blueRate < redRate ? Team.Blue : Team.None)
+            : red.Health <= 0f ? Team.Blue : Team.Red;
+        if (winner == Team.None) winner = Onslaught.NodesHeldBy(Team.Red) >= Onslaught.NodesHeldBy(Team.Blue)
+            ? Team.Red : Team.Blue;
+        PowerNode destroyed = winner == Team.Red ? blue : red;
+        CompleteOnslaughtRound(winner, destroyed.Position);
+        return true;
     }
 
     /// <summary>
@@ -1860,9 +2002,12 @@ public sealed class GameWorld
         switch (evt)
         {
             case NodeEvent.Captured:
+                OnslaughtNodeCaptures++;
                 actor.Captures++;
                 AddKillFeed(Loc.OnsNodeCaptured(actor.Name, node.Name), GameTypes.TeamColor(actor.Team));
                 OnSound?.Invoke(SoundId.FlagCapture, node.Position, 1f);
+                int index = Onslaught.Nodes.IndexOf(node);
+                if (index >= 0) ActivateNodeVehicles(index, node.Team);
                 AnnounceCoreState();
                 return false;
 
@@ -1874,15 +2019,59 @@ public sealed class GameWorld
                 return false;
 
             case NodeEvent.CoreDestroyed:
-                // Two points in regulation, one in sudden death, per the original.
-                Mode.TeamScores[(int)actor.Team] += Mode.State == MatchState.Overtime ? 1 : 2;
-                Mode.WinningTeam = actor.Team;
-                Particles.Explosion(node.Position + MathX.Up * 3f, 5f, new Vector3(1f, 0.75f, 0.3f));
-                OnSound?.Invoke(SoundId.Nuke, node.Position, 2f);
-                Mode.Finish(this);
+                CompleteOnslaughtRound(actor.Team, node.Position);
                 return true;
         }
         return false;
+    }
+
+    private void CompleteOnslaughtRound(Team winner, Vector3 destroyedCore)
+    {
+        int points = Mode.State == MatchState.Overtime ? 1 : 2;
+        Mode.TeamScores[(int)winner] += points;
+        Particles.Explosion(destroyedCore + MathX.Up * 3f, 5f, new Vector3(1f, 0.75f, 0.3f));
+        OnSound?.Invoke(SoundId.Nuke, destroyedCore, 2f);
+        if (Mode.TeamScores[(int)winner] >= OnslaughtState.GoalScore)
+        {
+            Mode.WinningTeam = winner;
+            Mode.Finish(this);
+            return;
+        }
+
+        foreach (Pawn pawn in Pawns) if (pawn.InVehicle) ExitVehicle(pawn);
+        Onslaught.ResetRound(swapSides: true);
+        ResetOnslaughtVehiclePads();
+        foreach (Pawn pawn in Pawns) RespawnPawn(pawn);
+        Mode.State = MatchState.InProgress;
+        Mode.TimeRemaining = Mode.TimeLimit;
+        _lastVulnerable = Team.None;
+        Broadcast(Loc.OnsNextRound, GameTypes.TeamColor(winner), 3f);
+    }
+
+    private void ActivateNodeVehicles(int nodeIndex, Team owner)
+    {
+        foreach (Vehicle vehicle in Vehicles)
+        {
+            if (vehicle.SpawnNodeIndex != nodeIndex || vehicle.Alive) continue;
+            vehicle.SpawnTeam = owner;
+            vehicle.Reset();
+        }
+    }
+
+    private void ResetOnslaughtVehiclePads()
+    {
+        foreach (Vehicle vehicle in Vehicles)
+        {
+            if (vehicle.SpawnNodeIndex < 0) { vehicle.Reset(); continue; }
+            PowerNode node = Onslaught.Nodes[vehicle.SpawnNodeIndex];
+            vehicle.SpawnTeam = node.Team;
+            if (node.IsActive) vehicle.Reset();
+            else
+            {
+                vehicle.Alive = false;
+                vehicle.RespawnTimer = float.PositiveInfinity;
+            }
+        }
     }
 
     private Team _lastVulnerable = Team.None;
@@ -1968,15 +2157,25 @@ public sealed class GameWorld
         switch (evt)
         {
             case ObjectiveEvent.Completed:
+                AssaultObjectiveCompletions++;
                 actor.Captures++;
                 AddKillFeed(Loc.AsObjectiveDone(actor.Name, objective.Name), GameTypes.TeamColor(actor.Team));
                 OnSound?.Invoke(SoundId.FlagCapture, objective.Position, 1.2f);
                 Particles.EnergyBurst(objective.Position + MathX.Up * 1.5f, new Vector3(1f, 0.8f, 0.35f), 2.4f);
                 Broadcast(Loc.AsNextObjective(Assault.CurrentObjective?.Name ?? ""),
                     new Vector3(1f, 0.85f, 0.4f), 2f);
+                // When round one timed out, round two ends the instant it gets one objective
+                // farther. Making it wait out the clock after already winning is not Assault.
+                if (Assault.Round == 2 && Assault.TargetTime == float.MaxValue
+                    && Assault.CompletedCount > Assault.TargetObjectives)
+                {
+                    FinishAssaultRound(false);
+                    return true;
+                }
                 return false;
 
             case ObjectiveEvent.AllCompleted:
+                AssaultObjectiveCompletions++;
                 actor.Captures++;
                 AddKillFeed(Loc.AsObjectiveDone(actor.Name, objective.Name), GameTypes.TeamColor(actor.Team));
                 Broadcast(Loc.AsObjectivesCleared, GameTypes.TeamColor(actor.Team), 3f);
@@ -1994,6 +2193,7 @@ public sealed class GameWorld
     private void FinishAssaultRound(bool attackersFinished)
     {
         var st = Assault;
+        AssaultRoundsCompleted++;
         if (st.Round == 1)
         {
             st.SwapSides(attackersFinished);
@@ -2003,8 +2203,16 @@ public sealed class GameWorld
                 if (p.InVehicle) ExitVehicle(p);
                 RespawnPawn(p);
             }
-            foreach (var v in Vehicles) v.Reset();
-            Mode.TimeRemaining = Mode.TimeLimit;
+            foreach (var v in Vehicles)
+            {
+                v.SpawnTeam = Opposite(v.AuthoredSpawnTeam);
+                v.Reset();
+            }
+            // If round one finished, round two receives exactly that completion time. If it did
+            // not, the ordinary round limit remains and objective count becomes the target.
+            Mode.TimeRemaining = st.TargetTime < float.MaxValue
+                ? MathF.Min(Mode.TimeLimit, st.TargetTime)
+                : Mode.TimeLimit;
             Broadcast(Loc.AsSidesSwapped, new Vector3(1f, 0.85f, 0.35f), 3f);
             OnSound?.Invoke(SoundId.AnnounceMajor, Vector3.Zero, 1.3f);
             return;
@@ -2026,6 +2234,16 @@ public sealed class GameWorld
         {
             if (!v.Alive)
             {
+                if (Mode.Kind == GameModeKind.Onslaught && v.SpawnNodeIndex >= 0)
+                {
+                    PowerNode pad = Onslaught.Nodes[v.SpawnNodeIndex];
+                    if (!pad.IsActive)
+                    {
+                        v.RespawnTimer = float.PositiveInfinity;
+                        continue;
+                    }
+                    v.SpawnTeam = pad.Team;
+                }
                 v.RespawnTimer -= dt;
                 if (v.RespawnTimer <= 0f)
                 {
@@ -2199,7 +2417,7 @@ public sealed class GameWorld
     {
         var def = v.Def;
         v.Alive = false;
-        v.RespawnTimer = 30f;
+        v.RespawnTimer = v.SpawnRespawnSeconds;
         Particles.Explosion(v.Position, MathF.Max(2.5f, def.HalfExtents.Length()));
         OnSound?.Invoke(SoundId.Explosion, v.Position, 1.3f);
         // Everyone aboard goes up with it, and so does anyone standing too close.
@@ -2809,7 +3027,9 @@ public sealed class GameWorld
             var node = nodes[i];
             float scale = node.IsCore ? 0.9f : 0.5f;
             Vector3 pos = node.Position + new Vector3(0, node.IsCore ? 4.2f : 3.2f, 0);
-            Vector3 col = node.Team == Team.None ? new Vector3(0.75f, 0.75f, 0.8f) : GameTypes.TeamColor(node.Team);
+            Team visibleTeam = node.Team != Team.None ? node.Team : node.BuildingFor;
+            Vector3 col = visibleTeam == Team.None ? new Vector3(0.75f, 0.75f, 0.8f)
+                : GameTypes.TeamColor(visibleTeam);
 
             // Half brightness while under construction, and a slow throb once it is up. A node
             // that is losing health pulses harder — damage is the thing you want seen first.
@@ -2920,6 +3140,60 @@ public sealed class GameWorld
                     Vector3.Zero, new Vector4(0.4f, 0.8f, 1f, 0.5f), new Vector4(0.4f, 0.8f, 1f, 0f),
                     def.HalfExtents.X * 2.4f, 0.08f, 0.08f, Spr.Flare);
         }
+    }
+
+    /// <summary>Stages the exact live vehicle mesh and materials for documentation turntables.</summary>
+    public void SubmitVehicleTurntable(RenderScene scene, VehicleKind kind, Vector3 groundPosition,
+        float yaw)
+    {
+        scene.SunDirection = Vector3.Normalize(new Vector3(-0.45f, -0.72f, -0.38f));
+        scene.SunColor = new Vector3(3.6f, 3.4f, 3.15f);
+        scene.AmbientSky = new Vector3(0.20f, 0.27f, 0.39f);
+        scene.AmbientGround = new Vector3(0.07f, 0.08f, 0.11f);
+        scene.SkyTop = new Vector3(0.015f, 0.028f, 0.065f);
+        scene.SkyHorizon = new Vector3(0.10f, 0.16f, 0.26f);
+        scene.SkyGround = new Vector3(0.025f, 0.03f, 0.045f);
+        scene.StarStrength = 0f;
+        scene.CloudStrength = 0f;
+        scene.EnvIntensity = 0.75f;
+        scene.FogDensity = 0f;
+        VehicleDef def = VehicleDef.Get(kind);
+        if (kind == VehicleKind.Darkwalker)
+        {
+            // Its nearly black body sits one full hull-height above the feet. Give that unique
+            // silhouette enough fill to read against the studio sky without changing gameplay.
+            scene.AmbientSky = new Vector3(0.42f, 0.50f, 0.68f);
+            scene.AmbientGround = new Vector3(0.16f, 0.18f, 0.24f);
+            scene.SunColor = new Vector3(5.0f, 4.8f, 4.5f);
+        }
+        Vector3 position = groundPosition + new Vector3(0f, def.HalfExtents.Y, 0f);
+        Matrix4x4 transform = Matrix4x4.CreateRotationY(yaw) * Matrix4x4.CreateTranslation(position);
+        Mesh mesh = _vehicleModels.MeshFor(kind);
+        foreach (MeshSection section in _vehicleModels.SectionsFor(kind))
+        {
+            scene.Opaque.Add(new DrawCall
+            {
+                Mesh = mesh,
+                IndexOffset = section.IndexOffset,
+                IndexCount = section.IndexCount,
+                Transform = transform,
+                Material = Materials.Get(section.Material),
+                Tint = new Vector4(def.Tint, 1f),
+                Alpha = 1f,
+                Center = position,
+                Radius = def.HalfExtents.Length() + 1f,
+                BoneBase = -1,
+                CastShadow = true,
+            });
+        }
+        scene.AddLight(position + new Vector3(def.HalfExtents.X * 1.6f,
+                def.HalfExtents.Y * 1.8f + 2f, def.HalfExtents.Z * 0.9f),
+            MathF.Max(10f, def.HalfExtents.Length() * 4f),
+            new Vector3(0.65f, 0.82f, 1f), 4.5f, 2f);
+        scene.AddLight(position + new Vector3(-def.HalfExtents.X * 1.4f,
+                def.HalfExtents.Y * 0.8f + 1f, -def.HalfExtents.Z),
+            MathF.Max(8f, def.HalfExtents.Length() * 3f),
+            new Vector3(1f, 0.38f, 0.16f), 2.4f, 1.5f);
     }
 
     private void SubmitFlags(RenderScene scene)

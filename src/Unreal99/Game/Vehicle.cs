@@ -13,8 +13,14 @@ public sealed class Vehicle
     public int Id;
     public VehicleKind Kind;
     public VehicleDef Def => VehicleDef.Get(Kind);
-    /// <summary>Whoever last drove it. Neutral until someone gets in; it does not reset on exit.</summary>
+    /// <summary>Current lock team. A fresh pad assigns it; a driver's exit unlocks it.</summary>
     public Team Team = Team.None;
+    /// <summary>Freshly spawned ownership; parked team vehicles unlock after their driver exits.</summary>
+    public Team SpawnTeam = Team.None;
+    public Team AuthoredSpawnTeam = Team.None;
+    /// <summary>Nearest Onslaught node controlling this pad, or -1 for a base/Assault pad.</summary>
+    public int SpawnNodeIndex = -1;
+    public float SpawnRespawnSeconds = 30f;
 
     public Vector3 Position;
     public Vector3 Velocity;
@@ -62,7 +68,7 @@ public sealed class Vehicle
         Velocity = Vector3.Zero;
         Health = Def.Health;
         Alive = true;
-        Team = Team.None;
+        Team = SpawnTeam;
         Deploy = 0f; Deploying = false;
         ShieldHealth = 0f; ShieldUp = false;
         CloakBlend = 0f; SelfDestructTimer = -1f;

@@ -86,10 +86,26 @@ try {
             '--map', $mapId,
             '--mode', $mode
         )
-        $output = @(& dotnet @arguments 2>&1 | Tee-Object -FilePath $log)
-        $processExit = $LASTEXITCODE
-        $resultLine = $output | Where-Object { "$_".StartsWith('TRAVERSAL_RESULT ') } |
-            Select-Object -Last 1
+        # Some older Intel WGL drivers need a short recovery window after a native GLFW shutdown.
+        # A driver reset can happen after a complete result was printed, then make the next process
+        # report ApiUnavailable before game code runs. Re-run only those identifiable infrastructure
+        # failures; ordinary non-zero behavioral results remain failures on their first attempt.
+        $attempt = 0
+        do {
+            $attempt++
+            if ($attempt -gt 1) { Start-Sleep -Seconds 3 }
+            $output = @(& dotnet @arguments 2>&1 | Tee-Object -FilePath $log)
+            $processExit = $LASTEXITCODE
+            $resultLine = $output | Where-Object { "$_".StartsWith('TRAVERSAL_RESULT ') } |
+                Select-Object -Last 1
+            $joinedOutput = $output -join "`n"
+            $wglUnavailable = -not $resultLine -and
+                $joinedOutput -match 'ApiUnavailable: WGL|driver does not appear to support OpenGL'
+            $nativeShutdownCrash = $resultLine -and $processExit -eq -1073740791
+            if (($wglUnavailable -or $nativeShutdownCrash) -and $attempt -lt 3) {
+                Write-Warning ("  graphics driver reset on attempt {0}; retrying after recovery" -f $attempt)
+            }
+        } while (($wglUnavailable -or $nativeShutdownCrash) -and $attempt -lt 3)
         if (-not $resultLine) {
             $result = [pscustomobject]@{
                 MapId = $mapId
@@ -123,6 +139,7 @@ try {
         Write-Host ("  {0}: travel={1}m cells={2} stall={3}s oscillation={4}s failures=[{5}]" -f `
             $status, $result.TravelMeters, $result.VisitedCells, $result.LongestStallSeconds,
             $result.LongestOscillationSeconds, (@($result.Failures) -join ', '))
+        Start-Sleep -Milliseconds 750
     }
 }
 finally {
