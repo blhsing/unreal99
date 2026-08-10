@@ -29,7 +29,9 @@ New-Item -ItemType Directory -Force $out, $tmp | Out-Null
 $names = @('morbias','stalwart','curse','grinder','codex','gothic','deck16','turbine','phobos',
            'peak','liandri','morpheus','hyperblast','coret','november','facingworlds','lavagiant',
            'leadworks','sesmar','olden','cinder',
-           'ons-torlan','ons-primeval','as-convoy','as-frigate')
+           'ons-torlan','ons-primeval','as-convoy','as-frigate','as-glacier',
+           'war-torlan','war-torlan-necris','war-serenity','war-avalanche','war-onyxcoast',
+           'war-islander')
 $last = $names.Count - 1
 
 # Arenas the automatic orbit cannot frame, with the camera authored by hand.
@@ -55,13 +57,23 @@ $authored = @{
     22 = '64 30 200 8'      # Primeval     — above the canopy, looking down the centre clearing
     23 = '92 34 160 10'     # Convoy       — along the column so several rigs stack in frame
     24 = '78 30 200 12'     # Frigate      — from over the dock, along the bridge onto the ship
+    25 = '120 52 195 8'     # Glacier      — from over the lake, looking along the station
+    # The Warfare arenas are the largest in the game; the orbit rule ends up inside the geometry.
+    26 = '104 56 200 10'    # WAR-Torlan   — the delta, both primes and the centre bridge
+    27 = '104 56 200 10'    # Torlan Necris— same framing, so the two rosters compare directly
+    28 = '84 40 150 8'      # Serenity     — down the valley with the mine node in frame
+    29 = '100 40 180 10'    # Avalanche    — from over the red base, straight down the mountain mouth
+    30 = '78 34 210 8'      # Onyx Coast   — across the channel at the bridge node and the Necris base
+    31 = '74 32 215 8'      # Islander     — down the island spine, air-node mesa on the right
 }
 
 # Domination arenas: shot in DOM so the control points show their held colours. The ONS and AS
 # arenas need the same treatment for the same reason — nodes and objectives only exist in mode.
+# Warfare (--mode 8) is the same again, and it is the only mode that shows the orbs at all.
 $domFirst = 17
 $onsFirst = 21
 $asFirst  = 23
+$warFirst = 26
 
 # Which arenas to shoot this run. Everything by default.
 $targets = if ($Maps) { @($Maps | Where-Object { $_ -ge 0 -and $_ -le $last } | Sort-Object -Unique) }
@@ -74,7 +86,8 @@ foreach ($i in $targets) {
     $png = Join-Path $tmp "map$i.png"
     $args = @('--windowed', '--nohud', '--demo', '--players', '1', '--bots', '6', '--map', $i)
     # Let the bots hold points for a while before the shutter, or every point is still neutral.
-    if     ($i -ge $asFirst)  { $args += @('--mode', 7) }
+    if     ($i -ge $warFirst) { $args += @('--mode', 8) }
+    elseif ($i -ge $asFirst)  { $args += @('--mode', 7) }
     elseif ($i -ge $onsFirst) { $args += @('--mode', 6) }
     elseif ($i -ge $domFirst) { $args += @('--mode', 5) }
     $frames = if ($i -ge $domFirst) { 1500 } else { 400 }

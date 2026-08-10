@@ -13,6 +13,8 @@ public enum GameAction
     NextWeapon, PrevWeapon, Scoreboard,
     /// <summary>Board or leave a vehicle.</summary>
     UseVehicle,
+    /// <summary>Deploy or stow the personal hoverboard.</summary>
+    Hoverboard,
     Weapon1, Weapon2, Weapon3, Weapon4, Weapon5,
     Weapon6, Weapon7, Weapon8, Weapon9, Weapon10,
     Count
@@ -67,6 +69,7 @@ public sealed class BindingProfile
             p[GameAction.MoveRight] = InputBinding.OnKey(Key.D);
             p[GameAction.Jump] = InputBinding.OnKey(Key.Space);
             p[GameAction.UseVehicle] = InputBinding.OnKey(Key.F);
+            p[GameAction.Hoverboard] = InputBinding.OnKey(Key.R);
             p[GameAction.Crouch] = InputBinding.OnKey(Key.ControlLeft);
             p[GameAction.NextWeapon] = InputBinding.OnKey(Key.E);
             p[GameAction.PrevWeapon] = InputBinding.OnKey(Key.Q);
@@ -92,6 +95,7 @@ public sealed class BindingProfile
             p[GameAction.LookDown] = InputBinding.OnKey(Key.Keypad5);
             p[GameAction.Jump] = InputBinding.OnKey(Key.ShiftRight);
             p[GameAction.UseVehicle] = InputBinding.OnKey(Key.Enter);
+            p[GameAction.Hoverboard] = InputBinding.OnKey(Key.KeypadAdd);
             p[GameAction.Crouch] = InputBinding.OnKey(Key.ControlRight);
             p[GameAction.NextWeapon] = InputBinding.OnKey(Key.PageUp);
             p[GameAction.PrevWeapon] = InputBinding.OnKey(Key.PageDown);
@@ -112,6 +116,7 @@ public sealed class BindingProfile
             // Not N — that is this player's crouch — and not F or Enter, which belong to players
             // one and two on the same shared keyboard. K sits beside the YGHJ cluster and is free.
             p[GameAction.UseVehicle] = InputBinding.OnKey(Key.K);
+            p[GameAction.Hoverboard] = InputBinding.OnKey(Key.V);
             p[GameAction.NextWeapon] = InputBinding.OnKey(Key.U);
             p[GameAction.PrevWeapon] = InputBinding.OnKey(Key.T);
             p[GameAction.Scoreboard] = InputBinding.OnKey(Key.B);
@@ -130,6 +135,7 @@ public sealed class BindingProfile
             p[GameAction.LookDown] = InputBinding.OnKey(Key.Keypad5);
             p[GameAction.Jump] = InputBinding.OnKey(Key.ShiftRight);
             p[GameAction.UseVehicle] = InputBinding.OnKey(Key.Enter);
+            p[GameAction.Hoverboard] = InputBinding.OnKey(Key.KeypadAdd);
             p[GameAction.Crouch] = InputBinding.OnKey(Key.ControlRight);
             p[GameAction.NextWeapon] = InputBinding.OnKey(Key.PageUp);
             p[GameAction.PrevWeapon] = InputBinding.OnKey(Key.PageDown);
@@ -221,6 +227,7 @@ public static class BindingNames
         GameAction.PrevWeapon => "上一把武器",
         GameAction.Scoreboard => "計分板",
         GameAction.UseVehicle => "上下載具",
+        GameAction.Hoverboard => "氣墊滑板",
         >= GameAction.Weapon1 and <= GameAction.Weapon10 => $"武器 {action - GameAction.Weapon1 + 1}",
         _ => "",
     };

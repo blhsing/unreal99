@@ -65,7 +65,8 @@ public sealed class GameMode
             RespawnDelay = Math.Clamp(respawnDelaySeconds, 0f, 9f),
             TimeLimit = timeLimitMinutes * 60f,
             TeamBased = kind is GameModeKind.TeamDeathmatch or GameModeKind.CaptureTheFlag
-                or GameModeKind.Domination or GameModeKind.Onslaught or GameModeKind.Assault,
+                or GameModeKind.Domination or GameModeKind.Onslaught or GameModeKind.Assault
+                or GameModeKind.Warfare,
         };
         // Assault has to have a round clock. "No time limit" means the first round never ends
         // when the attackers stall, so the sides never swap and there is nothing to beat in
@@ -87,7 +88,8 @@ public sealed class GameMode
         GameModeKind.Domination => p.Frags + (int)MathF.Floor(p.DominationScore + 0.0001f),
         // Nodes built and objectives completed are what these two modes are played for, so the
         // scoreboard has to weigh them well above the frags picked up on the way.
-        GameModeKind.Onslaught or GameModeKind.Assault => p.Frags + p.Captures * 5,
+        GameModeKind.Onslaught or GameModeKind.Assault or GameModeKind.Warfare
+            => p.Frags + p.Captures * 5,
         _ => p.Frags,
     };
 
@@ -97,7 +99,7 @@ public sealed class GameMode
         GameModeKind.Domination => DominationLimit,
         // Onslaught is a scored multi-round match: regulation core wins are worth two points,
         // overtime wins one, and the original default goal is three. Assault compares rounds.
-        GameModeKind.Onslaught => OnslaughtState.GoalScore,
+        GameModeKind.Onslaught or GameModeKind.Warfare => OnslaughtState.GoalScore,
         GameModeKind.Assault => 0,
         _ => FragLimit,
     };
@@ -168,7 +170,7 @@ public sealed class GameMode
                         // Onslaught does not stop at the regulation clock. It enters core-drain
                         // overtime; control of the network determines how quickly each core loses
                         // energy until one is destroyed.
-                        else if (Kind == GameModeKind.Onslaught)
+                        else if (Kind is GameModeKind.Onslaught or GameModeKind.Warfare)
                         {
                             State = MatchState.Overtime;
                             world.Broadcast(Loc.AnnOvertime, new Vector3(1f, 0.4f, 0.2f), 2.5f);
@@ -367,7 +369,7 @@ public sealed class GameMode
         {
             // A tied timed match enters sudden-death overtime. The first subsequent team score
             // breaks the tie and ends the match even when it is below the configured limit.
-            if (State == MatchState.Overtime && Kind != GameModeKind.Onslaught
+            if (State == MatchState.Overtime && Kind is not (GameModeKind.Onslaught or GameModeKind.Warfare)
                 && TeamScores[0] != TeamScores[1])
             {
                 WinningTeam = TeamScores[0] > TeamScores[1] ? Team.Red : Team.Blue;

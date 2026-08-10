@@ -56,6 +56,80 @@ public static class ObjectiveModeSelfTest
               && ons.Nodes[0].Team != originalRedCoreTeam,
             "Onslaught round swaps physical core sides", failures);
 
+        // ---------------------------------------------------------------- warfare
+        var war = new OnslaughtState { Warfare = true };
+        war.Nodes.Add(new PowerNode
+        {
+            IsCore = true, Team = Team.Red, Health = OnslaughtState.CoreHealth,
+            MaxHealth = OnslaughtState.CoreHealth, Built = 1f, Links = [1],
+        });
+        war.Nodes.Add(new PowerNode
+        {
+            Team = Team.None, Health = OnslaughtState.NodeHealth,
+            MaxHealth = OnslaughtState.NodeHealth, Links = [0, 2], IsPrime = true,
+        });
+        war.Nodes.Add(new PowerNode
+        {
+            IsCore = true, Team = Team.Blue, Health = OnslaughtState.CoreHealth,
+            MaxHealth = OnslaughtState.CoreHealth, Built = 1f, Links = [1],
+        });
+        // A support node with no links at all: unreachable under Onslaught rules, always reachable
+        // under Warfare's, which is the entire point of the auxiliary node.
+        war.Nodes.Add(new PowerNode
+        {
+            Team = Team.None, Health = OnslaughtState.NodeHealth,
+            MaxHealth = OnslaughtState.NodeHealth, Links = [], Role = NodeRole.Support,
+        });
+        war.RedCore = 0;
+        war.BlueCore = 2;
+
+        Check(war.IsReachable(3, Team.Blue), "warfare support node needs no link", failures);
+        war.Warfare = false;
+        Check(!war.IsReachable(3, Team.Blue), "onslaught keeps the link rule for every node", failures);
+        war.Warfare = true;
+
+        Check(war.OrbCapture(1, Team.Blue, 9, out PowerNode orbNode)
+              && orbNode.Team == Team.Blue && orbNode.Built >= 1f
+              && orbNode.Health == orbNode.MaxHealth,
+            "orb captures a node instantly and at full health", failures);
+        orbNode.OrbShield = Team.Blue;
+        Check(war.Hurt(1, Team.Red, 500f, out _) == NodeEvent.Blocked
+              && orbNode.Health == orbNode.MaxHealth,
+            "an orb-shielded node cannot be damaged", failures);
+        Check(!war.OrbCapture(1, Team.Red, 3, out _),
+            "an orb-shielded node cannot be flipped by the other orb", failures);
+        orbNode.OrbShield = Team.None;
+
+        // Red's own prime is Blue's now, and Red has lost every link to it — under Onslaught that
+        // would be unattackable forever. Warfare keeps a prime node permanently in reach.
+        Check(war.IsReachable(1, Team.Red), "an enemy prime node is never shielded", failures);
+
+        var countdown = new OnslaughtState { Warfare = true };
+        countdown.Nodes.Add(new PowerNode
+        {
+            Team = Team.Red, Built = 1f, Health = 10f, MaxHealth = 10f,
+            Role = NodeRole.Countdown, CountdownSeconds = 4f,
+        });
+        Check(countdown.TickCountdowns(1f) == null && countdown.Nodes[0].CountdownRemaining == 4f,
+            "capturing a countdown node arms its clock", failures);
+        Check(countdown.TickCountdowns(3f) == null, "countdown does not fire early", failures);
+        Check(countdown.TickCountdowns(1.5f) == countdown.Nodes[0], "countdown fires at zero", failures);
+        countdown.Nodes[0].Team = Team.None;
+        countdown.Nodes[0].Built = 0f;
+        countdown.TickCountdowns(0.1f);
+        Check(countdown.Nodes[0].CountdownRemaining < 0f,
+            "losing a countdown node discards its progress", failures);
+
+        var orb = new WarfareOrb { Team = Team.Red };
+        orb.ResetTo(new Vector3(5f, 0f, 0f));
+        Check(!orb.Held && !orb.Dropped, "a returned orb is neither held nor dropped", failures);
+        orb.CarrierId = 4;
+        Check(orb.Held, "orb tracks its carrier", failures);
+        orb.CarrierId = -1;
+        orb.DropTimer = WarfareOrb.DropTimeout;
+        Check(orb.Dropped && WarfareOrb.DropTimeout == 18f,
+            "a dropped orb runs the original's 18-second timer", failures);
+
         var assault = new AssaultState
         {
             Attackers = Team.Red,

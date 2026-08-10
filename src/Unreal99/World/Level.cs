@@ -82,8 +82,24 @@ public struct FlagBase
 }
 
 /// <summary>
-/// One node in an Onslaught power network. Links are indices into the level's own node list,
-/// which is what encodes the chain a team has to advance along.
+/// What a node does beyond sitting in the chain. Onslaught only has <see cref="Link"/>; the rest
+/// are Warfare's auxiliary nodes, which sit outside the link network and pay out in other ways.
+/// </summary>
+public enum NodeRole
+{
+    /// <summary>Part of the chain: must be linked to be captured, and links onward when built.</summary>
+    Link,
+    /// <summary>Capturable with no link at all. Pays out in vehicles, weapons and a spawn point.</summary>
+    Support,
+    /// <summary>Support node that runs a clock; finishing it damages the enemy core.</summary>
+    Countdown,
+    /// <summary>Countdown node that delivers a vehicle instead of hurting the core.</summary>
+    Vehicle,
+}
+
+/// <summary>
+/// One node in an Onslaught or Warfare power network. Links are indices into the level's own node
+/// list, which is what encodes the chain a team has to advance along.
 /// </summary>
 public struct PowerNodeDef
 {
@@ -93,6 +109,27 @@ public struct PowerNodeDef
     /// <summary>Set only for cores; nodes start neutral.</summary>
     public Team Team;
     public int[] Links;
+    public NodeRole Role;
+    /// <summary>Seconds on the clock for <see cref="NodeRole.Countdown"/> and <see cref="NodeRole.Vehicle"/>.</summary>
+    public float CountdownSeconds;
+    /// <summary>Fraction of the enemy core a finished <see cref="NodeRole.Countdown"/> removes.</summary>
+    public float CoreDamageFraction;
+    /// <summary>What a finished <see cref="NodeRole.Vehicle"/> node parks, and where.</summary>
+    public VehicleKind RewardVehicle;
+    public Vector3 RewardPosition;
+    public float RewardYaw;
+}
+
+/// <summary>
+/// Where a team's Warfare orb appears. A spawn tied to a node only works while that node is
+/// friendly, which is what lets a team that has pushed forward restart its orb runs from there.
+/// </summary>
+public struct OrbSpawn
+{
+    public Vector3 Position;
+    public Team Team;
+    /// <summary>Node that must be held for this spawn to be live; -1 for an always-on base spawn.</summary>
+    public int NodeIndex;
 }
 
 /// <summary>A vehicle spawn pad: what parks here, facing which way, and how fast it comes back.</summary>
@@ -210,6 +247,7 @@ public sealed class Level : IDisposable
     public readonly List<ControlPoint> ControlPoints = new();
     public readonly List<VehicleSpawn> VehicleSpawns = new();
     public readonly List<PowerNodeDef> PowerNodes = new();
+    public readonly List<OrbSpawn> OrbSpawns = new();
     public readonly List<AssaultObjectiveDef> Objectives = new();
     /// <summary>Assault only: which side attacks in round one. Defenders get the other colour.</summary>
     public Team AssaultAttackers = Team.Red;
@@ -596,6 +634,30 @@ public sealed class LevelBuilder
         }
     }
 
+    /// <summary>
+    /// A wall running along Z with any number of doorways cut through it. <see cref="WallWithDoor"/>
+    /// only handles one, and calling it twice over the same span seals both openings because each
+    /// call fills the other's doorway — build the segments once instead.
+    /// </summary>
+    public void WallWithDoors(Vector3 min, Vector3 max, float doorHeight, MatId material,
+        params (float Centre, float Width)[] doors)
+    {
+        var gaps = doors.Select(d => (Lo: d.Centre - d.Width * 0.5f, Hi: d.Centre + d.Width * 0.5f))
+            .OrderBy(g => g.Lo).ToArray();
+        float cursor = min.Z;
+        foreach (var gap in gaps)
+        {
+            if (gap.Lo > cursor)
+                Solid(new Vector3(min.X, min.Y, cursor), new Vector3(max.X, max.Y, gap.Lo), material);
+            // Lintel over the opening.
+            Solid(new Vector3(min.X, min.Y + doorHeight, gap.Lo),
+                new Vector3(max.X, max.Y, gap.Hi), material);
+            cursor = MathF.Max(cursor, gap.Hi);
+        }
+        if (cursor < max.Z)
+            Solid(new Vector3(min.X, min.Y, cursor), max, material);
+    }
+
     /// <summary>A run of steps between two heights. Cheaper on collision than a long ramp chain.</summary>
     public void Stairs(Vector3 start, Vector3 end, float width, int steps, MatId material, bool alongX = true)
     {
@@ -843,11 +905,17 @@ public sealed class LevelBuilder
     /// centre wired to both cores.
     /// </summary>
     public int AddPowerNode(Vector3 position, string name, int[] links, bool isCore = false,
-        Team team = Team.None)
+        Team team = Team.None, NodeRole role = NodeRole.Link, float countdownSeconds = 0f,
+        float coreDamageFraction = 0f, VehicleKind rewardVehicle = VehicleKind.Count,
+        Vector3 rewardPosition = default, float rewardYawDegrees = 0f)
     {
         _level.PowerNodes.Add(new PowerNodeDef
         {
             Position = position, Name = name, IsCore = isCore, Team = team, Links = links ?? [],
+            Role = role, CountdownSeconds = countdownSeconds, CoreDamageFraction = coreDamageFraction,
+            RewardVehicle = rewardVehicle,
+            RewardPosition = rewardPosition == default ? position + new Vector3(0f, 0f, 8f) : rewardPosition,
+            RewardYaw = rewardYawDegrees * MathX.Deg2Rad,
         });
         // A node reads as a pylon: a base ring, a column and a cap. Colour is applied at runtime.
         float r = isCore ? 3.4f : 2.4f;
@@ -857,11 +925,23 @@ public sealed class LevelBuilder
             MatId.TechPanelDark, 0.8f);
         Decor(position + new Vector3(-1.1f, h, -1.1f), position + new Vector3(1.1f, h + 0.7f, 1.1f),
             MatId.EnergyPanel, 0.7f);
+        // Auxiliary nodes wear a second collar so a player can tell from across the valley that
+        // this one is grabbable without a link — which is the whole reason to detour to it.
+        if (!isCore && role != NodeRole.Link)
+            Decor(position + new Vector3(-1.5f, h * 0.55f, -1.5f),
+                position + new Vector3(1.5f, h * 0.55f + 0.4f, 1.5f), MatId.Trim, 0.9f);
         AddLight(position + new Vector3(0, h + 1.6f, 0),
             isCore && team != Team.None ? GameTypes.TeamColor(team) : new Vector3(0.85f, 0.85f, 0.9f),
             isCore ? 26f : 18f, isCore ? 6f : 4f);
         return _level.PowerNodes.Count - 1;
     }
+
+    /// <summary>
+    /// Adds an orb spawn. Pass the index of a node to make it live only while that node is held;
+    /// the default -1 is a base spawn that is always available.
+    /// </summary>
+    public void AddOrbSpawn(Vector3 position, Team team, int nodeIndex = -1)
+        => _level.OrbSpawns.Add(new OrbSpawn { Position = position, Team = team, NodeIndex = nodeIndex });
 
     /// <summary>
     /// Wires a node's links after the fact. Links are indices, so a chain that refers forwards
@@ -948,6 +1028,11 @@ public sealed class LevelBuilder
             new Vector3(_level.Max.X + pad.X, _level.KillPlaneY, _level.Max.Z + pad.Z),
             BrushKind.Void));
         _level.Collision.Rebuild();
+
+        // Headless callers pass a null GL. They want the gameplay placements — vehicle pads, node
+        // graph, objectives — not the geometry, so the upload and the nav bake are both skipped.
+        // Nothing else in Build touches the GPU, so this stays a cheap data query.
+        if (gl == null) return _level;
 
         _mesh.RecalculateTangents();
         if (bakeAo) _mesh.BakeAmbientOcclusion(_occluders, 2.6f, 10);

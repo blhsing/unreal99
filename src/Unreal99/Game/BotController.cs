@@ -494,7 +494,38 @@ public sealed class BotController : Controller
             }
         }
 
+        DecideHoverboard(world, pawn, ref input, dt);
         return input;
+    }
+
+    private float _boardToggleTimer;
+
+    /// <summary>
+    /// The bot's hoverboard policy: ride it across open ground, step off the moment there is
+    /// anything to shoot. Riding costs the ability to fire entirely, so the trade is only worth
+    /// making when the alternative is a long walk with nobody in sight.
+    /// </summary>
+    private void DecideHoverboard(GameWorld world, Pawn pawn, ref PawnInput input, float dt)
+    {
+        _boardToggleTimer = MathF.Max(0f, _boardToggleTimer - dt);
+        if (!world.HoverboardAllowed || pawn.InVehicle) return;
+
+        Pawn enemy = world.FindPawn(_targetId);
+        bool threatened = enemy is { Alive: true }
+            && Vector3.Distance(enemy.Position, pawn.Position) < 34f;
+        float toGoal = _goalNode >= 0 && _goalNode < world.Level.Nav.NodeCount
+            ? Vector3.Distance(world.Level.Nav.Nodes[_goalNode].Position, pawn.Position)
+            : 0f;
+        // Carrying the orb is the one case where the board is always worth it: the carrier cannot
+        // shoot anyway, and the whole point of the run is arriving before the defence forms up.
+        bool carryingOrb = world.Mode.Kind == GameModeKind.Warfare
+            && world.Warfare.OrbOf(pawn.Team) is { } orb && orb.CarrierId == pawn.Id;
+        bool want = pawn.CanRideHoverboard && !threatened
+            && (carryingOrb || toGoal > 45f);
+
+        if (want == pawn.OnHoverboard || _boardToggleTimer > 0f) return;
+        input.Hoverboard = true;
+        _boardToggleTimer = 1.2f;
     }
 
     private bool RecoverFromFatalFall(GameWorld world)
@@ -1490,7 +1521,13 @@ public sealed class BotController : Controller
             && TryChooseDominationGoal(world, nav))
             return;
 
-        if (world.Mode.Kind == GameModeKind.Onslaught && Pawn.Team != Team.None
+        // Warfare layers the orb on top of the node network: the orb decides the match, so it is
+        // checked before the ordinary node push, which it then falls through to.
+        if (world.Mode.Kind == GameModeKind.Warfare && Pawn.Team != Team.None
+            && TryChooseWarfareGoal(world, nav))
+            return;
+
+        if (world.NodeNetworkMode && Pawn.Team != Team.None
             && TryChooseOnslaughtGoal(world, nav))
             return;
 
@@ -1723,6 +1760,86 @@ public sealed class BotController : Controller
     /// them on foot loses the game on its own, so before committing to a node a bot will take
     /// anything parked nearby that is pointed the right way.
     /// </summary>
+    private int _orbPatrolStep;
+
+    /// <summary>
+    /// The three Warfare-specific jobs, in the order the mode rewards them: run our orb at the
+    /// enemy prime node, hunt theirs, or go and fetch ours. Anything else falls through to the
+    /// ordinary node push, which already understands support nodes and the link chain.
+    /// </summary>
+    private bool TryChooseWarfareGoal(GameWorld world, NavGraph nav)
+    {
+        var state = world.Onslaught;
+        if (state.Nodes.Count == 0) return false;
+        Team enemy = Pawn.Team == Team.Red ? Team.Blue : Team.Red;
+        WarfareOrb ours = world.Warfare.OrbOf(Pawn.Team);
+        WarfareOrb theirs = world.Warfare.OrbOf(enemy);
+
+        // --- carrying it: the enemy prime node is the prize, because it is the one node they can
+        // never shield. Taking it puts their core in reach immediately.
+        if (ours != null && ours.CarrierId == Pawn.Id)
+        {
+            int target = NearestOrbTarget(state, enemy, primeOnly: true);
+            if (target < 0) target = NearestOrbTarget(state, enemy, primeOnly: false);
+            if (target >= 0)
+                return SetPreciseGoal(nav, state.Nodes[target].Position, objective: true,
+                    radius: 1.6f, refresh: 0.7f);
+        }
+
+        // --- their carrier is the single most valuable target on the map. Chase it.
+        if (theirs is { Held: true })
+        {
+            Pawn carrier = world.FindPawn(theirs.CarrierId);
+            if (carrier is { Alive: true }
+                && Vector3.Distance(carrier.Position, Pawn.Position) < 90f)
+                return SetPreciseGoal(nav, carrier.Position, objective: true, radius: 2.5f, refresh: 0.5f);
+        }
+        // A dropped enemy orb is worth walking to as well: using it costs 100 health and denies
+        // them the run entirely.
+        if (theirs is { Dropped: true }
+            && Vector3.Distance(theirs.Position, Pawn.Position) < 40f && Pawn.Health > 110f)
+            return SetPreciseGoal(nav, theirs.Position, objective: true, radius: 1.4f, refresh: 0.6f);
+
+        // --- nobody has ours: one bot per team goes and gets it, the rest keep pushing nodes.
+        if (ours is { Held: false })
+        {
+            int slot = 0;
+            foreach (Pawn mate in world.Pawns)
+                if (mate.Team == Pawn.Team && mate.Id < Pawn.Id && IsAiDriven(world, mate)) slot++;
+            if (slot == 0 && Vector3.Distance(ours.Position, Pawn.Position) < 130f)
+                return SetPreciseGoal(nav, ours.Position, objective: true, radius: 1.4f, refresh: 0.8f);
+        }
+
+        // --- defending a node our orb is shielding: stay inside the shield radius.
+        if (ours is { Held: true } && ours.CarrierId != Pawn.Id)
+        {
+            Pawn carrier = world.FindPawn(ours.CarrierId);
+            if (carrier is { Alive: true }
+                && Vector3.Distance(carrier.Position, Pawn.Position) < 45f)
+                return TryChoosePatrolGoal(nav, carrier.Position, ref _orbPatrolStep, 11f);
+        }
+
+        return false;
+    }
+
+    /// <summary>Nearest node an orb carrier could flip, optionally restricted to enemy primes.</summary>
+    private int NearestOrbTarget(OnslaughtState state, Team enemy, bool primeOnly)
+    {
+        int best = -1;
+        float bestDistance = float.MaxValue;
+        for (int i = 0; i < state.Nodes.Count; i++)
+        {
+            var node = state.Nodes[i];
+            if (node.IsCore) continue;
+            if (node.Team == Pawn.Team && node.IsActive) continue;
+            if (primeOnly && !(node.IsPrime && node.Team == enemy)) continue;
+            if (node.OrbShield != Team.None && node.OrbShield != Pawn.Team) continue;
+            float d = Vector3.Distance(Pawn.Position, node.Position);
+            if (d < bestDistance) { bestDistance = d; best = i; }
+        }
+        return best;
+    }
+
     private bool TryChooseOnslaughtGoal(GameWorld world, NavGraph nav)
     {
         var state = world.Onslaught;
@@ -1869,11 +1986,14 @@ public sealed class BotController : Controller
                     && Vector3.Distance(Pawn.Position, o.Position) < 40f;
             }
             case GameModeKind.Onslaught:
+            case GameModeKind.Warfare:
             {
                 int i = world.Onslaught.NextObjectiveFor(Pawn.Team, Pawn.Position);
                 if (i < 0) return false;
                 var node = world.Onslaught.Nodes[i];
                 if (!node.IsCore && node.Team == Team.None) return false;
+                // Shooting an orb-shielded node accomplishes nothing but giving away your position.
+                if (node.OrbShield != Team.None && node.OrbShield != Pawn.Team) return false;
                 return Vector3.Distance(Pawn.Position, node.Position) < 55f;
             }
             default:
@@ -1902,11 +2022,13 @@ public sealed class BotController : Controller
                 break;
             }
             case GameModeKind.Onslaught:
+            case GameModeKind.Warfare:
             {
                 var state = world.Onslaught;
                 int index = state.NextObjectiveFor(Pawn.Team, Pawn.Position);
                 if (index < 0) return;
                 var node = state.Nodes[index];
+                if (node.OrbShield != Team.None && node.OrbShield != Pawn.Team) return;
                 // Once a neutral pad has been activated, the Pulse beam is this game's Link Gun:
                 // it accelerates construction. Enemy structures continue to use ordinary fire.
                 support = !node.IsCore && node.Team == Team.None
@@ -2013,6 +2135,10 @@ public sealed class BotController : Controller
     private bool TryBoardVehicle(GameWorld world, NavGraph nav, Vector3 destination)
     {
         if (Pawn.InVehicle || world.Vehicles.Count == 0) return false;
+        // Boarding drops the orb. A carrier walking past a Manta must keep walking.
+        if (world.Mode.Kind == GameModeKind.Warfare
+            && world.Warfare.OrbOf(Pawn.Team) is { } carried && carried.CarrierId == Pawn.Id)
+            return false;
 
         // Keep the last choice while it is still valid, so the bot does not swap targets
         // every time another vehicle happens to become marginally closer.
@@ -2059,6 +2185,7 @@ public sealed class BotController : Controller
         switch (world.Mode.Kind)
         {
             case GameModeKind.Onslaught:
+            case GameModeKind.Warfare:
             {
                 var state = world.Onslaught;
                 int index = state.CoreVulnerable(Pawn.Team)
@@ -2224,6 +2351,7 @@ public sealed class BotController : Controller
             // Objectives are legitimate targets in their own right: shelling a node or a
             // generator from outside its defenders' range is what the heavy vehicles are for.
             bool objectiveInRange = world.Mode.Kind is GameModeKind.Onslaught or GameModeKind.Assault
+                    or GameModeKind.Warfare
                 && distance < hold * 1.6f;
             input.Fire = aimed && ((targetVisible && target != null && target.Team != Pawn.Team)
                 || objectiveInRange);

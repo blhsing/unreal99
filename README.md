@@ -25,6 +25,12 @@
   - [電腦對手的戰術](#電腦對手的戰術-1)
 - [突擊模式](#突擊模式)
   - [電腦對手的戰術](#電腦對手的戰術-2)
+- [戰爭模式](#戰爭模式)
+  - [能量球](#能量球)
+  - [支援節點](#支援節點)
+  - [主節點](#主節點)
+  - [電腦對手怎麼玩](#電腦對手怎麼玩)
+- [氣墊滑板](#氣墊滑板)
 - [載具](#載具)
   - [載具一覽](#載具一覽)
   - [電腦對手怎麼開](#電腦對手怎麼開)
@@ -114,8 +120,8 @@ artifacts\installer\Unreal99Installer.exe --help
 | `--bots N` | 電腦對手數量，0～15 |
 | `--skill N` | 電腦難度，0（新手）～5（神級） |
 | `--demoskill N` | 示範模式代打難度，0（新手）～5（神級），與對手難度分開 |
-| `--map N` | 競技場編號 0～24，見下方〈競技場〉 |
-| `--mode N` | 0 死亡競賽、1 團隊死亡競賽、2 奪旗大戰、3 最後生還者、4 瞬殺模式、5 支配佔領、6 攻堅模式、7 突擊模式 |
+| `--map N` | 競技場編號 0～31，見下方〈競技場〉 |
+| `--mode N` | 0 死亡競賽、1 團隊死亡競賽、2 奪旗大戰、3 最後生還者、4 瞬殺模式、5 支配佔領、6 攻堅模式、7 突擊模式、8 戰爭模式 |
 | `--frags N` / `--time N` | 擊殺上限／時間上限（分鐘） |
 | `--captures N` / `--domination N` | 奪旗上限／支配佔領得分上限；`0` 表示無限制 |
 | `--respawn N` | 重生等待時間，0～9 秒；預設 3 秒，`0` 表示立即重生 |
@@ -134,7 +140,8 @@ artifacts\installer\Unreal99Installer.exe --help
 | `--weaponturntable N 路徑` | 在白底攝影棚輸出第 N 把武器的 36 格 360° 旋轉畫面，取景由包圍盒算出 |
 | `--vehicleturntable N 路徑` | 以遊戲正式網格輸出第 N 種載具的 36 格 360° 旋轉畫面 |
 | `--vehicletest` | 讓神級正式電腦依序駕駛十七種載具，驗證登乘、前進、轉向與導航復原 |
-| `--moderulestest` | 無視窗驗證攻堅節點、核心與突擊兩回合勝負規則 |
+| `--moderulestest` | 無視窗驗證攻堅節點、核心、突擊兩回合勝負與戰爭模式的能量球／倒數節點規則 |
+| `--vehiclecoverage` | 無視窗清點每種載具實際出現在哪幾張圖，並要求每種至少兩張 |
 | `--loadslot N` | 直接從第 N 個存檔位接續對戰 |
 | `--weapon N` | 強制玩家一持有指定武器，用於檢視第一人稱模型 |
 | `--savetest` | 存檔與設定的往返自我測試（寫入、讀回、還原到實際世界並比對） |
@@ -145,8 +152,8 @@ artifacts\installer\Unreal99Installer.exe --help
 
 ## 競技場
 
-二十五座競技場，**每一座都是向原作經典地圖的致敬之作**（前二十一座來自 1999 年的初代，
-另外四座取自 UT2004 引進的攻堅與突擊模式）。佈局、路線、上下樓的方式與
+三十二座競技場，**每一座都是向原作經典地圖的致敬之作**：前二十一座來自 1999 年的初代，
+五座取自 UT2004 的攻堅與突擊模式，另外六座是 UT3 的戰爭模式。佈局、路線、上下樓的方式與
 每張圖的武器道具清單都**逐一對照過原作資料**（來源見
 [docs/original-map-reference.md](docs/original-map-reference.md)），幾何、材質與模型則完全用
 `LevelBuilder` 重新打造，沒有反編譯、轉檔或沿用任何原作關卡資料。
@@ -198,12 +205,24 @@ artifacts\installer\Unreal99Installer.exe --help
 <td><img src="docs/arenas/22-ons-primeval.jpg" width="100%"><br><b>22 · ONS-原始林</b><br><i>ONS-Primeval</i></td>
 <td><img src="docs/arenas/23-as-convoy.jpg" width="100%"><br><b>23 · AS-車隊</b><br><i>AS-Convoy</i></td>
 <td><img src="docs/arenas/24-as-frigate.jpg" width="100%"><br><b>24 · AS-護衛艦</b><br><i>AS-Frigate</i></td>
+<td><img src="docs/arenas/25-as-glacier.jpg" width="100%"><br><b>25 · AS-冰河研究站</b><br><i>AS-Glacier</i></td>
+</tr>
+<tr>
+<td><img src="docs/arenas/26-war-torlan.jpg" width="100%"><br><b>26 · WAR-托蘭三角洲</b><br><i>WAR-Torlan</i></td>
+<td><img src="docs/arenas/27-war-torlan-necris.jpg" width="100%"><br><b>27 · WAR-托蘭．死靈</b><br><i>WAR-Torlan Necris</i></td>
+<td><img src="docs/arenas/28-war-serenity.jpg" width="100%"><br><b>28 · WAR-寧謐林地</b><br><i>WAR-Serenity</i></td>
+<td><img src="docs/arenas/29-war-avalanche.jpg" width="100%"><br><b>29 · WAR-雪崩山道</b><br><i>WAR-Avalanche</i></td>
+</tr>
+<tr>
+<td><img src="docs/arenas/30-war-onyxcoast.jpg" width="100%"><br><b>30 · WAR-黑曜海岸</b><br><i>WAR-OnyxCoast</i></td>
+<td><img src="docs/arenas/31-war-islander.jpg" width="100%"><br><b>31 · WAR-群島通訊站</b><br><i>WAR-Islander</i></td>
 </tr>
 </table>
 
 統治模式的四張圖以 `--mode 5` 擷取，控制點因此顯示所屬隊伍的顏色；用死亡競賽拍 DOM 圖，
-所有控制點都會是中立灰，等於沒拍到重點。攻堅與突擊的四張圖同理，分別以 `--mode 6`／`--mode 7`
-擷取——能量節點、目標標記與全部載具都只在自己的模式裡存在。擷取流程與各圖的鏡頭參數見
+所有控制點都會是中立灰，等於沒拍到重點。攻堅、突擊與戰爭的十一張圖同理，分別以
+`--mode 6`／`--mode 7`／`--mode 8` 擷取——能量節點、目標標記、能量球與全部載具都只在自己的
+模式裡存在。擷取流程與各圖的鏡頭參數見
 [docs/capture-arenas.ps1](docs/capture-arenas.ps1)。
 
 下表的編號即 `--map` 參數要傳入的值：
@@ -235,6 +254,13 @@ artifacts\installer\Unreal99Installer.exe --help
 | 22 | ONS-原始林 | *ONS-Primeval* | 昏暗森林小圖，只有三個節點；中央空地是全圖唯一的重裝甲 |
 | 23 | AS-車隊 | *AS-Convoy* | 沙漠中的六節運輸車隊，攻方從尾車一路推進到前方的 Nexus 飛彈；七個目標 |
 | 24 | AS-護衛艦 | *AS-Frigate* | 停泊中的軍艦 SS Victory；木橋與水下通道兩條登艦路線，兩個目標 |
+| 25 | AS-冰河研究站 | *AS-Glacier* | 封凍的伊邪那岐研究站；攻方渡湖破門、啟動離子核心後奪下**離子電漿戰車**，一路轟開水壩與爆破門 |
+| 26 | WAR-托蘭三角洲 | *WAR-Torlan* | 托蘭的戰爭模式改版：七個節點、東西兩座支援節點，中央橋墩藏著一架蟬式 |
+| 27 | WAR-托蘭．死靈 | *WAR-Torlan Necris* | 同一片三角洲，藍隊改用死靈載具；每個節點都同時擺著兩個陣營的對應車種 |
+| 28 | WAR-寧謐林地 | *WAR-Serenity* | 森林補給站，三節點一直線；中央礦坑是**載具節點**，倒數結束生出利維坦 |
+| 29 | WAR-雪崩山道 | *WAR-Avalanche* | 中空雪山隔開兩座基地；山腹東西兩座**倒數節點**守滿一分鐘就炸毀敵方主節點 |
+| 30 | WAR-黑曜海岸 | *WAR-OnyxCoast* | 冰封海岸的阿克森對死靈；橋樑控制節點決定利維坦過不過得去 |
+| 31 | WAR-群島通訊站 | *WAR-Islander* | 攻守失衡的群島：西側輕裝快攻，東側要塞死守，空中節點通往救世主核彈 |
 
 低重力關卡由 `Level.GravityScale` 控制；角色重力、投射物重力、跳台的彈道解算與電腦對手的
 投射物提前量都會據此調整。這個係數不能無限調低：重力愈輕，跳躍愈高、滯空愈久，欄杆就愈擋不住人。
@@ -344,10 +370,69 @@ HUD 中央的目標卡顯示目前目標名稱、回合、自己是進攻或防�
 
 ---
 
+## 戰爭模式
+
+UT3 的戰爭模式是攻堅模式的續作，共用同一套能量節點網路，但加了三樣東西，而這三樣正是它玩起來
+完全不同的原因：
+
+### 能量球
+
+**能量球是這個模式的全部。** 攻堅模式一旦主節點被打掉就會僵持——連線規則讓落後的一方連可以打的
+目標都沒有。能量球就是這個問題的解答，所以它**完全無視連線鏈**：
+
+* 每隊一顆，在基地生成；隨著隊伍推進，前線節點會開出新的生成點，球就從那裡重新出發。
+* 帶著球走進**中立或敵方節點**，該節點立刻變成己方所有並且滿血。奪下後球即歸位——一次跑動只能
+  換一個節點，這是它沒有強到無解的原因。
+* 站在**己方節點**旁會持續治療它，並讓它**完全無法被攻擊**，直到持球者死亡或走遠。
+* 持球者頭上有一道衝上天的光柱，附近敵人一定看得到。
+* **不能上載具、不能用傳送器**（會掉球），但**可以踩氣墊滑板**——這是快速跑球的標準做法。
+* 球掉在地上後倒數 18 秒：隊友碰到就撿回，沒人撿就消失並重新生成。敵人可以走過去「使用」它強制
+  歸位，代價是**自己 100 點血**（護甲可以吸收，所以帶著護盾帶做這件事是免費的）。
+
+### 支援節點
+
+不在連線鏈上，**不需要任何連線就能搶**。除了送載具、武器與重生點之外還有兩種特別的：
+
+* **倒數節點**：佔下後開始倒數 60 秒。守滿了就削掉敵方核心約兩成血——或者，像雪崩山道那樣，
+  直接**炸毀敵方的主節點**。倒數完成後節點自己歸零，大家再搶一次。
+* **載具節點**：倒數結束時**生出一台超級載具**。寧謐林地的礦坑節點就是這樣生出利維坦的，而且
+  場上同時只能有一台，上一台不炸掉就生不出下一台。
+
+### 主節點
+
+與核心直接相連的節點是該隊的**主節點**，它**永遠不會被連線規則保護**。攻堅模式裡，前線一崩就
+沒有目標可打；戰爭模式裡，敵方主節點永遠是合法目標，所以永遠有仗可打。
+
+### 電腦對手怎麼玩
+
+* **搶到球就往敵方主節點跑**——那是唯一絕對打得到的節點，拿下它敵方核心立刻暴露。
+* 敵方持球者是全場最高優先的目標，會被主動追殺；掉在地上的敵方球若在 40 公尺內且自己血量夠，
+  會走過去犧牲 100 點血強制歸位。
+* 每隊派一名去撿自己的球，其餘的照常推節點。
+* **不會對被能量球保護的節點開火**——打不動，只會暴露位置。
+* 持球時**不會上載具**（上車就掉球），但會自動踩滑板。
+
+---
+
+## 氣墊滑板
+
+UT3 的滑板不是地圖上的載具，而是**每個人隨身帶著的**，這一版也是如此：在三種載具模式裡按
+`R`（玩家一）就能展開或收起。
+
+* **速度約為跑步的兩倍**，摩擦力極低，所以直線很快、轉彎很鈍。
+* **完全不能開火**。這是它唯一的代價，也是它不會取代跑步的原因。
+* **中一發就摔**：超過 8 點的傷害會把人掀下來並僵直 1.6 秒。
+* 落地時滑板會吸收一部分衝擊，所以可以抄近路跳崖；但摔得夠重還是會受傷並被掀下來。
+* **次要開火＝勾爪**：勾住 26 公尺內的友軍載具被拖著走，再按一次放開，離太遠會自動斷。勾在飛行
+  載具上會被整個拉到空中。
+* **可以帶著能量球騎**——這正是原作跑球的標準流程。
+
+---
+
 ## 載具
 
-UT2004 與 UT3 引進的**十七種載具全部實作**，**且只在攻堅與突擊模式中出現**——同一張圖用死亡
-競賽載入時不會生成任何載具。按 `F`（玩家一）上下車；多人座載具的乘客座位各自獨立瞄準與開火。
+UT2004 與 UT3 引進的**十七種載具全部實作**，**且只在攻堅、突擊與戰爭模式中出現**——同一張圖用
+死亡競賽載入時不會生成任何載具。按 `F`（玩家一）上下車；多人座載具的乘客座位各自獨立瞄準與開火。
 
 ### 載具一覽
 
@@ -356,33 +441,40 @@ UT2004 與 UT3 引進的**十七種載具全部實作**，**且只在攻堅與�
 步行腿都完整入鏡，同時盡量填滿畫面。完整命令與人工驗收程序見
 [載具旋轉展示擷取文件](docs/vehicle-turntable-capture.md)。
 
+每一格最後一行列出這台車**實際會出現在哪幾張圖**。這不是手寫的清單，而是
+`--vehiclecoverage` 直接讀關卡資料清點出來的；同一支自我測試會在任何一種載具掉到兩張圖以下時
+失敗，所以「有模型、有物理、有文件，但全場都開不到」這種狀態不會再悄悄出現。
+
+唯一一處與原作不同的擺放已標記為 ⚠：**離子電漿戰車**在 UT2004 只出現在 AS-Glacier 一張圖，
+為了讓它也達到兩張，我們把它額外放進了雪崩山道的山腹中央節點。那是我們加的，不是 Epic 的。
+
 <table>
 <tr>
-<td width="50%"><img src="docs/vehicles/scorpion-turntable.webp" width="100%"><br><b>Scorpion · 蠍式突擊車</b><br>Axon　輪型　1 座<br>快速偵察車；能量索炮與兩側近身刀刃適合搶點。</td>
-<td width="50%"><img src="docs/vehicles/hellbender-turntable.webp" width="100%"><br><b>Hellbender · 地獄犬</b><br>Axon　輪型　3 座<br><b>駕駛無武裝</b>；火力全在後兩座的天雷與遠距雷射。</td>
+<td width="50%"><img src="docs/vehicles/scorpion-turntable.webp" width="100%"><br><b>Scorpion · 蠍式突擊車</b><br>Axon　輪型　1 座<br>快速偵察車；能量索炮與兩側近身刀刃適合搶點。<br><i>出現於：ONS-托蘭、ONS-原始林、WAR-托蘭×2、WAR-寧謐林地、WAR-雪崩山道</i></td>
+<td width="50%"><img src="docs/vehicles/hellbender-turntable.webp" width="100%"><br><b>Hellbender · 地獄犬</b><br>Axon　輪型　3 座<br><b>駕駛無武裝</b>；火力全在後兩座的天雷與遠距雷射。<br><i>出現於：ONS-托蘭、ONS-原始林、WAR-托蘭×2、WAR-寧謐林地、WAR-雪崩山道、WAR-群島通訊站</i></td>
 </tr><tr>
-<td><img src="docs/vehicles/goliath-turntable.webp" width="100%"><br><b>Goliath · 歌利亞</b><br>Axon　履帶　2 座<br>主戰車；主砲保持遠距，車頂機槍壓制步兵。</td>
-<td><img src="docs/vehicles/leviathan-turntable.webp" width="100%"><br><b>Leviathan · 利維坦</b><br>Axon　輪型　5 座<br>移動堡壘；抵達陣地後架設，主駕駛改用離子砲。</td>
+<td><img src="docs/vehicles/goliath-turntable.webp" width="100%"><br><b>Goliath · 歌利亞</b><br>Axon　履帶　2 座<br>主戰車；主砲保持遠距，車頂機槍壓制步兵。<br><i>出現於：ONS-托蘭、ONS-原始林、WAR-托蘭×2、WAR-寧謐林地、WAR-雪崩山道、WAR-群島通訊站</i></td>
+<td><img src="docs/vehicles/leviathan-turntable.webp" width="100%"><br><b>Leviathan · 利維坦</b><br>Axon　輪型　5 座<br>移動堡壘；抵達陣地後架設，主駕駛改用離子砲。<br><i>出現於：WAR-寧謐林地（載具節點）、WAR-黑曜海岸</i></td>
 </tr><tr>
-<td><img src="docs/vehicles/paladin-turntable.webp" width="100%"><br><b>Paladin · 聖騎士</b><br>Axon　履帶　1 座<br>重裝支援車；可展開能量護盾替隊友吸收正面火力。</td>
-<td><img src="docs/vehicles/spma-turntable.webp" width="100%"><br><b>SPMA · 自走砲</b><br>Axon　輪型　2 座<br>遠程砲車，需架設；以拋物線重砲越過掩體。</td>
+<td><img src="docs/vehicles/paladin-turntable.webp" width="100%"><br><b>Paladin · 聖騎士</b><br>Axon　履帶　1 座<br>重裝支援車；可展開能量護盾替隊友吸收正面火力。<br><i>出現於：ONS-托蘭、WAR-群島通訊站</i></td>
+<td><img src="docs/vehicles/spma-turntable.webp" width="100%"><br><b>SPMA · 自走砲</b><br>Axon　輪型　2 座<br>遠程砲車，需架設；以拋物線重砲越過掩體。<br><i>出現於：ONS-托蘭、WAR-托蘭×2</i></td>
 </tr><tr>
-<td><img src="docs/vehicles/manta-turntable.webp" width="100%"><br><b>Manta · 曼塔</b><br>Axon　氣墊　1 座<br>高速氣墊艇；雙電漿砲，可俯衝輾壓。</td>
-<td><img src="docs/vehicles/raptor-turntable.webp" width="100%"><br><b>Raptor · 猛禽</b><br>Axon　飛行　1 座<br>戰機；可自由爬升俯衝，以電漿與飛彈攻擊地空目標。</td>
+<td><img src="docs/vehicles/manta-turntable.webp" width="100%"><br><b>Manta · 曼塔</b><br>Axon　氣墊　1 座<br>高速氣墊艇；雙電漿砲，可俯衝輾壓。<br><i>出現於：ONS-托蘭、ONS-原始林、AS-車隊、WAR-托蘭×2、WAR-寧謐林地、WAR-雪崩山道、WAR-黑曜海岸</i></td>
+<td><img src="docs/vehicles/raptor-turntable.webp" width="100%"><br><b>Raptor · 猛禽</b><br>Axon　飛行　1 座<br>戰機；可自由爬升俯衝，以電漿與飛彈攻擊地空目標。<br><i>出現於：ONS-托蘭、AS-車隊、WAR-托蘭×2、WAR-群島通訊站</i></td>
 </tr><tr>
-<td><img src="docs/vehicles/cicada-turntable.webp" width="100%"><br><b>Cicada · 蟬式武裝機</b><br>Axon　飛行　2 座<br>武裝直升機；駕駛發射飛彈，乘客以腹部砲塔掩護。</td>
-<td><img src="docs/vehicles/ion-tank-turntable.webp" width="100%"><br><b>Ion Tank · 離子戰車</b><br>履帶　1 座<br>慢速但以長程高傷離子砲控制開闊地（原作僅 AS-Glacier）。</td>
+<td><img src="docs/vehicles/cicada-turntable.webp" width="100%"><br><b>Cicada · 蟬式武裝機</b><br>Axon　飛行　2 座<br>武裝直升機；駕駛發射飛彈，乘客以腹部砲塔掩護。<br><i>出現於：ONS-托蘭、WAR-托蘭三角洲</i></td>
+<td><img src="docs/vehicles/ion-tank-turntable.webp" width="100%"><br><b>Ion Tank · 離子戰車</b><br>履帶　1 座<br>慢速但以長程高傷離子砲控制開闊地（原作僅 AS-Glacier）。<br><i>出現於：AS-冰河研究站、⚠ WAR-雪崩山道</i></td>
 </tr><tr>
-<td><img src="docs/vehicles/viper-turntable.webp" width="100%"><br><b>Viper · 蝰蛇</b><br>Necris　氣墊　1 座<br>高速電漿突襲；必要時可<b>自爆</b>衝入目標。</td>
-<td><img src="docs/vehicles/scavenger-turntable.webp" width="100%"><br><b>Scavenger · 掠奪者</b><br>Necris　步行　1 座<br>三足能量球；近距光束與捲球衝撞用於突破狹道。</td>
+<td><img src="docs/vehicles/viper-turntable.webp" width="100%"><br><b>Viper · 蝰蛇</b><br>Necris　氣墊　1 座<br>高速電漿突襲；必要時可<b>自爆</b>衝入目標。<br><i>出現於：WAR-托蘭．死靈、WAR-雪崩山道、WAR-黑曜海岸</i></td>
+<td><img src="docs/vehicles/scavenger-turntable.webp" width="100%"><br><b>Scavenger · 掠奪者</b><br>Necris　步行　1 座<br>三足能量球；近距光束與捲球衝撞用於突破狹道。<br><i>出現於：WAR-托蘭．死靈、WAR-雪崩山道</i></td>
 </tr><tr>
-<td><img src="docs/vehicles/nemesis-turntable.webp" width="100%"><br><b>Nemesis · 復仇者</b><br>Necris　履帶　1 座<br>變形戰車；砲塔可升高取得射界，也可下沉躲進掩體。</td>
-<td><img src="docs/vehicles/nightshade-turntable.webp" width="100%"><br><b>Nightshade · 夜影</b><br>Necris　氣墊　1 座<br><b>靜止時光學迷彩</b>；投放區域拒止武器。</td>
+<td><img src="docs/vehicles/nemesis-turntable.webp" width="100%"><br><b>Nemesis · 復仇者</b><br>Necris　履帶　1 座<br>變形戰車；砲塔可升高取得射界，也可下沉躲進掩體。<br><i>出現於：WAR-托蘭．死靈、WAR-雪崩山道</i></td>
+<td><img src="docs/vehicles/nightshade-turntable.webp" width="100%"><br><b>Nightshade · 夜影</b><br>Necris　氣墊　1 座<br><b>靜止時光學迷彩</b>；投放區域拒止武器。<br><i>出現於：WAR-托蘭．死靈、WAR-雪崩山道</i></td>
 </tr><tr>
-<td><img src="docs/vehicles/fury-turntable.webp" width="100%"><br><b>Fury · 狂怒</b><br>Necris　飛行　1 座<br>高速攔截機；以長程光束獵殺飛行與地面目標。</td>
-<td><img src="docs/vehicles/darkwalker-turntable.webp" width="100%"><br><b>Darkwalker · 暗黑行者</b><br>Necris　步行　2 座<br>三足重型步行機；高車體越過障礙，以雙光束壓制戰線。</td>
+<td><img src="docs/vehicles/fury-turntable.webp" width="100%"><br><b>Fury · 狂怒</b><br>Necris　飛行　1 座<br>高速攔截機；以長程光束獵殺飛行與地面目標。<br><i>出現於：WAR-托蘭．死靈、WAR-黑曜海岸</i></td>
+<td><img src="docs/vehicles/darkwalker-turntable.webp" width="100%"><br><b>Darkwalker · 暗黑行者</b><br>Necris　步行　2 座<br>三足重型步行機；高車體越過障礙，以雙光束壓制戰線。<br><i>出現於：WAR-托蘭．死靈、WAR-雪崩山道、WAR-黑曜海岸</i></td>
 </tr><tr>
-<td><img src="docs/vehicles/hoverboard-turntable.webp" width="100%"><br><b>Hoverboard · 氣墊滑板</b><br>氣墊　1 座<br>純交通工具，<b>無武裝、不輾壓</b>、全場最快；到達目標即下車。</td>
+<td><img src="docs/vehicles/hoverboard-turntable.webp" width="100%"><br><b>Hoverboard · 氣墊滑板</b><br>氣墊　1 座<br>純交通工具，<b>無武裝、不輾壓</b>、全場最快；到達目標即下車。<br><i>出現於：**所有載具模式**——不放在地圖上，每位玩家隨身攜帶</i></td>
 <td></td>
 </tr>
 </table>
@@ -488,6 +580,8 @@ Windows 通常會列舉十幾個「幽靈」HID 裝置，因此配對採用**實
 | 操作 | 說明 |
 | --- | --- |
 | 上下載具 | 玩家一 `F`、玩家二 `Enter`、玩家三 `K`、玩家四 `Enter`（玩家四預設使用方向鍵配置） |
+| 氣墊滑板 | 玩家一 `R`、玩家二 `Num +`、玩家三 `V`、玩家四 `Num +`；再按一次收起 |
+| 滑板勾爪 | 滑鼠右鍵（滑板上時）；勾住 26 公尺內的友軍載具被拖著走，再按一次放開 |
 | 前進／後退 | 移動鍵的前後（`W`／`S`）＝油門與倒車 |
 | 轉向 | 移動鍵的左右（`A`／`D`）＝方向盤；輪型與履帶載具靠轉向瞄準車體固定武器 |
 | 爬升／下降 | `Space`／蹲下鍵。**僅飛行載具**（Raptor、Cicada、Fury）；氣墊載具按跳躍可短暫抬升 |
@@ -677,11 +771,13 @@ src/Unreal99.Installer/
 * **載具** — 十七種全部以程式建模，以 **+Z 為前方**（與物理的行進方向一致）。裝甲車輛使用
   帶折角的斜甲截面、砲塔環與含抽煙器和膛口制退器的砲管，履帶是含負重輪、主動輪與惰輪的
   完整行走裝置；飛行載具使用翼型掃掠的機翼與座艙罩；Necris 載具則是反曲膝關節的步行腿。
-* **競技場** — 二十五座場地全部透過 `LevelBuilder` 撰寫，同時產生算圖幾何與碰撞筆刷。圓形結構
+* **競技場** — 三十二座場地全部透過 `LevelBuilder` 撰寫，同時產生算圖幾何與碰撞筆刷。圓形結構
   會柵格化成軸對齊區塊，確保碰撞與可見表面完全一致。路徑點圖在關卡建好後自動生成，
   因此新增競技場不需要另外標註導航資料。
 * **水面卸力** — 落入水中不會造成落下傷害。少了這條，從護衛艦的舷邊跳進港灣就是自殺，
   而那正是這張圖的水下路線該有的走法。
+* **氣墊滑板** — 不是載具實體，而是角色狀態。騎乘者仍然是 `Pawn`：會被打下來、可以撿能量球，
+  兩者都不是坐在駕駛艙裡的人做得到的事，所以把它做成載具反而更難寫。
 * **音效** — 所有音效在啟動時合成為 PCM 緩衝（濾波雜訊爆發、掃頻正弦、加法式鐘聲），
   再透過 OpenAL 以 3D 定位播放。
 

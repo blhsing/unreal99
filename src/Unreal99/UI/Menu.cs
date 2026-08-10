@@ -574,6 +574,8 @@ public sealed class Menu
             // on an arena that was not authored for it.
             if (ModeKind == GameModeKind.Onslaught && !World.Maps.SupportsOnslaught(Map))
                 Map = World.MapId.Torlan;
+            if (ModeKind == GameModeKind.Warfare && !World.Maps.SupportsWarfare(Map))
+                Map = World.MapId.WarTorlan;
             if (ModeKind == GameModeKind.Assault && !World.Maps.SupportsAssault(Map))
                 Map = World.MapId.Convoy;
         }, Loc.ModeDescription(ModeKind));
@@ -697,6 +699,7 @@ public sealed class Menu
                 GameModeKind.Domination => World.Maps.SupportsDomination(id),
                 GameModeKind.Onslaught => World.Maps.SupportsOnslaught(id),
                 GameModeKind.Assault => World.Maps.SupportsAssault(id),
+                GameModeKind.Warfare => World.Maps.SupportsWarfare(id),
                 _ => true,
             };
             Add(World.Maps.Name(id), () =>

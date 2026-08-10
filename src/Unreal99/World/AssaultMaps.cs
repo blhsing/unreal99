@@ -429,4 +429,205 @@ public static partial class Maps
 
         return b.Build(gl);
     }
+
+    // ================================================================ AS-冰河研究站
+
+    /// <summary>
+    /// Glacier. The Izanagi research station on Lamdon 3, and the only map in UT2004 that carries
+    /// the Ion Plasma Tank. The attackers cross a frozen lake, break into the station, overload the
+    /// ion core, steal the tank, and then blast their way out along a chain of doors and dams.
+    ///
+    /// The original runs ten steps. This is seven: the optional bridge switch is a real bridge that
+    /// is simply there, and the two dams and their depot door are merged into one dam objective
+    /// plus the final blast door. Everything that changes where the attackers spawn is kept,
+    /// because that progression is what makes the map winnable.
+    /// </summary>
+    private static Level BuildGlacier(GL gl)
+    {
+        var b = new LevelBuilder(Loc.MapGlacier, Loc.MapGlacierDesc);
+        var env = b.Level.Environment;
+        env.SunDirection = Vector3.Normalize(new Vector3(-0.30f, -0.58f, -0.76f));
+        env.SunColor = new Vector3(3.0f, 3.2f, 3.8f);
+        env.AmbientSky = new Vector3(0.44f, 0.50f, 0.64f);
+        env.AmbientGround = new Vector3(0.30f, 0.35f, 0.44f);
+        env.EnvIntensity = 0.80f;
+        env.SkyTop = new Vector3(0.16f, 0.30f, 0.56f);
+        env.SkyHorizon = new Vector3(0.72f, 0.78f, 0.88f);
+        env.SkyGround = new Vector3(0.52f, 0.58f, 0.66f);
+        env.StarStrength = 0f;
+        env.CloudStrength = 0.9f;
+        env.FogColor = new Vector3(0.74f, 0.80f, 0.90f);
+        env.FogDensity = 0.0040f;
+
+        b.Level.AssaultAttackers = Team.Red;
+
+        const float Ice = 0f, Floor = 3f, Upper = 12f;
+
+        // --- the frozen lake and the shore the station sits on ---
+        b.Solid(new Vector3(-190f, -10f, -70f), new Vector3(190f, Ice - 1.6f, 70f), MatId.Rock, true, 0.4f);
+        // The water starts past the attacker shore. Overlapping the two left every attacker
+        // spawning inside a water volume: they walked at swimming speed and slowly drowned on dry
+        // land, which is not a subtle bug once you see the oxygen meter on the beach.
+        b.Water(new Vector3(-150f, -10f, -70f), new Vector3(-92f, Ice - 0.6f, 70f));
+        b.Room(new Vector3(-194f, -10f, -74f), new Vector3(194f, 56f, 74f), 4f,
+            MatId.Rock, MatId.Rock, MatId.Rock, withCeiling: false, withFloor: false);
+        // Attacker shore, then the lake, then the station apron. The apron starts past the ramp,
+        // not under it: a ramp buried inside the block it climbs is no ramp at all, and the bots
+        // simply stood on the ice.
+        b.Solid(new Vector3(-190f, -10f, -70f), new Vector3(-150f, Ice, 70f), MatId.Rock, true, 0.5f);
+        b.Solid(new Vector3(-92f, -10f, -70f), new Vector3(190f, Floor, 70f), MatId.Concrete, true, 0.45f);
+        // Ice floes across the lake, which is how the original gets its infantry over.
+        var rng = new Rng(0x91AC);
+        for (int i = 0; i < 22; i++)
+        {
+            float px = rng.Range(-144f, -100f);
+            float pz = rng.Range(-52f, 52f);
+            float s = rng.Range(3.5f, 6.5f);
+            b.Solid(new Vector3(px - s, Ice - 1.1f, pz - s), new Vector3(px + s, Ice - 0.3f, pz + s),
+                MatId.Concrete, true, 0.7f);
+        }
+        // The bridge the original hides behind an optional switch. Here it is simply built: an
+        // objective that can be skipped is not one our sequence can express, and the crossing
+        // matters more than the switch did. It runs out to the ramp, which climbs the 3 m apron
+        // wall at 1:4 — anything steeper and the nav graph refuses to route a bot up it.
+        b.Solid(new Vector3(-150f, Ice - 0.4f, -6f), new Vector3(-104f, Ice, 6f), MatId.MetalGrate, true, 0.8f);
+        b.Ramp(new Vector3(-104f, Ice - 0.4f, -6f), new Vector3(-92f, Floor, 6f), 0, MatId.Concrete, true, 0.6f);
+        // A second way up, wide enough that the ramp is not a single choke for the whole attack.
+        for (int s = -1; s <= 1; s += 2)
+            b.Ramp(new Vector3(-108f, Ice - 1.1f, s * 30f - 7f), new Vector3(-92f, Floor, s * 30f + 7f), 0,
+                MatId.Rock, true, 0.6f);
+
+        // --- the station: two corridors flanking the ion core hall ---
+        // The two doors the attackers force. Both are cut from one wall, because building the
+        // wall solid and then adding doorways to it just produces a solid wall.
+        b.WallWithDoors(new Vector3(-84f, Floor, -46f), new Vector3(-80f, Upper + 6f, 46f),
+            doorHeight: 6f, MatId.TechPanelDark, (-20f, 9f), (20f, 9f));
+        b.Solid(new Vector3(-80f, Upper + 5f, -46f), new Vector3(-20f, Upper + 6f, 46f), MatId.MetalGrate, true, 0.9f);
+        // Outer walls, so the hall is a building rather than a roof on stilts.
+        for (int s = -1; s <= 1; s += 2)
+            b.Solid(new Vector3(-84f, Floor, s * 42f), new Vector3(-16f, Upper + 6f, s * 46f),
+                MatId.TechPanelDark, true, 0.8f);
+        // The two flanking corridors that lead to the core, which is the shape of the original.
+        for (int s = -1; s <= 1; s += 2)
+            b.Solid(new Vector3(-80f, Floor, s * 18f), new Vector3(-30f, Upper + 5f, s * 22f),
+                MatId.TechPanelDark, true, 0.8f);
+        b.AddLight(new Vector3(-52f, Upper, 0f), new Vector3(0.55f, 0.75f, 1f), 40f, 6f);
+
+        // Ion core in the middle of the hall.
+        b.Cylinder(new Vector3(-52f, Floor, 0f), 5.2f, 4.2f, 9f, 14, MatId.EnergyPanel);
+        b.AddLight(new Vector3(-52f, Floor + 6f, 0f), new Vector3(0.4f, 0.9f, 1f), 26f, 7f);
+
+        // Tank hangar east of the core.
+        b.WallWithDoors(new Vector3(-20f, Floor, -26f), new Vector3(-16f, Upper + 6f, 26f),
+            doorHeight: 8f, MatId.ArmorPlate, (0f, 14f));
+        b.Solid(new Vector3(-16f, Upper + 5f, -26f), new Vector3(26f, Upper + 6f, 26f), MatId.MetalGrate, true, 0.9f);
+
+        // --- the access tunnel and the power station ---
+        b.WallWithDoors(new Vector3(26f, Floor, -14f), new Vector3(30f, Upper + 6f, 14f),
+            doorHeight: 8f, MatId.ArmorPlate, (0f, 13f));
+        b.Solid(new Vector3(30f, Floor, -20f), new Vector3(78f, Floor + 0.4f, 20f), MatId.Concrete, true, 0.6f);
+        b.Solid(new Vector3(78f, Floor, -30f), new Vector3(120f, Upper, 30f), MatId.TechPanelDark, false, 0.7f);
+        b.WallWithDoors(new Vector3(78f, Floor, -30f), new Vector3(82f, Upper, 30f),
+            doorHeight: 7f, MatId.TechPanelDark, (0f, 12f));
+        b.Solid(new Vector3(82f, Upper - 1f, -30f), new Vector3(120f, Upper, 30f), MatId.MetalGrate, true, 0.9f);
+        b.AddLight(new Vector3(100f, Upper - 3f, 0f), new Vector3(0.9f, 0.75f, 0.5f), 34f, 5.5f);
+
+        // --- the dam and the final blast door ---
+        b.WallWithDoors(new Vector3(120f, Floor, -40f), new Vector3(124f, Upper + 8f, 40f),
+            doorHeight: 9f, MatId.Concrete, (0f, 14f));
+        b.Solid(new Vector3(124f, Floor, -40f), new Vector3(172f, Floor + 0.4f, 40f), MatId.Concrete, true, 0.6f);
+        b.Solid(new Vector3(160f, Floor, -22f), new Vector3(166f, Upper + 10f, 22f), MatId.ArmorPlate, true, 0.8f);
+        b.AddLight(new Vector3(146f, Upper, 0f), new Vector3(0.6f, 0.8f, 1f), 40f, 5f);
+
+        // ---------------------------------------------------------------- objectives
+        // 1 — force the station doors.
+        b.AddObjective(new Vector3(-82f, Floor + 1f, -20f), Loc.ObjBreachBase, ObjectiveKind.Destroy,
+            radius: 4f, health: 800f, unlocksSpawnGroup: 1);
+        // 2 — the ion core switches, right under the defenders' spawn.
+        b.AddObjective(new Vector3(-52f, Floor + 1f, 0f), Loc.ObjIonCore, ObjectiveKind.Hold,
+            radius: 4.6f, holdSeconds: 8f, unlocksSpawnGroup: 1);
+        // 3 — take the tank. Everything after this needs its main gun.
+        b.AddObjective(new Vector3(-6f, Floor + 1f, 0f), Loc.ObjSeizeTank, ObjectiveKind.Touch,
+            radius: 5f, unlocksSpawnGroup: 2);
+        // 4 — blow the hangar doors open and drive up the access tunnel.
+        b.AddObjective(new Vector3(28f, Floor + 1f, 0f), Loc.ObjAccessDoors, ObjectiveKind.Destroy,
+            radius: 4.2f, health: 1200f, unlocksSpawnGroup: 3);
+        // 5 — the security gate switch, deep inside the power station.
+        b.AddObjective(new Vector3(112f, Floor + 1f, 0f), Loc.ObjSecurityGate, ObjectiveKind.Hold,
+            radius: 4f, holdSeconds: 7f, unlocksSpawnGroup: 4);
+        // 6 — the dam controls. The original splits this across two dams and a depot door.
+        b.AddObjective(new Vector3(122f, Floor + 1f, 0f), Loc.ObjPrimaryDam, ObjectiveKind.Destroy,
+            radius: 4.2f, health: 1500f, unlocksSpawnGroup: 5);
+        // 7 — the blast door. Tank rounds only, in the original; here it is simply very tough.
+        b.AddObjective(new Vector3(163f, Floor + 1f, 0f), Loc.ObjBlastDoor, ObjectiveKind.Destroy,
+            radius: 4.6f, health: 2200f, unlocksSpawnGroup: 5);
+
+        // ---------------------------------------------------------------- the tank
+        // One tank, five parking spots. Each objective moves it forward with the attackers, which
+        // is exactly how the original keeps it from being stranded behind a door it just opened.
+        b.AddVehicle(VehicleKind.IonTank, new Vector3(-6f, Floor + 2.2f, 0f), 90f, Team.Red, 45f);
+
+        // ---------------------------------------------------------------- spawns
+        for (int i = 0; i < 6; i++)
+            b.Spawn(new Vector3(-176f + i * 4f, Ice + 0.2f, -18f + i * 7f), 90f, Team.Red, 0);
+        for (int i = 0; i < 4; i++)
+            b.Spawn(new Vector3(-76f + i * 3f, Floor + 0.2f, -30f + i * 6f), 90f, Team.Red, 1);
+        for (int i = 0; i < 4; i++)
+            b.Spawn(new Vector3(-12f + i * 3f, Floor + 0.2f, -20f + i * 6f), 90f, Team.Red, 2);
+        for (int i = 0; i < 4; i++)
+            b.Spawn(new Vector3(40f + i * 4f, Floor + 0.6f, -14f + i * 5f), 90f, Team.Red, 3);
+        for (int i = 0; i < 4; i++)
+            b.Spawn(new Vector3(92f + i * 4f, Floor + 0.6f, -16f + i * 6f), 90f, Team.Red, 4);
+        for (int i = 0; i < 4; i++)
+            b.Spawn(new Vector3(130f + i * 4f, Floor + 0.6f, -16f + i * 6f), 90f, Team.Red, 5);
+
+        for (int i = 0; i < 5; i++)
+            b.Spawn(new Vector3(-46f + i * 4f, Floor + 0.2f, 22f - i * 6f), -90f, Team.Blue, 0);
+        for (int i = 0; i < 4; i++)
+            b.Spawn(new Vector3(100f + i * 5f, Upper + 0.4f, -12f + i * 8f), -90f, Team.Blue, 1);
+
+        // ---------------------------------------------------------------- pickups
+        b.Weapon(new Vector3(-120f, Ice + 0.7f, 0f), WeaponKind.SniperRifle);
+        b.Weapon(new Vector3(-70f, Floor + 0.7f, -26f), WeaponKind.FlakCannon);
+        b.Weapon(new Vector3(-70f, Floor + 0.7f, 26f), WeaponKind.Minigun);
+        b.Weapon(new Vector3(-40f, Floor + 0.7f, 14f), WeaponKind.RocketLauncher);
+        b.Weapon(new Vector3(4f, Floor + 0.7f, -16f), WeaponKind.ShockRifle);
+        b.Weapon(new Vector3(56f, Floor + 1.1f, 0f), WeaponKind.RocketLauncher);
+        b.Weapon(new Vector3(98f, Floor + 1.1f, -14f), WeaponKind.FlakCannon);
+        b.Weapon(new Vector3(140f, Floor + 1.1f, 12f), WeaponKind.SniperRifle);
+        b.Item(new Vector3(-52f, Floor + 0.7f, -20f), PickupKind.BodyArmor);
+        b.Item(new Vector3(-52f, Floor + 0.7f, 20f), PickupKind.HealthPack);
+        b.Item(new Vector3(60f, Floor + 1.0f, 12f), PickupKind.ThighPads);
+        b.Item(new Vector3(104f, Upper + 0.6f, 0f), PickupKind.ShieldBelt);
+        b.Item(new Vector3(144f, Floor + 1.0f, -12f), PickupKind.SuperHealth);
+        b.Ammo(new Vector3(-66f, Floor + 0.7f, 0f), AmmoKind.Rockets);
+        b.Ammo(new Vector3(34f, Floor + 1.0f, 8f), AmmoKind.FlakShells);
+        b.Ammo(new Vector3(126f, Floor + 1.0f, -8f), AmmoKind.Bullets);
+
+        // ---------------------------------------------------------------- scenery
+        // Ice ridges out on the lake and service blocks along the apron. Without these the whole
+        // station reads as slabs on a white plate; the ridges also give the crossing some cover.
+        for (int i = 0; i < 34; i++)
+        {
+            float px = rng.Range(-186f, 184f);
+            float pz = rng.Range(-64f, 64f);
+            bool lake = px is > -150f and < -92f;
+            if (MathF.Abs(pz) < 22f && px > -100f) continue;          // keep the fighting lane clear
+            if (px is > -86f and < 170f && MathF.Abs(pz) < 48f && i % 2 == 0) continue;
+            float sz = rng.Range(3f, 7f);
+            float baseY = lake ? Ice - 1.6f : px < -150f ? Ice : Floor;
+            if (!lake && i % 3 == 0)
+            {
+                b.Solid(new Vector3(px - sz, baseY, pz - sz),
+                    new Vector3(px + sz, baseY + rng.Range(5f, 9f), pz + sz), MatId.TechPanelDark, true, 0.7f);
+                b.Solid(new Vector3(px - sz - 0.8f, baseY + rng.Range(5f, 9f), pz - sz - 0.8f),
+                    new Vector3(px + sz + 0.8f, baseY + 9.8f, pz + sz + 0.8f), MatId.MetalGrate, true, 0.9f);
+                continue;
+            }
+            b.Solid(new Vector3(px - sz, baseY, pz - sz),
+                new Vector3(px + sz, baseY + rng.Range(2.5f, 7f), pz + sz), MatId.Rock, true, 0.6f);
+        }
+
+        return b.Build(gl);
+    }
 }

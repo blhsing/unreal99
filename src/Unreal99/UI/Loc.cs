@@ -112,6 +112,8 @@ public static class Loc
     public const string ModeOnslaughtDesc = "沿著節點鏈推進，佔下與敵方核心相連的節點才能攻擊核心。";
     public const string ModeAssault = "突擊模式";
     public const string ModeAssaultDesc = "一隊依序攻下目標，另一隊防守；攻守交換後比誰更快。";
+    public const string ModeWarfare = "戰爭模式";
+    public const string ModeWarfareDesc = "節點戰的進化版：支援節點不必連線就能搶，能量球可瞬間佔領節點，人人配有氣墊滑板。";
 
     public const string MapTorlan = "ONS-托蘭";
     public const string MapTorlanDesc = "乾涸的叢林邊緣，五個節點連成一線，中央通訊塔俯瞰整片戰場。";
@@ -121,6 +123,37 @@ public static class Loc
     public const string MapConvoyDesc = "橫越沙漠的運輸車隊，攻方從尾車逐節推進，直到取出前方的飛彈。";
     public const string MapFrigate = "AS-護衛艦";
     public const string MapFrigateDesc = "停泊中的復原軍艦；木橋與水下通道兩條路線，通往艦橋控制室。";
+    public const string MapGlacier = "AS-冰河研究站";
+    public const string MapGlacierDesc = "封凍的伊邪那岐研究站；攻方奪下離子電漿戰車，一路轟開水壩與爆破門逃出。";
+
+    // ---------------------------------------------------------------- warfare maps
+    public const string MapWarTorlan = "WAR-托蘭三角洲";
+    public const string MapWarTorlanDesc = "托蘭的戰爭模式改版：七個節點、東西兩座支援節點，中央橋墩藏著一架蟬式。";
+    public const string MapWarTorlanNecris = "WAR-托蘭．死靈";
+    public const string MapWarTorlanNecrisDesc = "同一片三角洲，藍隊改用死靈載具；每個節點都同時擺著兩個陣營的對應車種。";
+    public const string MapSerenity = "WAR-寧謐林地";
+    public const string MapSerenityDesc = "森林中的補給站，三節點一直線；中央礦坑倒數節點會生出利維坦。";
+    public const string MapAvalanche = "WAR-雪崩山道";
+    public const string MapAvalancheDesc = "中空雪山隔開兩座基地，山腹三個節點；未連線的節點會倒數並炸毀敵方主節點。";
+    public const string MapOnyxCoast = "WAR-黑曜海岸";
+    public const string MapOnyxCoastDesc = "冰封海岸的阿克森對死靈；橋樑控制節點決定利維坦過不過得去。";
+    public const string MapIslander = "WAR-群島通訊站";
+    public const string MapIslanderDesc = "攻守失衡的群島：西側輕裝快攻，東側要塞死守，空中節點通往救世主核彈。";
+
+    public const string NodeRedPrime = "紅隊主節點";
+    public const string NodeBluePrime = "藍隊主節點";
+    public const string NodeNorthTank = "北側戰車節點";
+    public const string NodeSouthTank = "南側戰車節點";
+    public const string NodeEastRoad = "東側道路節點";
+    public const string NodeWestRoad = "西側道路節點";
+    public const string NodeCenterRoad = "中央橋墩節點";
+    public const string NodeMine = "礦坑倒數節點";
+    public const string NodeCentre = "山腹中央節點";
+    public const string NodeEast = "山腹東側節點";
+    public const string NodeWest = "山腹西側節點";
+    public const string NodeBridgeControl = "橋樑控制節點";
+    public const string NodeAir = "空中節點";
+    public const string NodePrime = "前線主節點";
 
     public const string NodeRedCore = "紅隊核心";
     public const string NodeBlueCore = "藍隊核心";
@@ -142,6 +175,14 @@ public static class Loc
     public const string ObjTakeMissile = "取出飛彈";
     public const string ObjCompressor = "摧毀液壓壓縮機";
     public const string ObjFireCannons = "啟動艦砲";
+
+    public const string ObjBreachBase = "突破研究站大門";
+    public const string ObjIonCore = "啟動離子核心";
+    public const string ObjSeizeTank = "奪取離子電漿戰車";
+    public const string ObjAccessDoors = "轟開通道閘門";
+    public const string ObjSecurityGate = "開啟安全閘門";
+    public const string ObjPrimaryDam = "破壞主水壩控制";
+    public const string ObjBlastDoor = "炸開最後爆破門";
 
     public const string OnsCoreShielded = "核心受節點保護";
     public const string OnsCoreVulnerable = "核心暴露！";
@@ -174,6 +215,27 @@ public static class Loc
     public static string AsNextObjective(string objective) => $"下一個目標：{objective}";
     public static string OnsNodeCaptured(string who, string node) => $"{who} 建立了 {node}";
     public static string OnsNodeLost(string node) => $"{node} 已失守";
+
+    // ---------------------------------------------------------------- warfare
+    public const string WarOrb = "能量球";
+    public const string WarOrbTaken = "已取得能量球";
+    public const string WarOrbDropped = "能量球掉落";
+    public const string WarOrbReturned = "能量球已歸位";
+    public const string WarOrbProtecting = "能量球正在保護節點";
+    public const string WarOrbBlocked = "節點受敵方能量球保護";
+    public const string WarPrimeNode = "主節點";
+    public const string WarSupportNode = "支援節點";
+    public const string WarCountdownNode = "倒數節點";
+    public const string WarVehicleNode = "載具節點";
+    public const string WarHoverboard = "氣墊滑板";
+    public const string WarHoverboardTowing = "拖曳中";
+    public const string WarNoFireOnBoard = "滑板上無法開火";
+    public static string WarOrbCarrier(string who) => $"{who} 持有能量球";
+    public static string WarEnemyOrbIncoming(string node) => $"敵方能量球逼近 {node}！";
+    public static string WarOrbCaptured(string who, string node) => $"{who} 以能量球奪下 {node}";
+    public static string WarCountdownStarted(string node, int seconds) => $"{node} 倒數 {seconds} 秒";
+    public static string WarCountdownDone(string node) => $"{node} 倒數完成";
+    public static string WarVehicleReady(string vehicle) => $"{vehicle} 已就緒";
 
     // ---------------------------------------------------------------- vehicles
     public const string VehScorpion = "蠍式突擊車";
@@ -539,6 +601,7 @@ public static class Loc
         GameModeKind.Domination => ModeDomination,
         GameModeKind.Onslaught => ModeOnslaught,
         GameModeKind.Assault => ModeAssault,
+        GameModeKind.Warfare => ModeWarfare,
         _ => ModeDeathmatch,
     };
 
@@ -552,6 +615,7 @@ public static class Loc
         GameModeKind.Domination => ModeDominationDesc,
         GameModeKind.Onslaught => ModeOnslaughtDesc,
         GameModeKind.Assault => ModeAssaultDesc,
+        GameModeKind.Warfare => ModeWarfareDesc,
         _ => ModeDeathmatchDesc,
     };
 
@@ -593,4 +657,5 @@ public enum GameModeKind
     Domination,
     Onslaught,
     Assault,
+    Warfare,
 }

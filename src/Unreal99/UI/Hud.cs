@@ -956,8 +956,19 @@ public sealed class Hud
             string status = node.IsCore || node.IsActive
                 ? (node.Team == Team.None ? Loc.DomNeutral : GameTypes.TeamName(node.Team))
                 : $"{(int)(node.Built * 100f)}%";
+            // A running auxiliary clock replaces the owner line: the seconds left are the only
+            // thing anyone cares about while a Leviathan or a prime-node strike is counting down.
+            if (node.HasCountdown && node.CountdownRemaining >= 0f)
+                status = $"{status} · {(int)MathF.Ceiling(node.CountdownRemaining)}s";
+            else if (node.IsAuxiliary && !node.IsActive)
+                status = $"{status} · {Loc.WarSupportNode}";
             ui.Text(FaceRegular, statusFont, x + MathF.Max(7f, 9f * s), y + 24f, status,
                 UiRenderer.Rgba(col * 1.25f, 0.98f));
+            // An orb standing guard is why a node cannot be shot; say so rather than letting the
+            // player fire into it and conclude the game is broken.
+            if (node.OrbShield != Team.None)
+                ui.RectOutline(x - 2f, y - 2f, cardWidth + 4f, cardHeight + 4f, 2.2f * s,
+                    UiRenderer.Rgba(GameTypes.TeamColor(node.OrbShield) * 1.6f, 0.95f));
 
             // Health while it is standing, build progress while it is going up.
             float fill = node.IsActive
@@ -972,12 +983,25 @@ public sealed class Hud
         bool ourCoreExposed = world.Onslaught.CoreVulnerable(pawn.Team);
         Team enemy = pawn.Team == Team.Red ? Team.Blue : Team.Red;
         bool theirCoreExposed = world.Onslaught.CoreVulnerable(enemy);
+        // In Warfare the orb outranks the core state: who is holding it decides the next minute.
+        WarfareOrb ourOrb = world.Mode.Kind == GameModeKind.Warfare
+            ? world.Warfare.OrbOf(pawn.Team) : null;
+        WarfareOrb theirOrb = world.Mode.Kind == GameModeKind.Warfare
+            ? world.Warfare.OrbOf(enemy) : null;
+        Pawn ourCarrier = ourOrb != null ? world.FindPawn(ourOrb.CarrierId) : null;
+
         string headline = world.Mode.State == MatchState.Overtime ? Loc.OnsCoreDrain
+            : theirOrb is { Held: true } && world.FindPawn(theirOrb.CarrierId) is { } them
+                ? Loc.WarOrbCarrier(them.Name)
             : ourCoreExposed ? Loc.OnsOurCoreExposed
+            : ourCarrier != null ? Loc.WarOrbCarrier(ourCarrier.Name)
+            : ourOrb is { Dropped: true } ? Loc.WarOrbDropped
             : theirCoreExposed ? Loc.OnsEnemyCoreExposed
             : Loc.OnsCoreShielded;
         Vector3 headlineCol = world.Mode.State == MatchState.Overtime ? new Vector3(1f, 0.55f, 0.25f)
+            : theirOrb is { Held: true } ? GameTypes.TeamColor(enemy) * 1.3f
             : ourCoreExposed ? new Vector3(1f, 0.45f, 0.3f)
+            : ourCarrier != null ? GameTypes.TeamColor(pawn.Team) * 1.3f
             : theirCoreExposed ? new Vector3(0.5f, 1f, 0.55f)
             : new Vector3(0.72f, 0.80f, 0.92f);
         ui.Text(FaceRegular, LayoutFont(14f * s), width * 0.5f, y - 28f,
@@ -1094,7 +1118,7 @@ public sealed class Hud
             DrawDominationPoints(ui, world, pawn, width, height, s);
             return;
         }
-        if (world.Mode.Kind == GameModeKind.Onslaught)
+        if (world.NodeNetworkMode)
         {
             DrawOnslaughtNodes(ui, world, pawn, width, height, s);
             return;
@@ -1263,7 +1287,7 @@ public sealed class Hud
             {
                 GameModeKind.CaptureTheFlag => Loc.ScoreCaptures,
                 GameModeKind.Domination => Loc.ScoreDomCaptures,
-                GameModeKind.Onslaught => Loc.ScoreNodes,
+                GameModeKind.Onslaught or GameModeKind.Warfare => Loc.ScoreNodes,
                 GameModeKind.Assault => Loc.ScoreObjectives,
                 _ => Loc.ScoreRatio,
             },
@@ -1296,7 +1320,7 @@ public sealed class Hud
                 UiRenderer.Rgba(0.75f, 0.85f, 0.95f), TextAlign.Right);
 
             string extra = mode.Kind is GameModeKind.CaptureTheFlag or GameModeKind.Domination
-                    or GameModeKind.Onslaught or GameModeKind.Assault
+                    or GameModeKind.Onslaught or GameModeKind.Assault or GameModeKind.Warfare
                 ? p.Captures.ToString()
                 : $"{(p.Deaths > 0 ? p.Frags / (float)p.Deaths : p.Frags):0.0}";
             ui.Text(FaceRegular, 17f * s, colExtra, ry + 1f * s, extra,

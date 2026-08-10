@@ -1,6 +1,7 @@
 using System.Numerics;
 using Unreal99.Core;
 using Unreal99.UI;
+using Unreal99.World;
 
 namespace Unreal99.Game;
 
@@ -28,7 +29,24 @@ public sealed class PowerNode
     public int BuilderPawnId = -1;
     public int[] Links = [];
 
+    // ------------------------------------------------------------ warfare only
+    public NodeRole Role = NodeRole.Link;
+    public float CountdownSeconds;
+    public float CoreDamageFraction;
+    public VehicleKind RewardVehicle = VehicleKind.Count;
+    public Vector3 RewardPosition;
+    public float RewardYaw;
+    /// <summary>Seconds left on a running clock; negative when no clock is running.</summary>
+    public float CountdownRemaining = -1f;
+    /// <summary>Set while an orb carrier stands close enough to shield this node.</summary>
+    public Team OrbShield = Team.None;
+    /// <summary>True while a node links directly into a core, which makes it that core's prime.</summary>
+    public bool IsPrime;
+
     public bool IsActive => IsCore || (Team != Team.None && Built >= 1f);
+    /// <summary>Auxiliary nodes sit outside the chain, so the link rule does not apply to them.</summary>
+    public bool IsAuxiliary => !IsCore && Role != NodeRole.Link;
+    public bool HasCountdown => Role is NodeRole.Countdown or NodeRole.Vehicle;
 }
 
 public sealed class OnslaughtState
@@ -41,10 +59,19 @@ public sealed class OnslaughtState
     public const float BuildSeconds = 6f;
     public const float LinkBuildEnergy = 700f;
 
+    /// <summary>Warfare's countdown nodes run 60 seconds, per the original.</summary>
+    public const float DefaultCountdownSeconds = 60f;
+
     public readonly List<PowerNode> Nodes = new();
     public int RedCore = -1;
     public int BlueCore = -1;
     public bool SidesSwapped { get; private set; }
+
+    /// <summary>
+    /// Warfare relaxes two Onslaught rules: auxiliary nodes need no link to be taken, and a team's
+    /// own prime node can always be attacked, so a lost prime is never permanently out of reach.
+    /// </summary>
+    public bool Warfare;
 
     public PowerNode CoreOf(Team t)
     {
@@ -60,13 +87,40 @@ public sealed class OnslaughtState
     public bool IsReachable(int index, Team by)
     {
         if (index < 0 || index >= Nodes.Count || by == Team.None) return false;
-        foreach (int link in Nodes[index].Links)
+        PowerNode node = Nodes[index];
+        // Warfare's auxiliary nodes are deliberately outside the chain. Their whole purpose is to
+        // give a team that is losing the link war somewhere to go, so gating them on a link would
+        // remove the comeback the mode is built around.
+        if (Warfare && node.IsAuxiliary) return true;
+        // A team's prime node is never shielded, so it stays a legal target however far back the
+        // attacker's own line has been pushed. Only an orb can protect it.
+        if (Warfare && node.IsPrime && node.Team != by) return true;
+        foreach (int link in node.Links)
         {
             if (link < 0 || link >= Nodes.Count) continue;
             var neighbour = Nodes[link];
             if (neighbour.Team == by && neighbour.IsActive) return true;
         }
         return false;
+    }
+
+    /// <summary>Marks every node wired straight into a core as that core's prime node.</summary>
+    private void MarkPrimeNodes()
+    {
+        foreach (var node in Nodes) node.IsPrime = false;
+        for (int i = 0; i < Nodes.Count; i++)
+        {
+            if (!Nodes[i].IsCore) continue;
+            foreach (int link in Nodes[i].Links)
+                if (link >= 0 && link < Nodes.Count && !Nodes[link].IsCore) Nodes[link].IsPrime = true;
+        }
+        // Links are declared one way in some maps; a node that lists a core is prime just the same.
+        for (int i = 0; i < Nodes.Count; i++)
+        {
+            if (Nodes[i].IsCore) continue;
+            foreach (int link in Nodes[i].Links)
+                if (link >= 0 && link < Nodes.Count && Nodes[link].IsCore) Nodes[i].IsPrime = true;
+        }
     }
 
     /// <summary>A core can only be hurt while an enemy holds a node wired directly into it.</summary>
@@ -89,6 +143,35 @@ public sealed class OnslaughtState
         int n = 0;
         foreach (var node in Nodes) if (!node.IsCore && node.Team == t && node.IsActive) n++;
         return n;
+    }
+
+    /// <summary>
+    /// Advances every running auxiliary clock. Returns the node that just finished, if any, so the
+    /// caller can apply the payout — core damage for a countdown node, a vehicle for a vehicle
+    /// node — with the world state it needs and this class does not have.
+    /// </summary>
+    public PowerNode TickCountdowns(float dt)
+    {
+        PowerNode finished = null;
+        foreach (var node in Nodes)
+        {
+            if (!node.HasCountdown) continue;
+            if (node.Team == Team.None || !node.IsActive)
+            {
+                // Losing the node loses the progress: the clock is what the fight is over.
+                node.CountdownRemaining = -1f;
+                continue;
+            }
+            if (node.CountdownRemaining < 0f)
+            {
+                node.CountdownRemaining = node.CountdownSeconds > 0f
+                    ? node.CountdownSeconds : DefaultCountdownSeconds;
+                continue;
+            }
+            node.CountdownRemaining = MathF.Max(0f, node.CountdownRemaining - dt);
+            if (node.CountdownRemaining <= 0f && finished == null) finished = node;
+        }
+        return finished;
     }
 
     /// <summary>
@@ -153,6 +236,12 @@ public sealed class OnslaughtState
                 Team = def.IsCore ? def.Team : Team.None,
                 MaxHealth = def.IsCore ? CoreHealth : NodeHealth,
                 Links = def.Links,
+                Role = def.Role,
+                CountdownSeconds = def.CountdownSeconds,
+                CoreDamageFraction = def.CoreDamageFraction,
+                RewardVehicle = def.RewardVehicle,
+                RewardPosition = def.RewardPosition,
+                RewardYaw = def.RewardYaw,
             };
             node.Health = node.MaxHealth;
             node.Built = def.IsCore ? 1f : 0f;
@@ -160,6 +249,30 @@ public sealed class OnslaughtState
             if (def.IsCore && def.Team == Team.Red) RedCore = Nodes.Count - 1;
             if (def.IsCore && def.Team == Team.Blue) BlueCore = Nodes.Count - 1;
         }
+        MarkPrimeNodes();
+    }
+
+    /// <summary>
+    /// The orb's instant capture. Unlike building, this ignores the link chain entirely and takes
+    /// the node at full health — it is the mechanic that keeps a team from being locked out once
+    /// its front line collapses. Returns false only when the node is already ours or orb-shielded.
+    /// </summary>
+    public bool OrbCapture(int index, Team by, int pawnId, out PowerNode node)
+    {
+        node = null;
+        if (index < 0 || index >= Nodes.Count || by == Team.None) return false;
+        node = Nodes[index];
+        if (node.IsCore) return false;
+        if (node.Team == by && node.IsActive) return false;
+        // A node already held under an enemy orb cannot be flipped by ours.
+        if (node.OrbShield != Team.None && node.OrbShield != by) return false;
+        node.Team = by;
+        node.Built = 1f;
+        node.BuildingFor = Team.None;
+        node.BuilderPawnId = pawnId;
+        node.Health = node.MaxHealth;
+        node.CountdownRemaining = -1f;
+        return true;
     }
 
     /// <summary>
@@ -189,7 +302,10 @@ public sealed class OnslaughtState
                 node.BuilderPawnId = -1;
             }
             node.Health = node.MaxHealth;
+            node.CountdownRemaining = -1f;
+            node.OrbShield = Team.None;
         }
+        MarkPrimeNodes();
     }
 
     /// <summary>
@@ -270,6 +386,8 @@ public sealed class OnslaughtState
         if (index < 0 || index >= Nodes.Count || by == Team.None || amount <= 0f) return NodeEvent.None;
         node = Nodes[index];
         if (node.Team == by) return NodeEvent.None;
+        // An orb carrier standing by a node makes it untouchable until they die or walk away.
+        if (node.OrbShield != Team.None && node.OrbShield != by) return NodeEvent.Blocked;
 
         if (node.IsCore)
         {

@@ -1,6 +1,6 @@
 # 原作地圖對照表
 
-本檔記錄二十五座競技場所依據的原作資料，來源為 The Liandri Archives
+本檔記錄三十二座競技場所依據的原作資料，來源為 The Liandri Archives 與 Unreal Wiki
 （<https://unrealarchive.org/wikis/the-liandri-archives/>）。每次調整佈局或道具配置前先看這裡，
 不要憑印象——先前憑印象重建對峙世界，塔樓結構與上下樓方式兩件事都弄錯了。
 
@@ -115,6 +115,54 @@ AS-Mothership、AS-RobotFactory。
 [AS-Frigate](https://unrealarchive.org/wikis/the-liandri-archives/AS-Frigate.html)、
 [UT2004 地圖總表](https://unrealarchive.org/wikis/the-liandri-archives/Unreal_Tournament_2004.html)
 
+## 戰爭模式（Warfare，UT3）規則
+
+攻堅模式的續作，共用能量核心／能量節點的骨架，差別在三處：
+
+- **能量球（Orb）**：每隊一顆，在基地生成，隨隊伍推進會從前線節點的生成點重新出現。帶球走進
+  中立或敵方節點，該節點**立即變成己方所有且滿血**；站在己方節點旁則持續治療它並使其**完全
+  無法被攻擊**。持球者頭上有直達天際的光柱，附近敵人一定看得見。**不能搭載具、不能用傳送器**
+  （會掉球），但**可以踩滑板**。掉落後倒數 18 秒，隊友碰到即撿回；敵人可「使用」它強制歸位，
+  代價是自身 100 點生命（護甲可吸收）。
+- **支援節點（Support Node）**：不在連結鏈上，**不需連線即可佔領**。其中兩種特別：
+  **倒數節點**佔滿 60 秒後扣除敵方核心約 20–25%（WAR-Avalanche 改為摧毀敵方主節點）；
+  **載具節點**倒數結束時交付一台超級載具（WAR-Serenity 的利維坦、WAR-Dusk 的蟬式），且場上同
+  時只能存在一台。另有橋樑節點、傷害節點與暴露核心節點。
+- **主節點（Prime Node）**：與核心直接相連的節點。**敵方主節點永遠不受連線規則保護**，只有
+  能量球能護住它——這正是攻堅模式一旦前線崩潰就僵持、而戰爭模式不會的原因。
+- 計分：正規時間內摧毀核心得 2 分，延長賽 1 分。延長賽兩隊核心同時流失，持有節點較多的一方
+  流失較慢，持有全部節點則完全不流失。
+
+規則依據：[The Liandri Archives / Unreal Wiki — Warfare](https://unreal.fandom.com/wiki/Warfare)、
+[Unreal Wiki — Orb](https://unreal.fandom.com/wiki/Orb)
+
+### 本作採用的六張戰爭地圖
+
+一律採用各圖的 **Regular link setup**，因為那是原作預設、也是電腦戰術調校的基準。
+
+| 地圖 | 連結設定 | 載具配置 |
+| --- | --- | --- |
+| **WAR-Torlan** | 核心→各自主節點，兩座主節點皆連往東、西道路節點；南北戰車節點與中央橋墩節點為支援節點 | Manta ×8、Raptor ×2、Scorpion ×4、Hellbender ×2、Goliath ×2（戰車節點）、**Cicada ×1**（中央橋墩上層）、Hellfire SPMA ×2（東西道路節點） |
+| **WAR-Torlan Necris** | 同上 | 紅方 Axon：Manta、Raptor、Scorpion、Hellbender、Goliath、SPMA／藍方 Necris：**Viper、Fury、Scavenger、Nemesis、Nightshade、Darkwalker**，兩陣營在同一個節點上一一對應 |
+| **WAR-Serenity** | 藍核心→藍主節點→紅主節點→紅核心一直線；礦坑節點為獨立的**載具節點** | Manta ×4、Scorpion ×8、Hellbender ×3（其一在礦坑，倒數結束即銷毀）、Goliath ×2、**Leviathan**（倒數結束交付，全場僅一台） |
+| **WAR-Avalanche** | 核心→各自主節點→中央節點；東、西節點為**倒數節點**，守滿 60 秒摧毀敵方主節點 | Manta ×2、Scorpion ×2、Hellbender ×2、Goliath ×1（西節點）／Viper ×6、Nemesis ×1、**Scavenger ×2**（中央）、Nightshade ×1、Darkwalker ×1（東節點） |
+| **WAR-OnyxCoast** | 藍核心→北主節點→南主節點→紅核心；橋樑控制節點為支援節點 | 紅：**Leviathan ×1**、Manta ×2／藍：Viper ×2、**Fury ×1**、Darkwalker ×2 |
+| **WAR-Islander** | 兩座核心皆連往同一個西側主節點；空中節點為支援節點 | Raptor ×2（空中節點）、Hellbender ×1、Goliath ×2、**Paladin ×1** |
+
+資料來源：[WAR-Torlan](https://unreal.fandom.com/wiki/WAR-Torlan)、
+[WAR-Torlan Necris](https://unreal.fandom.com/wiki/WAR-Torlan_Necris)、
+[WAR-Serenity](https://unreal.fandom.com/wiki/WAR-Serenity)、
+[WAR-Avalanche](https://unreal.fandom.com/wiki/WAR-Avalanche)、
+[WAR-OnyxCoast](https://unreal.fandom.com/wiki/WAR-OnyxCoast)、
+[WAR-Islander](https://unreal.fandom.com/wiki/WAR-Islander)
+
+**AS-Glacier**（UT2004，離子電漿戰車唯一的原生地圖）的目標序列：滲透基地（渡過冰湖、破門）→
+〔選用〕升起橋樑 → 啟動兩座離子核心開關 → 奪取離子電漿戰車 → 轟開通道閘門 → 開啟安全閘門 →
+關閉主水壩 → 轟開倉庫門 → 關閉次水壩 → 炸開爆破門。戰車只有一台，隨檢查點逐段前移。
+
+資料來源：[AS-Glacier](https://unreal.fandom.com/wiki/AS-Glacier)、
+[Ion Plasma Tank](https://unreal.fandom.com/wiki/Ion_Plasma_Tank)
+
 ## 載具一覽
 
 UT2004（Editor's Choice 追加者標註 EC）：
@@ -160,7 +208,7 @@ UT2004 的太空戰特殊關卡，與攻堅／突擊無關，因此未收錄。
 - **Leviathan 五個座位**，且離子砲只有在架設完成後才可用，架設期間完全不能移動。
 - **Paladin 的護盾可無限維持**，因此它是唯一能替隊友擋下正面火力的載具。
 - **Viper 可自爆**、**Nightshade 靜止時隱形**——兩者都是狀態而非攻擊，所以做成次要鍵的切換。
-- **Hoverboard 無武裝且不輾壓**，是純交通工具。
+- **Hoverboard 無武裝且不輾壓**，是純交通工具；在 UT3 它不放在地圖上，而是每位玩家隨身攜帶，R 展開／收起。中彈即摔、落地會吸收部分衝擊、次要開火勾住友軍載具被拖行、**可以帶著能量球騎**。
 
 另外，原作多數攻堅地圖在基地放有**能量砲塔**（固定式，非載具）。本作尚未實作砲塔實體，
 ONS-原始林的基地因此少了這一項。

@@ -162,11 +162,21 @@ public sealed class GameWorld
     /// <summary>The Assault objective sequence and round bookkeeping. Empty on every other mode.</summary>
     public readonly AssaultState Assault = new();
 
+    /// <summary>Warfare's orbs and auxiliary-node payouts. Idle on every other mode.</summary>
+    public readonly WarfareState Warfare = new();
+
+    /// <summary>True for the two modes built on the power-node network.</summary>
+    public bool NodeNetworkMode => Mode.Kind is GameModeKind.Onslaught or GameModeKind.Warfare;
+
     public readonly List<Vehicle> Vehicles = new(16);
     /// <summary>Behavioral-test telemetry accumulated through production gameplay paths.</summary>
     public int VehicleBoardings { get; private set; }
     public readonly HashSet<VehicleKind> VehicleKindsDriven = new();
     public int OnslaughtNodeCaptures { get; private set; }
+    public int WarfareOrbPickups { get; private set; }
+    public int WarfareOrbCaptures { get; private set; }
+    public int HoverboardRides { get; private set; }
+    public int HoverboardTows { get; private set; }
     public int AssaultObjectiveCompletions { get; private set; }
     public int AssaultRoundsCompleted { get; private set; }
     public int NextVehicleId = 1;
@@ -327,6 +337,10 @@ public sealed class GameWorld
         VehicleBoardings = 0;
         VehicleKindsDriven.Clear();
         OnslaughtNodeCaptures = 0;
+        WarfareOrbPickups = 0;
+        WarfareOrbCaptures = 0;
+        HoverboardRides = 0;
+        HoverboardTows = 0;
         AssaultObjectiveCompletions = 0;
         AssaultRoundsCompleted = 0;
 
@@ -344,15 +358,18 @@ public sealed class GameWorld
             });
         }
 
+        Onslaught.Warfare = Mode.Kind == GameModeKind.Warfare;
         Onslaught.Reset(level);
         Assault.Reset(level);
+        Warfare.Reset(level, Onslaught);
 
         Vehicles.Clear();
         NextVehicleId = 1;
-        // Vehicles belong to Onslaught and Assault only. The same arena loaded as a deathmatch
-        // is meant to be a foot fight, and a Goliath in one would not be a nod to the original —
-        // it would be a different game.
-        bool vehiclesAllowed = Mode.Kind is GameModeKind.Onslaught or GameModeKind.Assault;
+        // Vehicles belong to the three vehicle gametypes only. The same arena loaded as a
+        // deathmatch is meant to be a foot fight, and a Goliath in one would not be a nod to the
+        // original — it would be a different game.
+        bool vehiclesAllowed = Mode.Kind is GameModeKind.Onslaught or GameModeKind.Assault
+            or GameModeKind.Warfare;
         foreach (var vs in vehiclesAllowed ? level.VehicleSpawns : [])
         {
             var v = new Vehicle { Id = NextVehicleId++ };
@@ -361,14 +378,19 @@ public sealed class GameWorld
             v.AuthoredSpawnTeam = vs.Team;
             v.SpawnTeam = vs.Team;
             v.Team = vs.Team;
-            if (Mode.Kind == GameModeKind.Onslaught)
+            if (NodeNetworkMode)
             {
                 v.SpawnNodeIndex = NearestPowerNode(vs.Position, 48f);
                 if (v.SpawnNodeIndex >= 0)
                 {
                     PowerNode node = Onslaught.Nodes[v.SpawnNodeIndex];
-                    v.SpawnTeam = node.Team;
-                    v.Team = node.Team;
+                    // Warfare pads are authored per team — Torlan Necris parks an Axon and a
+                    // Necris vehicle at the same node — so an authored team wins over the node's.
+                    if (vs.Team == Team.None)
+                    {
+                        v.SpawnTeam = node.Team;
+                        v.Team = node.Team;
+                    }
                     if (!node.IsActive)
                     {
                         v.Alive = false;
@@ -463,7 +485,7 @@ public sealed class GameWorld
             if (Assault.Round == 2) spawnTeam = Opposite(spawnTeam);
         }
 
-        SpawnPoint spawn = Mode.Kind == GameModeKind.Onslaught
+        SpawnPoint spawn = NodeNetworkMode
             ? PickOnslaughtSpawn(pawn.Team, _spawnAvoid, 9f)
             : Level.PickSpawn(Rng, spawnTeam, _spawnAvoid, 9f, assaultGroup);
         Vector3 pos = spawn.Position + new Vector3(0, 0.06f, 0);
@@ -603,11 +625,16 @@ public sealed class GameWorld
             {
                 var boardable = VehicleToBoard(pawn);
                 if (boardable != null && EnterVehicle(pawn, boardable)) continue;
+                // Nothing to board: use is also how you force a dropped enemy orb to respawn.
+                if (SacrificeToEnemyOrb(pawn)) continue;
             }
+
+            UpdateHoverboard(pawn, input, dt);
 
             var events = pawn.Move(Level, input, dt);
             HandleMoveEvents(pawn, events, dt);
             if (!pawn.Alive) continue;
+            if (events.KnockedOffBoard) KnockOffHoverboard(pawn, stun: false);
 
             HandleWeapons(pawn, input, dt);
             HandlePickups(pawn);
@@ -718,6 +745,18 @@ public sealed class GameWorld
 
     private void HandleWeapons(Pawn pawn, in PawnInput input, float dt)
     {
+        // Hands are on the board. Alt-fire is the grapple and primary does nothing at all — the
+        // rider's only options are to keep going or step off, which is the point of the trade.
+        if (pawn.OnHoverboard)
+        {
+            pawn.SpinUp = 0f;
+            pawn.ZoomFov = 0f;
+            pawn.FiringBeam = false;
+            pawn.ChargingPrimary = false;
+            pawn.UpdateWeaponTimers(dt);
+            return;
+        }
+
         if (input.WeaponSelect >= 0 && input.WeaponSelect < (int)WeaponKind.Count)
             pawn.RequestWeapon((WeaponKind)input.WeaponSelect);
         else if (input.WeaponCycle != 0)
@@ -1395,7 +1434,7 @@ public sealed class GameWorld
             return;
         }
 
-        if (Mode.Kind != GameModeKind.Onslaught) return;
+        if (!NodeNetworkMode) return;
         int index = Onslaught.NearestWithin(center, radius + 4f);
         if (index < 0) return;
         float nodeDist = MathF.Max(0f, Vector3.Distance(center, Onslaught.Nodes[index].Position) - 4f);
@@ -1424,6 +1463,12 @@ public sealed class GameWorld
         float appliedDamage = MathF.Max(0f,
             healthBefore - target.Health + armorBefore - target.Armor);
         target.LastDamageTime = Time;
+        // Riding the board means giving up the ability to take a hit. Anything past a graze puts
+        // the rider on the floor for a moment, which is what stops it being a free speed boost in
+        // a firefight. Fall damage is handled where the landing is, so it does not double-stun.
+        if (target.OnHoverboard && type != DamageType.Fall
+            && appliedDamage >= Physics.HoverboardKnockoffDamage)
+            KnockOffHoverboard(target, stun: true);
         if (attacker != null && attacker != target) target.LastAttackerId = attacker.Id;
 
         if (target.PlayerIndex >= 0)
@@ -1490,6 +1535,9 @@ public sealed class GameWorld
         Effects.AddBloodSplat(victim.Position + new Vector3(0, 0.05f, 0), MathX.Up, 0.62f);
 
         DropFlag(victim, type);
+        DropCarriedOrb(victim);
+        victim.OnHoverboard = false;
+        victim.GrappleVehicleId = -1;
 
         // --- scoring and announcements ---
         if (killer != null && killer != victim)
@@ -1669,7 +1717,7 @@ public sealed class GameWorld
     {
         distance = maxDist;
         int best = -1;
-        if (Mode.Kind != GameModeKind.Onslaught) return -1;
+        if (!NodeNetworkMode) return -1;
 
         var nodes = Onslaught.Nodes;
         for (int i = 0; i < nodes.Count; i++)
@@ -1944,11 +1992,19 @@ public sealed class GameWorld
     /// </summary>
     private void UpdateOnslaught(float dt)
     {
-        if (Mode.Kind != GameModeKind.Onslaught) return;
+        if (!NodeNetworkMode) return;
         if (Mode.State is MatchState.Warmup or MatchState.Finished) return;
         var state = Onslaught;
 
         if (Mode.State == MatchState.Overtime && DrainOnslaughtCores(dt)) return;
+
+        // Orbs first: shielding a node has to be established before anything can shoot at it this
+        // frame, or a node the carrier is standing on would still take a tick of damage.
+        if (Mode.Kind == GameModeKind.Warfare)
+        {
+            UpdateOrbs(dt);
+            if (TickAuxiliaryNodes(dt)) return;
+        }
 
         for (int i = 0; i < state.Nodes.Count; i++)
         {
@@ -1975,6 +2031,327 @@ public sealed class GameWorld
                 HandleNodeEvent(evt, touched, pawn);
             }
         }
+    }
+
+    // ---------------------------------------------------------------- hoverboard
+
+    /// <summary>Every player carries a hoverboard in the vehicle gametypes, and nowhere else.</summary>
+    public bool HoverboardAllowed => Mode.Kind is GameModeKind.Warfare or GameModeKind.Onslaught
+        or GameModeKind.Assault;
+
+    /// <summary>
+    /// Deploy, stow, grapple and tow. The board is not a vehicle: the rider stays a pawn, keeps
+    /// carrying the orb, and can be shot off — which is the whole character of the thing.
+    /// </summary>
+    private void UpdateHoverboard(Pawn pawn, in PawnInput input, float dt)
+    {
+        pawn.HoverboardStun = MathF.Max(0f, pawn.HoverboardStun - dt);
+        if (!HoverboardAllowed)
+        {
+            pawn.OnHoverboard = false;
+            pawn.GrappleVehicleId = -1;
+            return;
+        }
+
+        if (input.Hoverboard)
+        {
+            if (pawn.OnHoverboard) KnockOffHoverboard(pawn, stun: false);
+            else if (pawn.CanRideHoverboard)
+            {
+                pawn.OnHoverboard = true;
+                HoverboardRides++;
+                OnSound?.Invoke(SoundId.JumpPad, pawn.Position, 0.5f);
+            }
+        }
+        if (!pawn.OnHoverboard) { pawn.GrappleVehicleId = -1; return; }
+
+        // Alt-fire is the grapple while riding — there is no weapon to fire it at anyway.
+        if (input.AltFire && pawn.GrappleVehicleId < 0) AttachGrapple(pawn);
+        else if (input.AltFire && pawn.GrappleVehicleId >= 0) pawn.GrappleVehicleId = -1;
+
+        Vehicle tow = FindVehicle(pawn.GrappleVehicleId);
+        if (tow == null || !tow.Alive)
+        {
+            pawn.GrappleVehicleId = -1;
+            return;
+        }
+
+        // Tow point sits behind the vehicle. The rider is dragged toward it rather than snapped
+        // to it, so they swing out on corners and clip scenery — which is what makes towing risky.
+        Vector3 back = new(-MathF.Sin(tow.Yaw), 0f, -MathF.Cos(tow.Yaw));
+        Vector3 anchor = tow.Position + back * (VehicleDef.Get(tow.Kind).HalfExtents.Z + 3.4f);
+        Vector3 toAnchor = anchor - pawn.Position;
+        if (toAnchor.Length() > Physics.GrappleBreakRange)
+        {
+            pawn.GrappleVehicleId = -1;
+            return;
+        }
+        pawn.Velocity += MathX.SafeNormalize(toAnchor, Vector3.Zero)
+            * Physics.GrappleAcceleration * dt;
+        // Flyers lift the rider off the ground entirely, exactly as in the original.
+        if (VehicleDef.Get(tow.Kind).Motion == VehicleMotion.Air && anchor.Y > pawn.Position.Y + 0.5f)
+            pawn.Velocity.Y = MathF.Max(pawn.Velocity.Y, 4f);
+    }
+
+    private void AttachGrapple(Pawn pawn)
+    {
+        Vehicle best = null;
+        float bestDistance = Physics.GrappleRange;
+        foreach (var v in Vehicles)
+        {
+            if (!v.Alive || v.Kind == VehicleKind.Hoverboard) continue;
+            if (v.Team != Team.None && pawn.Team != Team.None && v.Team != pawn.Team) continue;
+            float d = Vector3.Distance(v.Position, pawn.Position);
+            if (d < bestDistance) { bestDistance = d; best = v; }
+        }
+        if (best == null) return;
+        pawn.GrappleVehicleId = best.Id;
+        HoverboardTows++;
+        OnSound?.Invoke(SoundId.HammerHit, pawn.Position, 0.45f);
+    }
+
+    /// <summary>
+    /// Throws a rider off. Damage does this with a stun; stowing it voluntarily does not. Either
+    /// way the tow line goes with it.
+    /// </summary>
+    public void KnockOffHoverboard(Pawn pawn, bool stun)
+    {
+        if (pawn == null || !pawn.OnHoverboard) return;
+        pawn.OnHoverboard = false;
+        pawn.GrappleVehicleId = -1;
+        if (!stun) return;
+        pawn.HoverboardStun = Physics.HoverboardStunSeconds;
+        // Landing on your face costs momentum as well as time.
+        pawn.Velocity.X *= 0.25f;
+        pawn.Velocity.Z *= 0.25f;
+        OnSound?.Invoke(SoundId.Land, pawn.Position, 0.7f);
+    }
+
+    // ---------------------------------------------------------------- warfare
+
+    /// <summary>
+    /// Moves both orbs, applies node shields, and resolves instant captures. Everything the orb
+    /// does happens here; the node graph itself only exposes <see cref="OnslaughtState.OrbCapture"/>
+    /// and an <see cref="PowerNode.OrbShield"/> flag it reads back.
+    /// </summary>
+    private void UpdateOrbs(float dt)
+    {
+        foreach (var node in Onslaught.Nodes) node.OrbShield = Team.None;
+
+        foreach (WarfareOrb orb in Warfare.Orbs)
+        {
+            Pawn carrier = FindPawn(orb.CarrierId);
+            // A carrier who dies, leaves the match, or climbs into a vehicle drops it. Riding the
+            // hoverboard is fine, which is exactly what makes a fast orb run possible.
+            if (carrier != null && (!carrier.Alive || carrier.Team != orb.Team || carrier.VehicleId > 0))
+                DropOrb(orb, carrier);
+            carrier = FindPawn(orb.CarrierId);
+
+            if (carrier != null)
+            {
+                orb.Position = carrier.Position + new Vector3(0f, 0.9f, 0f);
+                ResolveOrbAtNodes(orb, carrier, dt);
+                continue;
+            }
+
+            if (orb.Dropped)
+            {
+                orb.DropTimer -= dt;
+                if (orb.DropTimer <= 0f) ReturnOrb(orb, null);
+                else CollectDroppedOrb(orb);
+                continue;
+            }
+
+            // Sitting at home: keep it on the furthest-forward live spawn and wait to be taken.
+            orb.Position = Warfare.HomeFor(Level, Onslaught, orb.Team);
+            CollectDroppedOrb(orb);
+        }
+    }
+
+    /// <summary>Instant capture on contact, and the protective shield on nodes already held.</summary>
+    private void ResolveOrbAtNodes(WarfareOrb orb, Pawn carrier, float dt)
+    {
+        for (int i = 0; i < Onslaught.Nodes.Count; i++)
+        {
+            PowerNode node = Onslaught.Nodes[i];
+            if (node.IsCore) continue;
+            float distance = Vector3.Distance(carrier.Position, node.Position);
+
+            if (node.Team == orb.Team && node.IsActive)
+            {
+                if (distance > WarfareOrb.ShieldRadius) continue;
+                node.OrbShield = orb.Team;
+                node.Health = MathF.Min(node.MaxHealth, node.Health + node.MaxHealth * 0.35f * dt);
+                continue;
+            }
+
+            if (distance > WarfareOrb.TouchRadius) continue;
+            if (!Onslaught.OrbCapture(i, orb.Team, carrier.Id, out PowerNode captured)) continue;
+
+            OnslaughtNodeCaptures++;
+            WarfareOrbCaptures++;
+            carrier.Captures++;
+            AddKillFeed(Loc.WarOrbCaptured(carrier.Name, captured.Name), GameTypes.TeamColor(orb.Team));
+            OnSound?.Invoke(SoundId.FlagCapture, captured.Position, 1f);
+            ActivateNodeVehicles(i, orb.Team);
+            AnnounceCoreState();
+            // The orb is spent on the capture: it goes home, which is what stops one carrier from
+            // sweeping the whole map in a single run.
+            ReturnOrb(orb, carrier);
+            return;
+        }
+    }
+
+    private void CollectDroppedOrb(WarfareOrb orb)
+    {
+        foreach (var pawn in Pawns)
+        {
+            if (!pawn.Alive || pawn.Team != orb.Team || pawn.VehicleId > 0) continue;
+            // Measure from the chest: an orb resting at waist height on a pad sits 2 m above the
+            // feet, and a foot-to-orb test left a bot standing right on top of it unable to reach.
+            if (Vector3.Distance(pawn.Center, orb.Position) > WarfareOrb.TouchRadius) continue;
+            orb.CarrierId = pawn.Id;
+            orb.DropTimer = -1f;
+            WarfareOrbPickups++;
+            FeedbackFor(pawn).Big(Loc.WarOrbTaken, GameTypes.TeamColor(orb.Team), 1.4f);
+            AddKillFeed(Loc.WarOrbCarrier(pawn.Name), GameTypes.TeamColor(orb.Team));
+            OnSound?.Invoke(SoundId.FlagTaken, orb.Position, 1f);
+            return;
+        }
+    }
+
+    public void DropOrb(WarfareOrb orb, Pawn carrier)
+    {
+        if (orb == null || orb.CarrierId < 0) return;
+        orb.Position = (carrier?.Position ?? orb.Position) + new Vector3(0f, 0.4f, 0f);
+        orb.CarrierId = -1;
+        orb.DropTimer = WarfareOrb.DropTimeout;
+        AddKillFeed(Loc.WarOrbDropped, GameTypes.TeamColor(orb.Team));
+    }
+
+    private void ReturnOrb(WarfareOrb orb, Pawn by)
+    {
+        orb.ResetTo(Warfare.HomeFor(Level, Onslaught, orb.Team));
+        if (by == null) AddKillFeed(Loc.WarOrbReturned, GameTypes.TeamColor(orb.Team));
+        OnSound?.Invoke(SoundId.FlagReturn, orb.Position, 0.9f);
+    }
+
+    /// <summary>Drops whichever orb a pawn was carrying. Called on death and on boarding.</summary>
+    public void DropCarriedOrb(Pawn pawn)
+    {
+        if (Mode.Kind != GameModeKind.Warfare || pawn == null) return;
+        foreach (WarfareOrb orb in Warfare.Orbs)
+            if (orb.CarrierId == pawn.Id) DropOrb(orb, pawn);
+    }
+
+    /// <summary>
+    /// The sacrifice play: walking up to a dropped enemy orb and forcing it to respawn, at the
+    /// cost of 100 health. Worth it only when that orb is about to take a node back.
+    /// </summary>
+    public bool SacrificeToEnemyOrb(Pawn pawn)
+    {
+        if (Mode.Kind != GameModeKind.Warfare || pawn == null || !pawn.Alive) return false;
+        foreach (WarfareOrb orb in Warfare.Orbs)
+        {
+            if (orb.Team == pawn.Team || !orb.Dropped) continue;
+            if (Vector3.Distance(pawn.Center, orb.Position) > WarfareOrb.TouchRadius) continue;
+            ReturnOrb(orb, pawn);
+            // Armour soaks it, so a shield belt turns this into a free play — as in the original.
+            Damage(pawn, null, WarfareOrb.SacrificeHealth, DamageType.Energy, MathX.Up);
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Runs the auxiliary-node clocks and pays them out. Returns true if a core died, so the
+    /// caller stops walking the node list this frame.
+    /// </summary>
+    private bool TickAuxiliaryNodes(float dt)
+    {
+        PowerNode finished = Onslaught.TickCountdowns(dt);
+        if (finished == null) return false;
+
+        if (finished.Role == NodeRole.Vehicle)
+        {
+            GrantNodeVehicle(finished);
+            // A vehicle node re-arms only once its reward is gone, so the map never stacks two.
+            finished.CountdownRemaining = -1f;
+            return false;
+        }
+
+        Team owner = finished.Team;
+        Team enemy = Opposite(owner);
+        AddKillFeed(Loc.WarCountdownDone(finished.Name), GameTypes.TeamColor(owner));
+        OnSound?.Invoke(SoundId.AnnounceMajor, finished.Position, 1f);
+        // The clock finishing also knocks the node down: the fight over it starts again.
+        finished.Team = Team.None;
+        finished.Built = 0f;
+        finished.Health = finished.MaxHealth;
+        finished.CountdownRemaining = -1f;
+
+        // Two payouts, distinguished by whether the map asked for core damage. Avalanche's
+        // countdown nodes take out the enemy's prime node instead of chipping the core, which is
+        // a far bigger swing: it drops the whole link into their base.
+        if (finished.CoreDamageFraction <= 0f)
+        {
+            DestroyPrimeNodeOf(enemy);
+            return false;
+        }
+
+        PowerNode core = Onslaught.CoreOf(enemy);
+        if (core == null) return false;
+        core.Health -= core.MaxHealth * finished.CoreDamageFraction;
+        if (core.Health > 0f) return false;
+        core.Health = 0f;
+        CompleteOnslaughtRound(owner, core.Position);
+        return true;
+    }
+
+    private void DestroyPrimeNodeOf(Team team)
+    {
+        for (int i = 0; i < Onslaught.Nodes.Count; i++)
+        {
+            PowerNode node = Onslaught.Nodes[i];
+            if (!node.IsPrime || node.Team != team || !node.IsActive) continue;
+            node.Team = Team.None;
+            node.Built = 0f;
+            node.BuildingFor = Team.None;
+            node.BuilderPawnId = -1;
+            node.Health = node.MaxHealth;
+            AddKillFeed(Loc.OnsNodeLost(node.Name), new Vector3(1f, 0.7f, 0.3f));
+            ResetOnslaughtVehiclePads();
+            AnnounceCoreState();
+            return;
+        }
+    }
+
+    /// <summary>Parks the vehicle a vehicle node just earned, unless the previous one is still alive.</summary>
+    private void GrantNodeVehicle(PowerNode node)
+    {
+        if (node.RewardVehicle >= VehicleKind.Count) return;
+        int index = Onslaught.Nodes.IndexOf(node);
+        if (Warfare.NodeVehicles.TryGetValue(index, out int existingId))
+        {
+            Vehicle existing = FindVehicle(existingId);
+            // Only one Leviathan may be in play at a time; the last one has to burn first.
+            if (existing != null && existing.Alive) return;
+        }
+
+        var v = new Vehicle { Id = NextVehicleId++ };
+        VehicleDef def = VehicleDef.Get(node.RewardVehicle);
+        v.Configure(node.RewardVehicle, node.RewardPosition + new Vector3(0f, def.HalfExtents.Y, 0f),
+            node.RewardYaw);
+        v.SpawnRespawnSeconds = float.PositiveInfinity;   // no automatic replacement; earn another
+        v.AuthoredSpawnTeam = node.Team;
+        v.SpawnTeam = node.Team;
+        v.Team = node.Team;
+        v.SpawnNodeIndex = -1;
+        Vehicles.Add(v);
+        Warfare.NodeVehicles[index] = v.Id;
+        AddKillFeed(Loc.WarVehicleReady(VehicleDef.Get(node.RewardVehicle).Name),
+            GameTypes.TeamColor(node.Team));
+        OnSound?.Invoke(SoundId.AnnounceMajor, node.RewardPosition, 1.1f);
     }
 
     private bool DrainOnslaughtCores(float dt)
@@ -2063,8 +2440,21 @@ public sealed class GameWorld
         foreach (Vehicle vehicle in Vehicles)
         {
             if (vehicle.SpawnNodeIndex != nodeIndex || vehicle.Alive) continue;
-            vehicle.SpawnTeam = owner;
+            // A pad authored for one side stays that side's; only unclaimed pads follow the node.
+            // Warfare's mirrored maps rely on this: the Manta and the Viper share a node.
+            if (vehicle.AuthoredSpawnTeam != Team.None && vehicle.AuthoredSpawnTeam != owner) continue;
+            if (vehicle.AuthoredSpawnTeam == Team.None) vehicle.SpawnTeam = owner;
             vehicle.Reset();
+        }
+        // Losing the node takes the other side's cars away again, or a captured node would end up
+        // with both teams' vehicles parked on it.
+        foreach (Vehicle vehicle in Vehicles)
+        {
+            if (vehicle.SpawnNodeIndex != nodeIndex || !vehicle.Alive) continue;
+            if (vehicle.AuthoredSpawnTeam == Team.None || vehicle.AuthoredSpawnTeam == owner) continue;
+            if (vehicle.Occupied) continue;   // never delete one out from under a driver
+            vehicle.Alive = false;
+            vehicle.RespawnTimer = float.PositiveInfinity;
         }
     }
 
@@ -2244,7 +2634,7 @@ public sealed class GameWorld
         {
             if (!v.Alive)
             {
-                if (Mode.Kind == GameModeKind.Onslaught && v.SpawnNodeIndex >= 0)
+                if (NodeNetworkMode && v.SpawnNodeIndex >= 0)
                 {
                     PowerNode pad = Onslaught.Nodes[v.SpawnNodeIndex];
                     if (!pad.IsActive)
@@ -2602,6 +2992,8 @@ public sealed class GameWorld
         SubmitProjectiles(scene);
         SubmitPickups(scene);
         SubmitFlags(scene);
+        SubmitOrbs(scene);
+        SubmitHoverboards(scene);
         SubmitVehicles(scene);
         SubmitControlPoints(scene);
         SubmitPowerNodes(scene);
@@ -3042,7 +3434,7 @@ public sealed class GameWorld
     /// </summary>
     private void SubmitPowerNodes(RenderScene scene)
     {
-        if (Mode.Kind != GameModeKind.Onslaught) return;
+        if (!NodeNetworkMode) return;
         var nodes = Onslaught.Nodes;
 
         for (int i = 0; i < nodes.Count; i++)
@@ -3264,6 +3656,102 @@ public sealed class GameWorld
                 });
             }
             scene.AddLight(pos + new Vector3(0, 1.3f, 0), 9f, col, 4f, 1.5f);
+        }
+    }
+
+    /// <summary>
+    /// Draws both Warfare orbs. The carrier's beacon is deliberately loud: the original makes the
+    /// orb runner the most visible player on the map, and the mode is balanced around that.
+    /// </summary>
+    private void SubmitOrbs(RenderScene scene)
+    {
+        if (Mode.Kind != GameModeKind.Warfare) return;
+        foreach (WarfareOrb orb in Warfare.Orbs)
+        {
+            Vector3 col = GameTypes.TeamColor(orb.Team);
+            Vector3 pos = orb.Position + new Vector3(0f, MathF.Sin(Time * 2.2f) * 0.12f, 0f);
+            Matrix4x4 xf = Matrix4x4.CreateScale(0.62f)
+                * Matrix4x4.CreateRotationY(Time * 1.4f)
+                * Matrix4x4.CreateTranslation(pos);
+            Mesh mesh = _pickupModels.MeshFor(PickupKind.DamageAmp);
+            foreach (var section in _pickupModels.SectionsFor(PickupKind.DamageAmp))
+            {
+                Material mat = Materials.Get(section.Material);
+                scene.Opaque.Add(new DrawCall
+                {
+                    Mesh = mesh,
+                    IndexOffset = section.IndexOffset,
+                    IndexCount = section.IndexCount,
+                    Material = mat,
+                    Transform = xf,
+                    BoneBase = -1,
+                    Tint = new Vector4(col, 1f),
+                    Emissive = col * 3.6f,
+                    OverrideEmissive = true,
+                    Alpha = 1f,
+                    Center = pos,
+                    Radius = 1.2f,
+                    CastShadow = false,
+                    UvScale = mat.UvScale,
+                    OwnerView = -1,
+                });
+            }
+            scene.AddLight(pos, orb.Held ? 16f : 10f, col, orb.Held ? 7f : 4f, 1.6f);
+            // The sky beam. Only the carrier gets one — a dropped orb is meant to be findable but
+            // not a lighthouse, and a parked one is already where everyone knows to look.
+            if (!orb.Held) continue;
+            for (int i = 1; i <= 6; i++)
+                scene.AddLight(pos + new Vector3(0f, i * 3.5f, 0f), 9f, col, 2.4f, 1.4f);
+        }
+    }
+
+    /// <summary>Draws the board under anyone riding one, using the real vehicle mesh.</summary>
+    private void SubmitHoverboards(RenderScene scene)
+    {
+        if (!HoverboardAllowed) return;
+        Mesh mesh = _vehicleModels.MeshFor(VehicleKind.Hoverboard);
+        if (mesh == null) return;
+        foreach (var pawn in Pawns)
+        {
+            if (!pawn.Alive || !pawn.OnHoverboard) continue;
+            Vector3 pos = pawn.Position + new Vector3(0f, 0.14f, 0f);
+            // Leans into the turn a little, so a board run reads as a board run from a distance.
+            float lean = MathX.Clamp(Vector3.Dot(pawn.Velocity, pawn.RightFlat) * 0.035f, -0.35f, 0.35f);
+            Matrix4x4 xf = Matrix4x4.CreateRotationZ(lean)
+                * Matrix4x4.CreateRotationY(pawn.Yaw)
+                * Matrix4x4.CreateTranslation(pos);
+            foreach (var section in _vehicleModels.SectionsFor(VehicleKind.Hoverboard))
+            {
+                Material mat = Materials.Get(section.Material);
+                scene.Opaque.Add(new DrawCall
+                {
+                    Mesh = mesh,
+                    IndexOffset = section.IndexOffset,
+                    IndexCount = section.IndexCount,
+                    Material = mat,
+                    Transform = xf,
+                    BoneBase = -1,
+                    Tint = new Vector4(VehicleDef.Get(VehicleKind.Hoverboard).Tint, 1f),
+                    Emissive = mat.Emissive,
+                    Alpha = 1f,
+                    Center = pos,
+                    Radius = 1.6f,
+                    CastShadow = true,
+                    UvScale = mat.UvScale,
+                    OwnerView = -1,
+                });
+            }
+            // Tow line to the vehicle being grappled, so bystanders can see who is hitching a ride.
+            Vehicle tow = FindVehicle(pawn.GrappleVehicleId);
+            if (tow == null || !tow.Alive) continue;
+            Vector3 a = pawn.Center;
+            for (int i = 1; i <= 6; i++)
+            {
+                Vector3 p = Vector3.Lerp(a, tow.Position, i / 7f);
+                Particles.Spawn(BlendMode.Additive, p, Vector3.Zero,
+                    new Vector4(0.6f, 0.85f, 1f, 0.55f), new Vector4(0.6f, 0.85f, 1f, 0f),
+                    0.16f, 0.06f, 0.06f, Spr.Flare);
+            }
         }
     }
 

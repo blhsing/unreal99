@@ -20,6 +20,8 @@ public struct PawnInput
     public int WeaponSelect;      // direct slot, or -1
     /// <summary>Edge-triggered: board the nearest vehicle, or leave the one you are in.</summary>
     public bool UseVehicle;
+    /// <summary>Edge-triggered: deploy or stow the hoverboard every player carries.</summary>
+    public bool Hoverboard;
 }
 
 /// <summary>
@@ -63,6 +65,19 @@ public sealed class Pawn
     public Vector2 VehicleDrive;
     public bool VehicleUp;
     public bool VehicleDown;
+
+    // --- hoverboard ---
+    /// <summary>
+    /// Riding the personal hoverboard. It is a pawn state rather than a vehicle because the rider
+    /// is still very much a pawn: they can be shot off it, and they can carry the Warfare orb,
+    /// neither of which is true of anyone sitting in a cockpit.
+    /// </summary>
+    public bool OnHoverboard;
+    /// <summary>Vehicle being towed behind via the grapple, or -1.</summary>
+    public int GrappleVehicleId = -1;
+    /// <summary>Seconds of forced dismount after being knocked off. No board, no weapons.</summary>
+    public float HoverboardStun;
+    public bool CanRideHoverboard => Alive && !InVehicle && HoverboardStun <= 0f;
 
     public bool OnGround;
     public bool Crouching;
@@ -271,6 +286,9 @@ public sealed class Pawn
         SpawnProtection = 1.6f;
         HasFlag = false;
         CarriedFlag = Team.None;
+        OnHoverboard = false;
+        GrappleVehicleId = -1;
+        HoverboardStun = 0f;
 
         Array.Clear(HasWeapon);
         Array.Clear(Ammo);
@@ -333,7 +351,8 @@ public sealed class Pawn
         Vector3 wish = ForwardFlat * input.Move.Y + RightFlat * input.Move.X;
         float wishLen = wish.Length();
         Vector3 wishDir = wishLen > 1e-4f ? wish / wishLen : Vector3.Zero;
-        float wishSpeed = MathF.Min(wishLen, 1f) * Physics.GroundSpeed;
+        float wishSpeed = MathF.Min(wishLen, 1f)
+            * (OnHoverboard ? Physics.HoverboardSpeed : Physics.GroundSpeed);
         if (Crouching) wishSpeed *= Physics.CrouchSpeedScale;
 
         if (InWater)
@@ -354,9 +373,15 @@ public sealed class Pawn
 
             if (OnGround)
             {
-                float friction = Physics.GroundFriction + (DodgeBlend > 0.4f ? Physics.DodgeLandFriction : 0f);
+                // The board glides: barely any friction and a slow build-up, so it is fast in a
+                // straight line and clumsy in a fight — which is the trade the original makes.
+                float friction = OnHoverboard
+                    ? Physics.HoverboardFriction
+                    : Physics.GroundFriction + (DodgeBlend > 0.4f ? Physics.DodgeLandFriction : 0f);
+                float acceleration = OnHoverboard
+                    ? Physics.HoverboardAcceleration : Physics.GroundAcceleration;
                 Velocity = Physics.ApplyFriction(Velocity, friction, dt);
-                Velocity = Physics.Accelerate(Velocity, wishDir, wishSpeed, Physics.GroundAcceleration, dt);
+                Velocity = Physics.Accelerate(Velocity, wishDir, wishSpeed, acceleration, dt);
             }
             else
             {
@@ -430,8 +455,15 @@ public sealed class Pawn
             LandBlend = MathX.Saturate(result.LandingSpeed / 14f);
             // Water breaks a fall. Without this a dive off a ship's rail into the harbour is
             // lethal, which is neither what the genre does nor what any player expects.
-            float fall = InWater ? 0f : Physics.FallDamage(result.LandingSpeed);
+            // The board absorbs a chunk of the impact too, which is how a hoverboard run gets to
+            // take the shortcut down the cliff — but a long enough drop still ends with the rider
+            // on the floor rather than gliding away.
+            float impact = OnHoverboard
+                ? MathF.Max(0f, result.LandingSpeed - Physics.HoverboardFallAbsorb)
+                : result.LandingSpeed;
+            float fall = InWater ? 0f : Physics.FallDamage(impact);
             if (fall > 0f) events.FallDamage = fall;
+            if (OnHoverboard && fall > 0f) events.KnockedOffBoard = true;
         }
 
         if (result.HitCeiling) Velocity.Y = MathF.Min(Velocity.Y, 0f);
@@ -611,4 +643,6 @@ public struct MoveEvents
     public bool UsedJumpBoots;
     public bool Teleported;
     public Vector3 TeleportFrom;
+    /// <summary>The landing was hard enough to throw the rider off the hoverboard.</summary>
+    public bool KnockedOffBoard;
 }

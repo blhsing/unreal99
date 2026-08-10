@@ -39,6 +39,14 @@ public enum MapId
     // Assault. One-way maps: a fixed objective sequence and forward spawns behind it.
     Convoy,
     Frigate,
+    Glacier,
+    // Warfare. Onslaught's successor: orbs, auxiliary nodes and a hoverboard for everyone.
+    WarTorlan,
+    WarTorlanNecris,
+    Serenity,
+    Avalanche,
+    OnyxCoast,
+    Islander,
     Count
 }
 
@@ -79,6 +87,13 @@ public static partial class Maps
         MapId.Primeval => Loc.MapPrimeval,
         MapId.Convoy => Loc.MapConvoy,
         MapId.Frigate => Loc.MapFrigate,
+        MapId.Glacier => Loc.MapGlacier,
+        MapId.WarTorlan => Loc.MapWarTorlan,
+        MapId.WarTorlanNecris => Loc.MapWarTorlanNecris,
+        MapId.Serenity => Loc.MapSerenity,
+        MapId.Avalanche => Loc.MapAvalanche,
+        MapId.OnyxCoast => Loc.MapOnyxCoast,
+        MapId.Islander => Loc.MapIslander,
         _ => Loc.MapDeck16,
     };
 
@@ -109,6 +124,13 @@ public static partial class Maps
         MapId.Primeval => Loc.MapPrimevalDesc,
         MapId.Convoy => Loc.MapConvoyDesc,
         MapId.Frigate => Loc.MapFrigateDesc,
+        MapId.Glacier => Loc.MapGlacierDesc,
+        MapId.WarTorlan => Loc.MapWarTorlanDesc,
+        MapId.WarTorlanNecris => Loc.MapWarTorlanNecrisDesc,
+        MapId.Serenity => Loc.MapSerenityDesc,
+        MapId.Avalanche => Loc.MapAvalancheDesc,
+        MapId.OnyxCoast => Loc.MapOnyxCoastDesc,
+        MapId.Islander => Loc.MapIslanderDesc,
         _ => Loc.MapDeck16Desc,
     };
 
@@ -119,7 +141,13 @@ public static partial class Maps
     public static bool SupportsOnslaught(MapId id) => id is MapId.Torlan or MapId.Primeval;
 
     /// <summary>Assault needs an objective sequence, so only the AS arenas can host it.</summary>
-    public static bool SupportsAssault(MapId id) => id is MapId.Convoy or MapId.Frigate;
+    public static bool SupportsAssault(MapId id)
+        => id is MapId.Convoy or MapId.Frigate or MapId.Glacier;
+
+    /// <summary>Warfare needs a node graph with orb spawns, so only the WAR arenas can host it.</summary>
+    public static bool SupportsWarfare(MapId id)
+        => id is MapId.WarTorlan or MapId.WarTorlanNecris or MapId.Serenity or MapId.Avalanche
+            or MapId.OnyxCoast or MapId.Islander;
 
     /// <summary>Domination needs control points, so only the DOM arenas can host it.</summary>
     public static bool SupportsDomination(MapId id)
@@ -152,6 +180,13 @@ public static partial class Maps
         MapId.Primeval => BuildPrimeval(gl),
         MapId.Convoy => BuildConvoy(gl),
         MapId.Frigate => BuildFrigate(gl),
+        MapId.Glacier => BuildGlacier(gl),
+        MapId.WarTorlan => BuildWarTorlan(gl, necris: false),
+        MapId.WarTorlanNecris => BuildWarTorlan(gl, necris: true),
+        MapId.Serenity => BuildSerenity(gl),
+        MapId.Avalanche => BuildAvalanche(gl),
+        MapId.OnyxCoast => BuildOnyxCoast(gl),
+        MapId.Islander => BuildIslander(gl),
         _ => BuildDeck16(gl),
     };
 

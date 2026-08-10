@@ -53,6 +53,22 @@ public static class Physics
     public const float DrownDamagePerSecond = 14f;
     public const float BreathSeconds = 22f;
 
+    // --- hoverboard ---
+    /// <summary>Roughly twice running speed: crossing a Warfare map on foot is not a plan.</summary>
+    public const float HoverboardSpeed = 17.5f;
+    public const float HoverboardAcceleration = 26f;
+    /// <summary>Low, so a board carries its speed through turns and feels like it is gliding.</summary>
+    public const float HoverboardFriction = 2.2f;
+    /// <summary>Damage above this knocks the rider off. Chip damage should not.</summary>
+    public const float HoverboardKnockoffDamage = 8f;
+    public const float HoverboardStunSeconds = 1.6f;
+    /// <summary>The board eats this much of a fall before the rider starts taking any of it.</summary>
+    public const float HoverboardFallAbsorb = 8f;
+    public const float GrappleRange = 26f;
+    public const float GrappleBreakRange = 34f;
+    /// <summary>How hard the tow line pulls the rider toward the tow point behind the vehicle.</summary>
+    public const float GrappleAcceleration = 48f;
+
     public static float FallDamage(float impactSpeed)
     {
         if (impactSpeed <= FallDamageMinSpeed) return 0f;

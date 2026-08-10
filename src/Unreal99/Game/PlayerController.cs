@@ -191,6 +191,7 @@ public sealed class PlayerController : Controller
         if (tap != Vector2.Zero) input.Dodge = Pawn.RegisterDodgeTap(tap, _time);
 
         input.UseVehicle = _input.ActionPressed(Device, GameAction.UseVehicle);
+        input.Hoverboard = _input.ActionPressed(Device, GameAction.Hoverboard);
         input.Jump = _input.ActionDown(Device, GameAction.Jump);
         input.Crouch = _input.ActionDown(Device, GameAction.Crouch);
         input.Fire = _input.ActionDown(Device, GameAction.Fire);

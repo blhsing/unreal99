@@ -2209,7 +2209,9 @@ public sealed class App : IDisposable
             Vector3 eye = pawn.EyePosition;
             // View bob.
             float speed01 = MathX.Saturate(pawn.Speed / Physics.GroundSpeed);
-            float bobAmount = pawn.OnGround ? speed01 * 0.030f : 0f;
+            // Keep locomotion readable without making the player's viewpoint bounce.
+            // The previous 0.030 amplitude was especially uncomfortable while sprinting.
+            float bobAmount = pawn.OnGround ? speed01 * 0.004f : 0f;
             eye.Y += MathF.Sin(pawn.ViewBobPhase * 2f) * bobAmount;
             Vector3 right = pawn.RightFlat;
             eye += right * (MathF.Sin(pawn.ViewBobPhase) * bobAmount * 0.75f);
@@ -3245,16 +3247,29 @@ public sealed class App : IDisposable
                 if (_world.Mode.DominationScores[0] + _world.Mode.DominationScores[1] <= 0.01f)
                     failures.Add("domination-score=0");
             }
-            if (_world.Mode.Kind == GameModeKind.Onslaught)
+            if (_world.NodeNetworkMode)
             {
                 if (_world.OnslaughtNodeCaptures <= 0) failures.Add("onslaught-node-captures=0");
                 if (_world.VehicleBoardings <= 0) failures.Add("vehicle-boardings=0");
             }
+            if (_world.Mode.Kind == GameModeKind.Warfare)
+            {
+                // The orb is the mode. A Warfare match where nobody ever picked one up is a
+                // Warfare match that was silently running as Onslaught.
+                if (_world.WarfareOrbPickups <= 0) failures.Add("warfare-orb-pickups=0");
+                if (_world.HoverboardRides <= 0) failures.Add("hoverboard-rides=0");
+            }
             if (_world.Mode.Kind == GameModeKind.Assault)
             {
                 if (_world.AssaultObjectiveCompletions <= 0) failures.Add("assault-objectives=0");
-                if (_world.Level.VehicleSpawns.Count > 0 && _world.VehicleBoardings <= 0)
-                    failures.Add("vehicle-boardings=0");
+                // Only require a boarding when a vehicle is actually available from the opening
+                // spawns. Glacier's Ion Tank is the third objective — demanding that a
+                // sixty-second harness reach it is asserting the wrong thing about the map.
+                Team attackers = _world.Assault.Attackers;
+                bool vehicleAtStart = _world.Level.VehicleSpawns.Any(v =>
+                    _world.Level.Spawns.Any(s => s.AssaultGroup == 0 && s.Team == attackers
+                        && Vector3.Distance(s.Position, v.Position) < 60f));
+                if (vehicleAtStart && _world.VehicleBoardings <= 0) failures.Add("vehicle-boardings=0");
             }
             bool passed = failures.Count == 0;
             allPassed &= passed;
@@ -3315,6 +3330,10 @@ public sealed class App : IDisposable
                 OnslaughtNodeCaptures = _world.OnslaughtNodeCaptures,
                 OnslaughtNodesHeldRed = _world.Onslaught?.NodesHeldBy(Team.Red) ?? 0,
                 OnslaughtNodesHeldBlue = _world.Onslaught?.NodesHeldBy(Team.Blue) ?? 0,
+                WarfareOrbPickups = _world.WarfareOrbPickups,
+                WarfareOrbCaptures = _world.WarfareOrbCaptures,
+                HoverboardRides = _world.HoverboardRides,
+                HoverboardTows = _world.HoverboardTows,
                 AssaultObjectiveCompletions = _world.AssaultObjectiveCompletions,
                 AssaultRoundsCompleted = _world.AssaultRoundsCompleted,
                 AssaultRound = _world.Assault?.Round ?? 0,
