@@ -318,9 +318,9 @@ public sealed class InputSystem : IDisposable
         if (UseSilkSharedInput(device)) return _mouseDelta;
         if (RawAvailable)
         {
-            // Local sessions use per-device Raw motion. Remote sessions are routed above through
-            // a non-recentering hidden Silk pointer; interpreting their captured absolute packets
-            // here produced the reported immediate upward view and spin.
+            // A local player normally has a dedicated handle. Handle zero deliberately reads only
+            // the Raw shared/RDP stream—not GLFW's recentered cursor—until a physical mouse sends
+            // its first packet and the hot-plug reconciler assigns that handle.
             RawMouseState state = device.MouseHandle != 0
                 ? Raw.Mouse(device.MouseHandle) : Raw.SharedMouse;
             return new Vector2(state.DeltaX, state.DeltaY);
@@ -352,24 +352,27 @@ public sealed class InputSystem : IDisposable
         return pass ? 0 : 1;
     }
 
-    /// <summary>RDP has no independent physical Raw mouse, so player one uses GLFW's shared stream.</summary>
+    /// <summary>
+    /// When Raw Input is available, even an as-yet unassigned player must not fall back to GLFW's
+    /// captured cursor coordinates. GLFW can emit a recenter jump when a keyboard key is pressed;
+    /// treating that jump as mouse motion is what made W/S/A/D snap the view upward and spin.
+    /// The zero-handle Raw stream is used for RDP, while a local mouse is assigned as soon as its
+    /// first real packet identifies it.
+    /// </summary>
     public static int RunLookRoutingSelfTest()
     {
-        bool pass = ShouldUseSharedPointerForLook(rawAvailable: true, remotePointerPresent: true, mouseHandle: 0)
-            && !ShouldUseSharedPointerForLook(rawAvailable: true, remotePointerPresent: true, mouseHandle: 44)
-            && ShouldUseSharedPointerForLook(rawAvailable: true, remotePointerPresent: false, mouseHandle: 0)
-            && ShouldUseSharedPointerForLook(rawAvailable: false, remotePointerPresent: false, mouseHandle: 0);
-        Console.WriteLine($"本機專屬／RDP 共用視角路由: {(pass ? "通過" : "失敗")}");
+        bool pass = !ShouldUseSilkPointerForLook(rawAvailable: true, mouseHandle: 0)
+            && !ShouldUseSilkPointerForLook(rawAvailable: true, mouseHandle: 44)
+            && ShouldUseSilkPointerForLook(rawAvailable: false, mouseHandle: 0);
+        Console.WriteLine($"移動鍵不會讀取 GLFW 重定位視角: {(pass ? "通過" : "失敗")}");
         return pass ? 0 : 1;
     }
 
-    internal static bool ShouldUseSharedPointerForLook(bool rawAvailable, bool remotePointerPresent,
-        nint mouseHandle)
-        => mouseHandle == 0;
+    internal static bool ShouldUseSilkPointerForLook(bool rawAvailable, nint mouseHandle)
+        => mouseHandle == 0 && !rawAvailable;
 
     private bool UseSilkSharedInput(PlayerDevice device)
-        => ShouldUseSharedPointerForLook(RawAvailable, Raw?.SharedRemotePointerPresent == true,
-            device.MouseHandle);
+        => ShouldUseSilkPointerForLook(RawAvailable, device.MouseHandle);
 
     public float WheelDelta(PlayerDevice device)
     {
@@ -453,18 +456,6 @@ public sealed class InputSystem : IDisposable
         _firstMouseSample = false;
     }
 
-    /// <summary>Deterministic shared-match hook; bypasses the desktop cursor.</summary>
-    public void SetSharedMatchInputForTest(Vector2 delta, int buttonsDown)
-    {
-        _mouseDelta = delta;
-        for (int i = 0; i < 5; i++)
-        {
-            bool down = (buttonsDown & (1 << i)) != 0;
-            if (down && !_mouseDown[i]) _mousePressed[i] = true;
-            _mouseDown[i] = down;
-        }
-    }
-
     /// <summary>
     /// Captured locks and hides the cursor for gameplay look. Hidden leaves normal pointer
     /// motion but draws nothing, which is what the front-end wants so it can render its own
@@ -498,6 +489,10 @@ public sealed class InputSystem : IDisposable
             // Raw mode is unavailable on some drivers; hidden still works for look control.
             _mouse.Cursor.CursorMode = mode == PointerMode.Normal ? CursorMode.Normal : CursorMode.Hidden;
         }
+        // GLFW changes the process-wide Raw Input registration while entering captured mode.
+        // Restore our per-device registration immediately so the first physical mouse packet can
+        // assign an unbound player before any gameplay input is consumed, even after a fallback.
+        Raw?.Register();
         _firstMouseSample = true;
         _mouseDelta = Vector2.Zero;
     }

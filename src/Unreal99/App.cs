@@ -2626,13 +2626,13 @@ public sealed class App : IDisposable
         }
     }
 
-    /// <summary>Injects the shared RDP/window stream before the production controller consumes it.</summary>
+    /// <summary>Injects the shared Raw/RDP stream before the production controller consumes it.</summary>
     private void InjectMatchMouseInputSelfTest()
     {
         if (!_matchMouseInputTest || _state != AppState.Playing
             || _world?.Mode.State != MatchState.InProgress || _matchMouseInputTestFrame < 1) return;
         bool active = _matchMouseInputTestFrame <= 10;
-        _input.SetSharedMatchInputForTest(new Vector2(active ? 5f : 0f, active ? -2f : 0f),
+        _input.Raw.SetSyntheticSharedMouseForTest(active ? 5f : 0f, active ? -2f : 0f,
             _matchMouseInputTestFrame == 5 ? 1 : 0);
     }
 
