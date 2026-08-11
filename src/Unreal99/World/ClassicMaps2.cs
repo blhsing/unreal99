@@ -585,19 +585,37 @@ public static partial class Maps
         const float HX = 20f, HZ = 16f;
         const float CeilY = 15f;
         const float Gallery = 6.5f;
+        const float StairLandingZ = HZ - 12f;
 
         // --- main hall ---
         b.Solid(new Vector3(-HX, -1.4f, -HZ), new Vector3(HX, 0f, HZ), MatId.Concrete, true, 0.8f);
-        b.Room(new Vector3(-HX - 2f, -2f, -HZ - 2f), new Vector3(HX + 2f, CeilY, HZ + 2f), 2f,
-            MatId.Concrete, MatId.RustMetal, MatId.TechPanelDark, withCeiling: true, withFloor: false);
+        // Build the shell explicitly so the side walls contain real corridor openings. Room()
+        // emits each side as one solid brush; adding doorway-shaped wall pieces afterwards cannot
+        // subtract from that original brush and was leaving both side chambers completely sealed.
+        b.Solid(new Vector3(-HX - 2f, CeilY - 2f, -HZ - 2f),
+            new Vector3(HX + 2f, CeilY, HZ + 2f), MatId.TechPanelDark);
+        b.Solid(new Vector3(-HX, 0f, -HZ - 2f),
+            new Vector3(HX, CeilY, -HZ), MatId.RustMetal);
+        b.Solid(new Vector3(-HX, 0f, HZ),
+            new Vector3(HX, CeilY, HZ + 2f), MatId.RustMetal);
+        b.WallWithDoor(new Vector3(-HX - 2f, 0f, -HZ - 2f),
+            new Vector3(-HX, CeilY, HZ + 2f), 0f, 5f, 5f, MatId.RustMetal, alongX: false);
+        b.WallWithDoor(new Vector3(HX, 0f, -HZ - 2f),
+            new Vector3(HX + 2f, CeilY, HZ + 2f), 0f, 5f, 5f, MatId.RustMetal, alongX: false);
 
         // --- gallery ledge around three sides ---
         b.Solid(new Vector3(-HX, Gallery - 0.6f, -HZ), new Vector3(HX, Gallery, -HZ + 5f), MatId.Concrete, true, 0.9f);
-        b.Solid(new Vector3(-HX, Gallery - 0.6f, -HZ + 5f), new Vector3(-HX + 5f, Gallery, HZ - 5f), MatId.Concrete, true, 0.9f);
-        b.Solid(new Vector3(HX - 5f, Gallery - 0.6f, -HZ + 5f), new Vector3(HX, Gallery, HZ - 5f), MatId.Concrete, true, 0.9f);
+        // End the side slabs at the stair landings. Extending them to the south wall put a solid
+        // second-floor ceiling directly through both stair runs, blocking the upper steps.
+        b.Solid(new Vector3(-HX, Gallery - 0.6f, -HZ + 5f),
+            new Vector3(-HX + 5f, Gallery, StairLandingZ), MatId.Concrete, true, 0.9f);
+        b.Solid(new Vector3(HX - 5f, Gallery - 0.6f, -HZ + 5f),
+            new Vector3(HX, Gallery, StairLandingZ), MatId.Concrete, true, 0.9f);
         RailRun(b, new Vector3(-HX + 5f, Gallery, -HZ + 5f), new Vector3(HX - 5f, Gallery, -HZ + 5f));
-        RailRun(b, new Vector3(-HX + 5f, Gallery, -HZ + 5f), new Vector3(-HX + 5f, Gallery, HZ - 5f));
-        RailRun(b, new Vector3(HX - 5f, Gallery, -HZ + 5f), new Vector3(HX - 5f, Gallery, HZ - 5f));
+        RailRun(b, new Vector3(-HX + 5f, Gallery, -HZ + 5f),
+            new Vector3(-HX + 5f, Gallery, StairLandingZ));
+        RailRun(b, new Vector3(HX - 5f, Gallery, -HZ + 5f),
+            new Vector3(HX - 5f, Gallery, StairLandingZ));
 
         b.Stairs(new Vector3(-HX + 2.5f, 0f, HZ - 4f), new Vector3(-HX + 2.5f, Gallery, HZ - 12f), 5f, 11,
             MatId.Concrete, alongX: false);
@@ -621,21 +639,27 @@ public static partial class Maps
 
             b.Solid(new Vector3(x - ChamberHalf, -1.4f, -8f), new Vector3(x + ChamberHalf, 0f, 8f),
                 MatId.Concrete, true, 0.9f);
-            b.Room(new Vector3(x - ChamberHalf, 0f, -8f), new Vector3(x + ChamberHalf, 10f, 8f), 1.6f,
-                MatId.Concrete, MatId.RustMetal, MatId.TechPanelDark, withCeiling: true, withFloor: false);
+            b.Solid(new Vector3(x - ChamberHalf, 8.4f, -8f),
+                new Vector3(x + ChamberHalf, 10f, 8f), MatId.TechPanelDark);
+            b.Solid(new Vector3(x - ChamberHalf + 1.6f, 0f, -8f),
+                new Vector3(x + ChamberHalf - 1.6f, 10f, -6.4f), MatId.RustMetal);
+            b.Solid(new Vector3(x - ChamberHalf + 1.6f, 0f, 6.4f),
+                new Vector3(x + ChamberHalf - 1.6f, 10f, 8f), MatId.RustMetal);
+
+            float outer0 = i < 0 ? x - ChamberHalf : x + ChamberHalf - 1.6f;
+            float outer1 = i < 0 ? x - ChamberHalf + 1.6f : x + ChamberHalf;
+            b.Solid(new Vector3(outer0, 0f, -8f), new Vector3(outer1, 10f, 8f),
+                MatId.RustMetal);
+
+            float inner0 = i < 0 ? x + ChamberHalf - 1.6f : x - ChamberHalf;
+            float inner1 = i < 0 ? x + ChamberHalf : x - ChamberHalf + 1.6f;
+            b.WallWithDoor(new Vector3(inner0, 0f, -8f), new Vector3(inner1, 10f, 8f),
+                0f, DoorHalf * 2f, DoorTop, MatId.RustMetal, alongX: false);
 
             // Punch matching openings through the chamber's inner wall and the hall's outer wall,
             // then floor and roof the corridor between them.
-            float chamberInner = i < 0 ? x + ChamberHalf - 1.6f : x - ChamberHalf;
-            float hallOuter = i < 0 ? -HX - 2f : HX;
-            foreach (float wx in new[] { chamberInner, hallOuter })
-            {
-                b.Solid(new Vector3(wx, 0f, -8f), new Vector3(wx + 1.6f, 10f, -DoorHalf), MatId.RustMetal, true, 0.9f);
-                b.Solid(new Vector3(wx, 0f, DoorHalf), new Vector3(wx + 1.6f, 10f, 8f), MatId.RustMetal, true, 0.9f);
-                b.Solid(new Vector3(wx, DoorTop, -DoorHalf), new Vector3(wx + 1.6f, 10f, DoorHalf), MatId.RustMetal, true, 0.9f);
-            }
-            float corridorA = i < 0 ? x + ChamberHalf : hallOuter + 1.6f;
-            float corridorB = i < 0 ? hallOuter : x - ChamberHalf;
+            float corridorA = i < 0 ? x + ChamberHalf : HX;
+            float corridorB = i < 0 ? -HX : x - ChamberHalf;
             float c0 = MathF.Min(corridorA, corridorB), c1 = MathF.Max(corridorA, corridorB);
             b.Solid(new Vector3(c0, -1.4f, -DoorHalf), new Vector3(c1, 0f, DoorHalf), MatId.Concrete, true, 0.9f);
             b.Solid(new Vector3(c0, DoorTop, -DoorHalf), new Vector3(c1, DoorTop + 1f, DoorHalf),

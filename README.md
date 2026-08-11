@@ -153,7 +153,8 @@ artifacts\installer\Unreal99Installer.exe --help
 | `--loadslot N` | 直接從第 N 個存檔位接續對戰 |
 | `--weapon N` | 強制玩家一持有指定武器，用於檢視第一人稱模型 |
 | `--savetest` | 存檔與設定的往返自我測試（寫入、讀回、還原到實際世界並比對） |
-| `--saverespawntest N` | 載入第 N 格真實存檔、擊殺其中的電腦並驗證其依原設定在新出生點復活 |
+| `--saverespawntest N` | 載入第 N 格真實存檔，驗證唯一敵人會主動進入交戰，再擊殺並驗證其依原設定在新出生點復活 |
+| `--staircasetest` | 不跳躍，實際步行通過 DM-磚牆競技場曾被二樓地板堵住的樓梯 |
 | `--flycam 半徑 高度 角度 注視高度` | 手動指定巡航鏡頭的取景，用於為個別競技場擷取滿意的角度 |
 | `--install-shortcut` / `--uninstall-shortcut` | 建立／移除開始選單捷徑 |
 

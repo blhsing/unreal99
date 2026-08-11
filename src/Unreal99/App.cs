@@ -411,6 +411,20 @@ public sealed class App : IDisposable
                     if (int.TryParse(args[i + 1], out int respawnSlot)) _loadSlotAtBoot = respawnSlot;
                     i++;
                     break;
+                case "--staircasetest":
+                    // Walk the exact Stalwart staircase that used to intersect the gallery slab.
+                    _staircaseTest = true;
+                    _windowed = true;
+                    _menu.Map = MapId.Stalwart;
+                    _menu.ModeKind = GameModeKind.Deathmatch;
+                    _menu.LocalPlayers = 1;
+                    _menu.BotCount = 0;
+                    _menu.DemoMode = false;
+                    _menu.FragLimit = 0;
+                    _menu.TimeLimitMinutes = 0;
+                    _cliOverrides.UnionWith(["map", "mode", "players", "bots", "demo", "frags", "time"]);
+                    _autoStartMatch = true;
+                    break;
                 case "--weapon" when i + 1 < args.Length:
                     // Forces player one's held weapon each frame. For inspecting view models,
                     // which is otherwise awkward because the pawn auto-selects its best gun.
@@ -552,9 +566,10 @@ public sealed class App : IDisposable
         _nativeWindowHandle = hwnd;
         bool raw = hwnd != 0 && _input.TryEnableRawInput(hwnd);
         _rawDeviceRevision = raw ? _input.Raw.DeviceRevision : 0;
-        if (raw && (_inputTest || _movementInputTest || _matchMouseInputTest))
+        if (raw && (_inputTest || _movementInputTest || _matchMouseInputTest || _staircaseTest))
             _input.Raw.AcceptBackgroundInput = true;
-        if (raw && _movementInputTest) _input.Raw.AcceptSyntheticKeyboardInput = true;
+        if (raw && (_movementInputTest || _staircaseTest))
+            _input.Raw.AcceptSyntheticKeyboardInput = true;
         Console.WriteLine(raw
             ? $"輸入系統: 多裝置輸入已啟用（滑鼠 {_input.RawMouseCount} · 鍵盤 {_input.RawKeyboardCount}）"
             : "輸入系統: 多裝置輸入不可用，所有玩家共用一組滑鼠");
@@ -1373,7 +1388,8 @@ public sealed class App : IDisposable
         // Behavioral suites use the production update/render path but advance it at a stable
         // 60 Hz without waiting for wall-clock VSync. This makes long all-map runs practical
         // while preserving the same per-tick physics and bot decisions as normal gameplay.
-        if (_traversalTest || _vehicleTest || _weaponFootageMode >= 0 || _weaponTurntableDirectory != null
+        if (_traversalTest || _vehicleTest || _movementInputTest || _staircaseTest
+            || _saveRespawnTest || _weaponFootageMode >= 0 || _weaponTurntableDirectory != null
             || _vehicleTurntableDirectory != null)
             dt = 1f / 60f;
         _time += dt;
@@ -1415,6 +1431,7 @@ public sealed class App : IDisposable
 
         if (_inputTest) UpdateInputSelfTest();
         if (_movementInputTest) UpdateMovementInputSelfTest();
+        if (_staircaseTest) UpdateStaircaseSelfTest();
         if (_matchMouseInputTest) UpdateMatchMouseInputSelfTest();
         if (_saveRespawnTest) UpdateSaveRespawnSelfTest();
         if (_menuMouseInputTest) UpdateMenuMouseInputSelfTest();
@@ -1754,6 +1771,7 @@ public sealed class App : IDisposable
                 // Automated traversal runs must never capture or warp the user's real desktop
                 // cursor. Their local player is bot-driven and has no need for mouse-look.
                 if (_traversalTest || _vehicleTest || _saveTest || _movementInputTest
+                    || _staircaseTest || _saveRespawnTest
                     || _weaponFootageMode >= 0
                     || _weaponTurntableDirectory != null || _vehicleTurntableDirectory != null
                     || _autoShotFrames >= 0)
@@ -2520,6 +2538,13 @@ public sealed class App : IDisposable
     private int _saveRespawnTestFrame;
     private int _saveRespawnTestDeaths;
     private Vector3 _saveRespawnTestDeathPosition;
+    private Vector3 _saveRespawnTestPreviousPosition;
+    private float _saveRespawnTestPath;
+    private float _saveRespawnTestMinDistance = float.MaxValue;
+    private bool _saveRespawnTestSawEnemy;
+    private bool _staircaseTest;
+    private int _staircaseTestFrame;
+    private Vector3 _staircaseTestStart;
     /// <summary>Wheel accumulated per slot across the whole test, so a scroll at any moment counts.</summary>
     private readonly float[] _inputTestWheel = new float[4];
 
@@ -2652,7 +2677,45 @@ public sealed class App : IDisposable
     {
         if (!_movementInputTest || _state != AppState.Playing
             || _world?.Mode.State != MatchState.InProgress || _movementInputTestFrame != 30) return;
-        _input.SetSharedMatchInputForTest(new Vector2(960f, -540f), buttonsDown: 0);
+        // The vertical component has the signature of a host recenter, but the horizontal
+        // component is real steering and must survive independently.
+        _input.SetSharedMatchInputForTest(new Vector2(8f, -540f), buttonsDown: 0);
+    }
+
+    /// <summary>Walks from Stalwart's floor to its left gallery without injecting a jump.</summary>
+    private void UpdateStaircaseSelfTest()
+    {
+        if (_state != AppState.Playing || _world?.Mode.State != MatchState.InProgress
+            || _players.Count == 0) return;
+        Pawn pawn = _players[0].Pawn;
+        _staircaseTestFrame++;
+        if (_staircaseTestFrame == 1)
+        {
+            _staircaseTestStart = new Vector3(-17.5f, 0.01f, 13.1f);
+            pawn.Position = _staircaseTestStart;
+            pawn.Velocity = Vector3.Zero;
+            pawn.Yaw = 0f;
+            pawn.Pitch = 0f;
+            pawn.OnGround = true;
+            _playerDevices[0].MouseLook = false;
+            _input.Raw.SetSyntheticKeyForTest(0x57, down: true); // W, never Jump
+            return;
+        }
+        if (_staircaseTestFrame < 150 && _staircaseTestFrame % 6 == 0)
+            _input.Raw.SetSyntheticKeyForTest(0x57, down: true);
+        if (_staircaseTestFrame == 150)
+            _input.Raw.SetSyntheticKeyForTest(0x57, down: false);
+        if (_staircaseTestFrame != 175) return;
+
+        float travel = (pawn.Position - _staircaseTestStart).FlatXZ().Length();
+        bool reachedGallery = pawn.Position.Z <= 4.8f && pawn.Position.Y >= 6.35f;
+        bool passed = reachedGallery && travel >= 8f;
+        Console.WriteLine($"STAIRCASE {(passed ? "PASS" : "FAIL")} " +
+                          $"start={_staircaseTestStart.X:0.00},{_staircaseTestStart.Y:0.00},{_staircaseTestStart.Z:0.00} " +
+                          $"end={pawn.Position.X:0.00},{pawn.Position.Y:0.00},{pawn.Position.Z:0.00} " +
+                          $"travel={travel:0.00} jumpInjected=False");
+        if (!passed) ExitCode = 1;
+        _window.Close();
     }
 
     /// <summary>Injects the shared window stream before the production controller consumes it.</summary>
@@ -2697,7 +2760,10 @@ public sealed class App : IDisposable
         _window.Close();
     }
 
-    /// <summary>Kills the bot in a real loaded save, then requires the normal respawn loop to restore it.</summary>
+    /// <summary>
+    /// Exercises the only enemy in a real loaded save: it must actively traverse into an
+    /// encounter before being killed, then the normal respawn loop must restore it.
+    /// </summary>
     private void UpdateSaveRespawnSelfTest()
     {
         if (_state != AppState.Playing || _world == null || _world.Frozen
@@ -2718,12 +2784,38 @@ public sealed class App : IDisposable
             }
             _saveRespawnTestDeaths = enemy.Deaths;
             _saveRespawnTestDeathPosition = enemy.Position;
+            _saveRespawnTestPreviousPosition = enemy.Position;
+            return;
+        }
+
+        _saveRespawnTestPath += (enemy.Position - _saveRespawnTestPreviousPosition).FlatXZ().Length();
+        _saveRespawnTestPreviousPosition = enemy.Position;
+        _saveRespawnTestMinDistance = MathF.Min(_saveRespawnTestMinDistance,
+            Vector3.Distance(player.Position, enemy.Position));
+        _saveRespawnTestSawEnemy |= _level.Collision.LineOfSight(player.EyePosition,
+            enemy.Position + new Vector3(0f, enemy.CurrentHeight * 0.6f, 0f));
+
+        if (_saveRespawnTestFrame == 720)
+        {
+            bool active = enemy.Alive && _saveRespawnTestPath >= 4f
+                && (_saveRespawnTestSawEnemy || _saveRespawnTestMinDistance <= 18f);
+            Console.WriteLine($"SAVE_ENEMY_ACTIVITY {(active ? "PASS" : "FAIL")} " +
+                              $"alive={enemy.Alive} path={_saveRespawnTestPath:0.00} " +
+                              $"minDistance={_saveRespawnTestMinDistance:0.00} " +
+                              $"lineOfSight={_saveRespawnTestSawEnemy}");
+            if (!active)
+            {
+                ExitCode = 1;
+                _window.Close();
+                return;
+            }
+            _saveRespawnTestDeathPosition = enemy.Position;
             _world.Damage(enemy, player, 1000f, DamageType.Hitscan,
                 MathX.SafeNormalize(enemy.Position - player.Position, MathX.Forward));
             return;
         }
 
-        if (_saveRespawnTestFrame != 30) return;
+        if (_saveRespawnTestFrame != 750) return;
         bool movedToSpawn = Vector3.DistanceSquared(enemy.Position, _saveRespawnTestDeathPosition) > 1f;
         bool passed = enemy.Alive && enemy.Health > 0f && enemy.RespawnTimer <= 0f
             && enemy.Deaths == _saveRespawnTestDeaths + 1 && movedToSpawn;

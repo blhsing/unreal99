@@ -900,11 +900,15 @@ public sealed class BotController : Controller
     private void SelectTarget(GameWorld world)
     {
         Pawn best = null;
+        Pawn onlyEnemy = null;
+        int eligibleEnemies = 0;
         float bestScore = float.MinValue;
         foreach (var candidate in world.Pawns)
         {
             if (candidate == Pawn || !candidate.Alive) continue;
             if (world.Mode.TeamBased && candidate.Team == Pawn.Team) continue;
+            onlyEnemy = candidate;
+            eligibleEnemies++;
             if (!CanSee(world, candidate)) continue;
 
             float dist = Vector3.Distance(Pawn.Position, candidate.Position);
@@ -923,6 +927,19 @@ public sealed class BotController : Controller
             if (_targetId != best.Id && Skill < 0.85f)
                 _reactionTimer = ReactionTime * _rng.Range(0.85f, 1.20f);
             _targetId = best.Id;
+            return;
+        }
+
+        // In a one-on-one deathmatch, wandering randomly on the opposite navigation island can
+        // leave the only opponent absent for most of the opening minute. Give the bot one sampled
+        // search position for five seconds. The position is not refreshed through walls, and the
+        // bot still cannot aim or fire until ordinary sight and line-of-sight checks succeed.
+        if (world.Mode.Kind == GameModeKind.Deathmatch && eligibleEnemies == 1
+            && onlyEnemy != null && _targetId < 0)
+        {
+            _targetId = onlyEnemy.Id;
+            _lastKnownTargetPos = onlyEnemy.Position;
+            _lastSeenTargetTime = world.Time;
             return;
         }
 

@@ -361,10 +361,16 @@ public sealed class InputSystem : IDisposable
     {
         Vector2 ordinary = FilterCapturedSharedLookDelta(new Vector2(420f, -21f), captured: true);
         Vector2 recenter = FilterCapturedSharedLookDelta(new Vector2(960f, -540f), captured: true);
+        Vector2 horizontalDuringVerticalWarp = FilterCapturedSharedLookDelta(
+            new Vector2(32f, -540f), captured: true);
+        Vector2 verticalDuringHorizontalWarp = FilterCapturedSharedLookDelta(
+            new Vector2(960f, -18f), captured: true);
         bool pass = ShouldUseSilkPointerForLook(rawAvailable: true, mouseHandle: 0)
             && !ShouldUseSilkPointerForLook(rawAvailable: true, mouseHandle: 44)
             && ShouldUseSilkPointerForLook(rawAvailable: false, mouseHandle: 0)
-            && ordinary == new Vector2(420f, -21f) && recenter == Vector2.Zero;
+            && ordinary == new Vector2(420f, -21f) && recenter == Vector2.Zero
+            && horizontalDuringVerticalWarp == new Vector2(32f, 0f)
+            && verticalDuringHorizontalWarp == new Vector2(0f, -18f);
         Console.WriteLine($"共用滑鼠保留移動並拒絕重定位跳躍: {(pass ? "通過" : "失敗")}");
         return pass ? 0 : 1;
     }
@@ -381,10 +387,14 @@ public sealed class InputSystem : IDisposable
         // motion while still rejecting the upward snap and full spin.
         const float MaxPlausibleHorizontalDelta = 720f;
         const float MaxPlausibleVerticalDelta = 420f;
-        return captured && (MathF.Abs(delta.X) > MaxPlausibleHorizontalDelta
-                || MathF.Abs(delta.Y) > MaxPlausibleVerticalDelta)
-            ? Vector2.Zero
-            : delta;
+        if (!captured) return delta;
+
+        // Treat the two axes independently. A host cursor warp is often vertical-only while the
+        // player is deliberately steering sideways. Discarding the whole vector in that case is
+        // why horizontal mouse movement intermittently stopped working while W was held.
+        return new Vector2(
+            MathF.Abs(delta.X) > MaxPlausibleHorizontalDelta ? 0f : delta.X,
+            MathF.Abs(delta.Y) > MaxPlausibleVerticalDelta ? 0f : delta.Y);
     }
 
     private bool UseSilkSharedInput(PlayerDevice device)
