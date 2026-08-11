@@ -443,7 +443,7 @@ public sealed class Pawn
         // --- integrate ---
         Vector3 half = HalfExtents;
         Vector3 center = Position + new Vector3(0, CurrentHeight * 0.5f, 0);
-        var result = world.MoveBox(center, half, Velocity, dt);
+        var result = world.MoveBox(center, half, Velocity, dt, initiallyGrounded: OnGround);
         Position = result.Position - new Vector3(0, CurrentHeight * 0.5f, 0);
         Velocity = result.Velocity;
         bool wasOnGround = OnGround;

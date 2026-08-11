@@ -359,12 +359,12 @@ public sealed class InputSystem : IDisposable
     /// </summary>
     public static int RunLookRoutingSelfTest()
     {
-        Vector2 ordinary = FilterCapturedSharedLookDelta(new Vector2(38f, -21f), captured: true);
+        Vector2 ordinary = FilterCapturedSharedLookDelta(new Vector2(420f, -21f), captured: true);
         Vector2 recenter = FilterCapturedSharedLookDelta(new Vector2(960f, -540f), captured: true);
         bool pass = ShouldUseSilkPointerForLook(rawAvailable: true, mouseHandle: 0)
             && !ShouldUseSilkPointerForLook(rawAvailable: true, mouseHandle: 44)
             && ShouldUseSilkPointerForLook(rawAvailable: false, mouseHandle: 0)
-            && ordinary == new Vector2(38f, -21f) && recenter == Vector2.Zero;
+            && ordinary == new Vector2(420f, -21f) && recenter == Vector2.Zero;
         Console.WriteLine($"共用滑鼠保留移動並拒絕重定位跳躍: {(pass ? "通過" : "失敗")}");
         return pass ? 0 : 1;
     }
@@ -375,12 +375,14 @@ public sealed class InputSystem : IDisposable
     internal static Vector2 FilterCapturedSharedLookDelta(Vector2 delta, bool captured)
     {
         if (!float.IsFinite(delta.X) || !float.IsFinite(delta.Y)) return Vector2.Zero;
-        // A single real mouse frame can be fast, but a 256-count jump on both commodity and high-
-        // DPI mice already represents a very large flick. Captured recenter events are typically
-        // half a 1080p viewport (roughly 960x540) and must be discarded, not clamped into a turn.
-        const float MaxPlausibleFrameDelta = 256f;
-        return captured && (MathF.Abs(delta.X) > MaxPlausibleFrameDelta
-                || MathF.Abs(delta.Y) > MaxPlausibleFrameDelta)
+        // Fast, deliberate horizontal flicks can exceed 256 counts—especially while the player
+        // is steering through a stairway—so do not suppress them. Captured recenter events on the
+        // host's 1920x1080 display are about 960x540; component-specific limits retain real mouse
+        // motion while still rejecting the upward snap and full spin.
+        const float MaxPlausibleHorizontalDelta = 720f;
+        const float MaxPlausibleVerticalDelta = 420f;
+        return captured && (MathF.Abs(delta.X) > MaxPlausibleHorizontalDelta
+                || MathF.Abs(delta.Y) > MaxPlausibleVerticalDelta)
             ? Vector2.Zero
             : delta;
     }

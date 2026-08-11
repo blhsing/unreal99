@@ -133,7 +133,8 @@ artifacts\installer\Unreal99Installer.exe --help
 | `--autoshot N 路徑` | 執行 N 個畫格後輸出 PNG 截圖並結束 |
 | `--traversaltest N 路徑` | 執行固定步長的電腦走圖測試，輸出遙測與 PNG；不擷取或移動桌面游標 |
 | `--inputtest` | 多裝置輸入自我測試 |
-| `--movementinputtest` | 以實際視窗按鍵路徑驗證前進不會改變視角或原地旋轉 |
+| `--movementinputtest` | 以實際 Windows→GLFW 路徑同時按住前進並注入橫向滑鼠，驗證可快速轉向且重定位跳躍不會造成抬頭或旋轉 |
+| `--collisiontest` | 無視窗驗證站在地面的玩家可直接向前走上 0.5 m 階梯，不必跳躍 |
 | `--menumouseinputtest` | 不移動桌面游標，驗證初次進入主選單時的滑鼠指標路由 |
 | `--hotplugtest` | 驗證滑鼠拔插、失效代號清除與自動重新指派 |
 | `--bindingtest` | 玩家一 F 上下載具、玩家二右 Shift 跳躍、左右修飾鍵 Raw Input 與舊設定遷移的無視窗自我測試 |
@@ -152,6 +153,7 @@ artifacts\installer\Unreal99Installer.exe --help
 | `--loadslot N` | 直接從第 N 個存檔位接續對戰 |
 | `--weapon N` | 強制玩家一持有指定武器，用於檢視第一人稱模型 |
 | `--savetest` | 存檔與設定的往返自我測試（寫入、讀回、還原到實際世界並比對） |
+| `--saverespawntest N` | 載入第 N 格真實存檔、擊殺其中的電腦並驗證其依原設定在新出生點復活 |
 | `--flycam 半徑 高度 角度 注視高度` | 手動指定巡航鏡頭的取景，用於為個別競技場擷取滿意的角度 |
 | `--install-shortcut` / `--uninstall-shortcut` | 建立／移除開始選單捷徑 |
 

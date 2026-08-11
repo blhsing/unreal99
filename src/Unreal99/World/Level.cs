@@ -682,6 +682,10 @@ public sealed class LevelBuilder
     /// <summary>A run of steps between two heights. Cheaper on collision than a long ramp chain.</summary>
     public void Stairs(Vector3 start, Vector3 end, float width, int steps, MatId material, bool alongX = true)
     {
+        // Authored counts are a visual preference, but no riser may exceed the collision world's
+        // step height. Otherwise an ordinary staircase becomes a wall unless the player jumps.
+        const float MaxRiser = 0.50f;
+        steps = Math.Max(steps, (int)MathF.Ceiling(MathF.Abs(end.Y - start.Y) / MaxRiser));
         for (int i = 0; i < steps; i++)
         {
             float t0 = i / (float)steps, t1 = (i + 1) / (float)steps;

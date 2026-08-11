@@ -1,5 +1,6 @@
 using System.Numerics;
 using Unreal99.Core;
+using Unreal99.Game;
 
 namespace Unreal99.World;
 
@@ -395,7 +396,7 @@ public sealed class CollisionWorld
     /// move is sub-stepped so fast projectiles and dodges never tunnel through thin brushes.
     /// </summary>
     public MoveResult MoveBox(Vector3 position, Vector3 halfExtents, Vector3 velocity, float dt,
-        bool stepUp = true, float gravityDir = -1f)
+        bool stepUp = true, float gravityDir = -1f, bool initiallyGrounded = false)
     {
         MoveResult r = default;
         r.Position = position;
@@ -414,7 +415,8 @@ public sealed class CollisionWorld
             r.Position.X += stepDelta.X;
             if (Blocked(r.Position, halfExtents, out float pushX, 0))
             {
-                if (stepUp && TryStepUp(ref r, halfExtents, 0)) { }
+                if (stepUp && (initiallyGrounded || r.OnGround)
+                    && TryStepUp(ref r, halfExtents, 0)) { }
                 else
                 {
                     r.Position.X += pushX;
@@ -428,7 +430,8 @@ public sealed class CollisionWorld
             r.Position.Z += stepDelta.Z;
             if (Blocked(r.Position, halfExtents, out float pushZ, 2))
             {
-                if (stepUp && TryStepUp(ref r, halfExtents, 2)) { }
+                if (stepUp && (initiallyGrounded || r.OnGround)
+                    && TryStepUp(ref r, halfExtents, 2)) { }
                 else
                 {
                     r.Position.Z += pushZ;
@@ -538,7 +541,6 @@ public sealed class CollisionWorld
     /// <summary>Lets the pawn walk up small ledges without jumping.</summary>
     private bool TryStepUp(ref MoveResult r, Vector3 half, int axis)
     {
-        if (!r.OnGround) return false;
         Vector3 raised = r.Position + new Vector3(0, StepHeight, 0);
         if (Blocked(raised, half, out _, axis)) return false;
         // Make sure there is floor under the raised position before committing to the step.
@@ -546,7 +548,37 @@ public sealed class CollisionWorld
         if (!Blocked(settle, half, out float down, 1) || down <= 0f) return false;
         r.Position = settle;
         r.Position.Y += down;
+        r.OnGround = true;
+        r.GroundNormal = FindGroundNormal(r.Position, half, out int groundBrush);
+        r.GroundBrush = groundBrush;
         return true;
+    }
+
+    /// <summary>Headless regression for walking up authored steps without needing to jump.</summary>
+    public static int RunStepTraversalSelfTest()
+    {
+        var world = new CollisionWorld();
+        world.Add(Brush.Box(new Vector3(-3f, -1f, -2f), new Vector3(4f, 0f, 2f)));
+        world.Add(Brush.Box(new Vector3(0f, -1f, -1.5f), new Vector3(1f, 0.5f, 1.5f)));
+        world.Add(Brush.Box(new Vector3(1f, -1f, -1.5f), new Vector3(2f, 1.0f, 1.5f)));
+        world.Add(Brush.Box(new Vector3(2f, -1f, -1.5f), new Vector3(4f, 1.5f, 1.5f)));
+        world.Rebuild();
+
+        Vector3 half = new(Physics.PawnRadius, Physics.PawnHeight * 0.5f, Physics.PawnRadius);
+        Vector3 position = new(-1f, half.Y + SkinWidth, 0f);
+        bool grounded = true;
+        for (int frame = 0; frame < 125; frame++)
+        {
+            MoveResult move = world.MoveBox(position, half, new Vector3(2f, -0.25f, 0f),
+                1f / 60f, initiallyGrounded: grounded);
+            position = move.Position;
+            grounded = move.OnGround;
+        }
+
+        bool pass = position.X > 2.8f && position.Y >= 1.5f + half.Y - 0.03f && grounded;
+        Console.WriteLine($"階梯可直接向前走上去: {(pass ? "通過" : "失敗")} " +
+                          $"位置={position.X:0.00},{position.Y:0.00},{position.Z:0.00}");
+        return pass ? 0 : 1;
     }
 
     private Vector3 FindGroundNormal(Vector3 center, Vector3 half, out int brushIndex)

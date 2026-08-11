@@ -405,6 +405,12 @@ public sealed class App : IDisposable
                     if (int.TryParse(args[i + 1], out int ls)) _loadSlotAtBoot = ls;
                     i++;
                     break;
+                case "--saverespawntest" when i + 1 < args.Length:
+                    _saveRespawnTest = true;
+                    _windowed = true;
+                    if (int.TryParse(args[i + 1], out int respawnSlot)) _loadSlotAtBoot = respawnSlot;
+                    i++;
+                    break;
                 case "--weapon" when i + 1 < args.Length:
                     // Forces player one's held weapon each frame. For inspecting view models,
                     // which is otherwise awkward because the pawn auto-selects its best gun.
@@ -1410,6 +1416,7 @@ public sealed class App : IDisposable
         if (_inputTest) UpdateInputSelfTest();
         if (_movementInputTest) UpdateMovementInputSelfTest();
         if (_matchMouseInputTest) UpdateMatchMouseInputSelfTest();
+        if (_saveRespawnTest) UpdateSaveRespawnSelfTest();
         if (_menuMouseInputTest) UpdateMenuMouseInputSelfTest();
         if (_saveTest) UpdateSaveSelfTest();
         if (_vehicleTest) UpdateVehicleSelfTest();
@@ -2509,6 +2516,10 @@ public sealed class App : IDisposable
     private float _matchMouseInputTestYaw;
     private float _matchMouseInputTestPitch;
     private int _matchMouseInputTestButtonFrames;
+    private bool _saveRespawnTest;
+    private int _saveRespawnTestFrame;
+    private int _saveRespawnTestDeaths;
+    private Vector3 _saveRespawnTestDeathPosition;
     /// <summary>Wheel accumulated per slot across the whole test, so a scroll at any moment counts.</summary>
     private readonly float[] _inputTestWheel = new float[4];
 
@@ -2597,6 +2608,10 @@ public sealed class App : IDisposable
             _input.Raw.SetSyntheticKeyForTest(0x57, down: true);
             _movementInputTestInjected++;
         }
+        // Drive the real Windows → GLFW pointer path while W remains held. Directly assigning
+        // _mouseDelta would miss the host-specific captured-cursor behavior this test exists for.
+        if (_movementInputTestFrame is >= 40 and < 60)
+            InputDiagnostics.InjectMouseMove(8, 0);
         else if (_movementInputTestFrame == 100)
         {
             _input.Raw.SetSyntheticKeyForTest(0x57, down: false);
@@ -2610,8 +2625,11 @@ public sealed class App : IDisposable
             float cameraYawChange = MathF.Abs(MathX.WrapAngle(_cameras[0].Yaw
                 - _movementInputTestCameraYaw));
             float cameraPitchChange = MathF.Abs(_cameras[0].Pitch - _movementInputTestCameraPitch);
-            bool passed = travel >= 1.5f && yawChange <= 0.02f && pitchChange <= 0.02f
-                && cameraYawChange <= 0.02f && cameraPitchChange <= 0.02f;
+            // The injected sideways mouse motion must still steer quickly while W is held, while
+            // the separate 960x540 recenter-shaped packet must not alter pitch or add a spin.
+            bool passed = travel >= 1.5f && yawChange >= 0.10f && yawChange <= 0.80f
+                && pitchChange <= 0.02f && cameraYawChange >= 0.10f && cameraYawChange <= 0.80f
+                && cameraPitchChange <= 0.02f;
             Console.WriteLine($"MOVEMENT_INPUT {(passed ? "PASS" : "FAIL")} " +
                               $"travel={travel:0.00} yaw={yawChange:0.000} pitch={pitchChange:0.000} " +
                               $"cameraYaw={cameraYawChange:0.000} cameraPitch={cameraPitchChange:0.000} " +
@@ -2675,6 +2693,43 @@ public sealed class App : IDisposable
         Console.WriteLine($"MATCH_MOUSE_INPUT {(passed ? "PASS" : "FAIL")} " +
                           $"yaw={yaw:0.000} pitch={pitch:0.000} cameraYaw={cameraYaw:0.000} " +
                           $"buttonFrames={_matchMouseInputTestButtonFrames}");
+        if (!passed) ExitCode = 1;
+        _window.Close();
+    }
+
+    /// <summary>Kills the bot in a real loaded save, then requires the normal respawn loop to restore it.</summary>
+    private void UpdateSaveRespawnSelfTest()
+    {
+        if (_state != AppState.Playing || _world == null || _world.Frozen
+            || _world.Mode.State != MatchState.InProgress) return;
+        Pawn player = _players.FirstOrDefault()?.Pawn;
+        Pawn enemy = _world.Pawns.FirstOrDefault(p => p.IsBot);
+        if (player == null || enemy == null) return;
+
+        _saveRespawnTestFrame++;
+        if (_saveRespawnTestFrame == 1)
+        {
+            if (!enemy.Alive)
+            {
+                Console.WriteLine("SAVE_RESPAWN FAIL enemy was already dead after restore");
+                ExitCode = 1;
+                _window.Close();
+                return;
+            }
+            _saveRespawnTestDeaths = enemy.Deaths;
+            _saveRespawnTestDeathPosition = enemy.Position;
+            _world.Damage(enemy, player, 1000f, DamageType.Hitscan,
+                MathX.SafeNormalize(enemy.Position - player.Position, MathX.Forward));
+            return;
+        }
+
+        if (_saveRespawnTestFrame != 30) return;
+        bool movedToSpawn = Vector3.DistanceSquared(enemy.Position, _saveRespawnTestDeathPosition) > 1f;
+        bool passed = enemy.Alive && enemy.Health > 0f && enemy.RespawnTimer <= 0f
+            && enemy.Deaths == _saveRespawnTestDeaths + 1 && movedToSpawn;
+        Console.WriteLine($"SAVE_RESPAWN {(passed ? "PASS" : "FAIL")} alive={enemy.Alive} " +
+                          $"health={enemy.Health:0} timer={enemy.RespawnTimer:0.00} " +
+                          $"deaths={enemy.Deaths} movedToSpawn={movedToSpawn}");
         if (!passed) ExitCode = 1;
         _window.Close();
     }

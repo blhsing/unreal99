@@ -3,6 +3,7 @@ using Unreal99;
 using Unreal99.Game;
 using Unreal99.Platform;
 using Unreal99.UI;
+using Unreal99.World;
 
 // Console output includes Traditional Chinese status lines.
 try { Console.OutputEncoding = Encoding.UTF8; } catch (IOException) { /* redirected stdout */ }
@@ -18,6 +19,7 @@ if (args.Contains("--moderulestest")) return ObjectiveModeSelfTest.Run();
 if (args.Contains("--vehiclecoverage")) return VehicleCoverageSelfTest.Run();
 if (args.Contains("--weaponcoverage")) return WeaponCoverageSelfTest.Run();
 if (args.Contains("--weaponmechanicstest")) return WeaponMechanicsSelfTest.Run();
+if (args.Contains("--collisiontest")) return CollisionWorld.RunStepTraversalSelfTest();
 if (args.Contains("--hotplugtest"))
     return DeviceAssignment.RunSelfTest() | InputSystem.RunPointerResetSelfTest()
         | InputSystem.RunLookRoutingSelfTest();
