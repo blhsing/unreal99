@@ -1391,7 +1391,12 @@ public sealed class App : IDisposable
         RefreshHotPlugAssignments();
         InjectMatchMouseInputSelfTest();
         if (_menuMouseInputTest && _state == AppState.Menu)
-            _input.SetSharedPointerForTest(new Vector2(Width * 0.5f, Height * 0.5f));
+        {
+            // Two valid positions with zero reported delta reproduce the RDP/DeskFerry path: the
+            // styled cursor moves, and hover must follow its coordinates rather than MouseDelta.
+            float y = _menuMouseInputTestFrame == 0 ? Height * 0.417f : Height * 0.562f;
+            _input.SetSharedPointerForTest(new Vector2(Width * 0.5f, y));
+        }
         HandleGlobalKeys();
 
         switch (_state)
@@ -1642,11 +1647,12 @@ public sealed class App : IDisposable
         Vector2 position = _input.MousePosition;
         bool inside = position.X >= 0f && position.X <= Width
             && position.Y >= 0f && position.Y <= Height;
-        // The first pointer sample intentionally has zero delta. Treat its valid position as
-        // activity so entering the menu while already resting over a row highlights that row
-        // immediately instead of waiting for a second movement event.
+        // RDP/DeskFerry can update the absolute pointer position while reporting a zero motion
+        // delta. Compare against the menu's last drawn pointer instead: this activates the first
+        // sample and makes every visible software-cursor movement drive hover highlighting.
         bool moved = inside && _input.HasPointerSample
-            && (_input.MouseDelta.LengthSquared() > 0.01f || !_menu.PointerActiveForTest);
+            && (!_menu.PointerActiveForTest
+                || Vector2.DistanceSquared(position, _menu.PointerForTest) > 0.25f);
         position.X = MathX.Clamp(position.X, 0f, Width);
         position.Y = MathX.Clamp(position.Y, 0f, Height);
         _menu.HandleMouse(position, moved,
@@ -2670,12 +2676,16 @@ public sealed class App : IDisposable
     {
         if (_state != AppState.Menu) return;
         _menuMouseInputTestFrame++;
-        if (_menuMouseInputTestFrame < 2) return;
-        Vector2 expected = new(Width * 0.5f, Height * 0.5f);
+        // Allow one frame for first menu layout and one stationary follow-up hit-test. This is the
+        // exact ordering that used to leave first-entry hover inactive.
+        if (_menuMouseInputTestFrame < 4) return;
+        Vector2 expected = new(Width * 0.5f, Height * 0.562f);
         bool passed = _menu.PointerActiveForTest
-            && Vector2.Distance(_menu.PointerForTest, expected) <= 0.1f;
+            && Vector2.Distance(_menu.PointerForTest, expected) <= 0.1f
+            && _menu.SelectedIndex == 3;
         Console.WriteLine($"MENU_MOUSE_INPUT {(passed ? "PASS" : "FAIL")} " +
-                          $"position={_menu.PointerForTest.X:0.0},{_menu.PointerForTest.Y:0.0}");
+                          $"position={_menu.PointerForTest.X:0.0},{_menu.PointerForTest.Y:0.0} " +
+                          $"selected={_menu.SelectedIndex}");
         if (!passed) ExitCode = 1;
         _window.Close();
     }

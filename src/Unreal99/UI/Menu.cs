@@ -52,6 +52,12 @@ public sealed class Menu
     private float _scroll;
     private float _maxScroll;
     private bool _pointerActive;
+    /// <summary>
+    /// True while the mouse owns selection. Unlike pointer visibility this survives a stationary
+    /// frame, which is required when the pointer arrives before the first set of hit rectangles.
+    /// Keyboard navigation clears it until the pointer is used again.
+    /// </summary>
+    private bool _pointerControlsSelection;
     private Vector2 _pointer;
     private ItemRect? _captureCancelRect;
     private ItemRect? _nameConfirmRect;
@@ -172,6 +178,7 @@ public sealed class Menu
 
     public void HandleInput(bool up, bool down, bool left, bool right, bool accept, bool back, float dt)
     {
+        if (up || down || left || right || accept || back) _pointerControlsSelection = false;
         _time += dt;
         _navCooldown = MathF.Max(0f, _navCooldown - dt);
         _selectPulse = MathF.Max(0f, _selectPulse - dt * 3f);
@@ -227,6 +234,7 @@ public sealed class Menu
         if (pointerUsed)
         {
             _pointerActive = true;
+            _pointerControlsSelection = true;
             _pointer = position;
         }
         else if (_pointerActive)
@@ -280,9 +288,11 @@ public sealed class Menu
         if (!_pointerActive) return;
 
         int hovered = HitTest(position, out ItemRect rect);
-        // Only steal the selection when the mouse actually moves, so hovering over one row does
-        // not fight the keyboard when the player is navigating with the arrows.
-        if ((moved || MathF.Abs(wheel) > 0.01f) && hovered >= 0 && hovered != SelectedIndex)
+        // Mouse mode hit-tests every frame. The pointer can become active one frame before the
+        // first menu draw creates hit rectangles; requiring another motion event here left that
+        // first-entry hover permanently unselected. Keyboard input clears mouse ownership above,
+        // so a stationary pointer still cannot fight arrow-key navigation.
+        if (_pointerControlsSelection && hovered >= 0 && hovered != SelectedIndex)
         {
             SelectedIndex = hovered;
             PlaySound?.Invoke(SoundId.MenuMove);
