@@ -570,9 +570,6 @@ public sealed class App : IDisposable
 
         _menu.FaceRegular = _hud.FaceRegular;
         _menu.FaceBold = _hud.FaceBold;
-        // Normal front-end cursor mode is reliable on this host and avoids a duplicated native +
-        // software pointer. Gameplay switches back to captured relative motion.
-        _menu.DrawSoftwarePointer = false;
         _menu.LogoTexture = _logoTexture;
         _menu.MapThumbnail = MapThumbnail;
         _menu.Render = _renderSettings;
@@ -1643,9 +1640,15 @@ public sealed class App : IDisposable
     private void FeedMenuMouse()
     {
         Vector2 position = _input.MousePosition;
+        bool inside = position.X >= 0f && position.X <= Width
+            && position.Y >= 0f && position.Y <= Height;
+        // The first pointer sample intentionally has zero delta. Treat its valid position as
+        // activity so entering the menu while already resting over a row highlights that row
+        // immediately instead of waiting for a second movement event.
+        bool moved = inside && _input.HasPointerSample
+            && (_input.MouseDelta.LengthSquared() > 0.01f || !_menu.PointerActiveForTest);
         position.X = MathX.Clamp(position.X, 0f, Width);
         position.Y = MathX.Clamp(position.Y, 0f, Height);
-        bool moved = _input.MouseDelta.LengthSquared() > 0.01f;
         _menu.HandleMouse(position, moved,
             _input.MouseButtonPressed(MouseButton.Left),
             _input.MouseButtonPressed(MouseButton.Right),

@@ -439,13 +439,17 @@ public sealed class InputSystem : IDisposable
 
     public Vector2 MouseDelta => _mouseDelta;
     public Vector2 MousePosition => _mousePosition;
+    public bool HasPointerSample => !_firstMouseSample;
     public float ScrollDelta => _scroll;
 
-    /// <summary>Deterministic menu-test hook; does not move or capture the desktop cursor.</summary>
+    /// <summary>
+    /// Deterministic first-entry menu hook. It deliberately supplies a valid position with zero
+    /// delta, matching the first real sample that previously failed to activate hover.
+    /// </summary>
     public void SetSharedPointerForTest(Vector2 position)
     {
         _mousePosition = position;
-        _mouseDelta = new Vector2(12f, 8f);
+        _mouseDelta = Vector2.Zero;
         _firstMouseSample = false;
     }
 
@@ -499,9 +503,7 @@ public sealed class InputSystem : IDisposable
     }
 
     public void SetMouseCapture(bool capture)
-        // Front-end states keep the native cursor visible. Hiding it made a newly opened menu
-        // unusable on RDP/DeskFerry desktops where GLFW could not report the hidden pointer.
-        => SetPointerMode(capture ? PointerMode.Captured : PointerMode.Normal);
+        => SetPointerMode(capture ? PointerMode.Captured : PointerMode.Hidden);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct WinPoint { public int X; public int Y; }
