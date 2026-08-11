@@ -11,7 +11,7 @@ namespace Unreal99.Platform;
 /// </summary>
 public sealed class UserSettings
 {
-    public const int CurrentVersion = 7;
+    public const int CurrentVersion = 8;
     public int Version = CurrentVersion;
 
     // --- video ---
@@ -269,7 +269,49 @@ public static class SettingsStore
                 if (insertVehicleUse && i == 1
                     && d.Bindings[GameAction.Jump] == InputBinding.OnKey(Key.Keypad7))
                     d.Bindings[GameAction.Jump] = InputBinding.OnKey(Key.ShiftRight);
+
+                // The first version-7 migration restored UseVehicle but a released intermediate
+                // build had already shifted Hoverboard and player one's numeric tail one slot.
+                // Recognise that exact layout rather than resetting genuine custom bindings.
+                if (s.Version < 8 && LooksLikeShiftedNumericTail(d))
+                {
+                    BindingProfile defaults = BindingProfile.CreateDefault(i);
+                    d.Bindings[GameAction.Hoverboard] = defaults[GameAction.Hoverboard];
+                    for (int slot = 0; slot < 10; slot++)
+                        d.Bindings[GameAction.Weapon1 + slot] = defaults[GameAction.Weapon1 + slot];
+                }
+                else if (s.Version < 8 && LooksLikeDefaultExceptHoverboard(d, i))
+                {
+                    d.Bindings[GameAction.Hoverboard] =
+                        BindingProfile.CreateDefault(i)[GameAction.Hoverboard];
+                }
             }
+        }
+
+        static bool LooksLikeShiftedNumericTail(PlayerDevice device)
+        {
+            if (device.Bindings[GameAction.Hoverboard] != InputBinding.OnKey(Key.Number1))
+                return false;
+            for (int slot = 0; slot < 9; slot++)
+            {
+                Key expected = slot < 8 ? Key.Number2 + slot : Key.Number0;
+                if (device.Bindings[GameAction.Weapon1 + slot]
+                    != InputBinding.OnKey(expected)) return false;
+            }
+            return device.Bindings[GameAction.Weapon10] == InputBinding.OnKey(Key.Number0);
+        }
+
+        static bool LooksLikeDefaultExceptHoverboard(PlayerDevice device, int player)
+        {
+            if (device.Bindings[GameAction.Hoverboard].IsBound) return false;
+            BindingProfile defaults = BindingProfile.CreateDefault(player);
+            if (!defaults[GameAction.Hoverboard].IsBound) return false;
+            for (int action = 0; action < (int)GameAction.Count; action++)
+            {
+                if (action == (int)GameAction.Hoverboard) continue;
+                if (device.Bindings.Bindings[action] != defaults.Bindings[action]) return false;
+            }
+            return true;
         }
     }
 
@@ -341,6 +383,35 @@ public static class SettingsStore
             && devices[1].Bindings[GameAction.Hoverboard] == InputBinding.OnKey(Key.KeypadAdd);
         Console.WriteLine($"舊版載具／右 Shift 設定遷移: {(migrated ? "通過" : "失敗")}");
         return migrated ? 0 : 1;
+    }
+
+    /// <summary>Repairs the released version-7 Hoverboard/numeric-tail alignment.</summary>
+    public static int RunHoverboardMigrationSelfTest()
+    {
+        var legacy = new UserSettings { Version = 7 };
+        BindingProfile shifted = BindingProfile.CreateDefault(0);
+        shifted[GameAction.Hoverboard] = InputBinding.OnKey(Key.Number1);
+        for (int slot = 0; slot < 9; slot++)
+            shifted[GameAction.Weapon1 + slot] = InputBinding.OnKey(
+                slot < 8 ? Key.Number2 + slot : Key.Number0);
+        shifted[GameAction.Weapon10] = InputBinding.OnKey(Key.Number0);
+        var stored = new PlayerProfileData();
+        foreach (InputBinding binding in shifted.Bindings)
+        {
+            stored.BindingKeys.Add((int)binding.Key);
+            stored.BindingMouseButtons.Add(binding.MouseButton);
+        }
+        legacy.Players.Add(stored);
+
+        PlayerDevice[] devices = [PlayerDevice.Keyboard(0)];
+        Apply(legacy, new RenderSettings(), new ControlSettings(), devices, new string[1],
+            new MatchSetup(), out _, out _, out _);
+        bool pass = devices[0].Bindings[GameAction.Hoverboard] == InputBinding.OnKey(Key.R)
+            && devices[0].Bindings[GameAction.Weapon1] == InputBinding.OnKey(Key.Number1)
+            && devices[0].Bindings[GameAction.Weapon9] == InputBinding.OnKey(Key.Number9)
+            && devices[0].Bindings[GameAction.Weapon10] == InputBinding.OnKey(Key.Number0);
+        Console.WriteLine($"舊版氣墊板／數字武器槽設定遷移: {(pass ? "通過" : "失敗")}");
+        return pass ? 0 : 1;
     }
 }
 

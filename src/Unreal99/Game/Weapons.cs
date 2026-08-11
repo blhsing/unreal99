@@ -762,6 +762,90 @@ public static class Weapons
     ];
 
     /// <summary>
+    /// The eleven persistent HUD positions. Newer games replaced several UT99 weapons instead of
+    /// extending the number row, so equivalent weapons share the original arsenal position. This
+    /// keeps the bar readable even when a custom map makes the entire cross-generation arsenal
+    /// available at once.
+    /// </summary>
+    public static readonly WeaponKind[][] HudGroups =
+    [
+        [WeaponKind.ImpactHammer, WeaponKind.ShieldGun, WeaponKind.Translocator],
+        [WeaponKind.Enforcer, WeaponKind.AssaultRifle],
+        [WeaponKind.BioRifle, WeaponKind.MineLayer],
+        [WeaponKind.ShockRifle, WeaponKind.SuperShockRifle],
+        [WeaponKind.PulseGun, WeaponKind.LinkGun],
+        [WeaponKind.Ripper, WeaponKind.Stinger],
+        [WeaponKind.Minigun],
+        [WeaponKind.FlakCannon, WeaponKind.GrenadeLauncher],
+        [WeaponKind.RocketLauncher, WeaponKind.Avril],
+        [WeaponKind.SniperRifle, WeaponKind.LightningGun],
+        [WeaponKind.Redeemer, WeaponKind.IonPainter, WeaponKind.TargetPainter, WeaponKind.BallLauncher],
+    ];
+
+    /// <summary>
+    /// Numeric bindings 1–9 address the first nine positions. Zero retains its familiar
+    /// superweapon selection on the first tap; a second tap within the controller's double-tap
+    /// window addresses the sniper position, giving eleven positions ten keys without adding a
+    /// sprawling second row.
+    /// </summary>
+    public static int HudGroupForBinding(int zeroBasedBinding, bool doubleTap)
+    {
+        if (zeroBasedBinding < 0 || zeroBasedBinding > 9) return -1;
+        if (zeroBasedBinding < 9) return zeroBasedBinding;
+        return doubleTap ? 9 : 10;
+    }
+
+    public static int HudGroupForWeapon(WeaponKind weapon)
+    {
+        for (int group = 0; group < HudGroups.Length; group++)
+            if (Array.IndexOf(HudGroups[group], weapon) >= 0) return group;
+        return -1;
+    }
+
+    /// <summary>Selects the next usable member of a HUD group, or the first when entering it.</summary>
+    public static WeaponKind? NextInHudGroup(Pawn pawn, int group)
+    {
+        if (group < 0 || group >= HudGroups.Length) return null;
+        WeaponKind[] candidates = HudGroups[group];
+        int current = Array.IndexOf(candidates,
+            pawn.PendingWeapon != WeaponKind.Count ? pawn.PendingWeapon : pawn.Weapon);
+        for (int step = 1; step <= candidates.Length; step++)
+        {
+            int index = current < 0 ? step - 1 : (current + step) % candidates.Length;
+            WeaponKind weapon = candidates[index];
+            if (!pawn.HasWeapon[(int)weapon]) continue;
+            WeaponDef def = Get(weapon);
+            if (def.Ammo != AmmoKind.None && pawn.AmmoFor(weapon) <= 0) continue;
+            return weapon;
+        }
+        return null;
+    }
+
+    public static int RunHudGroupSelfTest()
+    {
+        var seen = new HashSet<WeaponKind>();
+        int entries = 0;
+        foreach (WeaponKind[] group in HudGroups)
+            foreach (WeaponKind weapon in group) { seen.Add(weapon); entries++; }
+
+        var pawn = new Pawn { Weapon = WeaponKind.Enforcer };
+        pawn.HasWeapon[(int)WeaponKind.ImpactHammer] = true;
+        pawn.HasWeapon[(int)WeaponKind.ShieldGun] = true;
+        WeaponKind? firstTap = NextInHudGroup(pawn, 0);
+        pawn.Weapon = WeaponKind.ImpactHammer;
+        WeaponKind? secondTap = NextInHudGroup(pawn, 0);
+        bool pass = HudGroups.Length == 11
+            && seen.Count == (int)WeaponKind.Count && entries == (int)WeaponKind.Count
+            && HudGroupForBinding(0, false) == 0
+            && HudGroupForBinding(8, true) == 8
+            && HudGroupForBinding(9, false) == 10
+            && HudGroupForBinding(9, true) == 9
+            && firstTap == WeaponKind.ImpactHammer && secondTap == WeaponKind.ShieldGun;
+        Console.WriteLine($"HUD 十一個武器槽與 0 鍵雙擊選擇: {(pass ? "通過" : "失敗")}");
+        return pass ? 0 : 1;
+    }
+
+    /// <summary>
     /// Which era's sidearms a map hands out. UT2004's arenas start you with a Shield Gun and an
     /// Assault Rifle, not an Impact Hammer and an Enforcer; UT3 went back to the 1999 pair. A map
     /// that opens with the wrong two weapons feels wrong before anything else happens.

@@ -100,7 +100,7 @@ public static class InputDiagnostics
         foreach (var d in raw.Mice)
         {
             if (!d.SeenInput) continue;
-            sb.AppendLine($"  · {d.Name}  handle=0x{d.Handle:X}  活動值={d.ActivityScore:0.0}");
+            sb.AppendLine($"  · {d.Name}  handle=0x{d.Handle:X}  活動值={d.ActivityScore:0.0}  {d.Identity}");
         }
         foreach (var d in raw.Keyboards)
         {

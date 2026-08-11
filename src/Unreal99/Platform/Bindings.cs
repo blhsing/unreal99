@@ -236,7 +236,7 @@ public static class BindingNames
         GameAction.Scoreboard => "計分板",
         GameAction.UseVehicle => "上下載具",
         GameAction.Hoverboard => "氣墊滑板",
-        >= GameAction.Weapon1 and <= GameAction.Weapon10 => $"武器 {action - GameAction.Weapon1 + 1}",
+        >= GameAction.Weapon1 and <= GameAction.Weapon10 => $"武器槽 {action - GameAction.Weapon1 + 1}",
         _ => "",
     };
 

@@ -680,7 +680,7 @@ public sealed class App : IDisposable
             Array.Copy(setup.BotSkillOverrides, _menu.BotSkillOverrides,
                 Math.Min(setup.BotSkillOverrides.Length, _menu.BotSkillOverrides.Length));
         if (!_cliOverrides.Contains("quality")) _renderSettings.Apply((QualityLevel)MathX.Clamp(saved.Quality, 0, 3));
-        _menu.DemoMode = saved.DemoMode || _demoMode;
+        if (!_cliOverrides.Contains("demo")) _menu.DemoMode = saved.DemoMode || _demoMode;
         if (!_cliOverrides.Contains("demoskill"))
             _menu.DemoSkill = MathX.Clamp(saved.DemoSkill, 0, 5);
 
@@ -2433,8 +2433,12 @@ public sealed class App : IDisposable
     private Vector3 _movementInputTestStart;
     private float _movementInputTestYaw;
     private float _movementInputTestPitch;
+    private float _movementInputTestCameraYaw;
+    private float _movementInputTestCameraPitch;
     private int _movementInputTestDownFrames;
     private int _movementInputTestInjected;
+    private Vector2 _movementInputTestMaxLook;
+    private Vector2 _movementInputTestTotalLook;
     private bool _menuMouseInputTest;
     private int _menuMouseInputTestFrame;
     /// <summary>Wheel accumulated per slot across the whole test, so a scroll at any moment counts.</summary>
@@ -2486,7 +2490,7 @@ public sealed class App : IDisposable
     /// <summary>
     /// End-to-end regression for the reported failure: inject W at the Raw Input boundary, let
     /// the normal binding/controller/pawn path consume it, then require forward translation without
-    /// any mouse-less yaw or pitch change.
+    /// any mouse-less controller or rendered-camera yaw/pitch change.
     /// </summary>
     private void UpdateMovementInputSelfTest()
     {
@@ -2494,6 +2498,12 @@ public sealed class App : IDisposable
             || _players.Count == 0 || _players[0].Pawn == null) return;
         Pawn pawn = _players[0].Pawn;
         _movementInputTestFrame++;
+        Vector2 observedLook = _input.LookDelta(_playerDevices[0]);
+        if (MathF.Abs(observedLook.X) > MathF.Abs(_movementInputTestMaxLook.X))
+            _movementInputTestMaxLook.X = observedLook.X;
+        if (MathF.Abs(observedLook.Y) > MathF.Abs(_movementInputTestMaxLook.Y))
+            _movementInputTestMaxLook.Y = observedLook.Y;
+        _movementInputTestTotalLook += observedLook;
         if (_input.ActionDown(_playerDevices[0], GameAction.MoveForward))
             _movementInputTestDownFrames++;
         if (_movementInputTestFrame == 1)
@@ -2501,10 +2511,14 @@ public sealed class App : IDisposable
             _movementInputTestStart = pawn.Position;
             _movementInputTestYaw = pawn.Yaw;
             _movementInputTestPitch = pawn.Pitch;
-            // This gate measures whether a movement key itself can mutate view state. Hot-plug
-            // look-delta clearing has its own topology test, so exclude unrelated real mouse
-            // motion from the host while this deterministic window test runs.
-            _playerDevices[0].MouseLook = false;
+            _movementInputTestCameraYaw = _cameras[0].Yaw;
+            _movementInputTestCameraPitch = _cameras[0].Pitch;
+            // Leave mouse look enabled and exercise the exact zero-handle Raw routing that used
+            // to consume captured Silk cursor coordinates. Normal pointer mode keeps this
+            // automated gate from taking control of the user's desktop cursor.
+            _playerDevices[0].MouseLook = true;
+            _playerDevices[0].MouseHandle = 0;
+            _input.SetPointerMode(InputSystem.PointerMode.Normal);
             _input.ClearLookDelta(_playerDevices[0]);
             _input.Raw.SetSyntheticKeyForTest(0x57, down: true); // W
             _movementInputTestInjected++;
@@ -2526,11 +2540,20 @@ public sealed class App : IDisposable
             float travel = (pawn.Position - _movementInputTestStart).FlatXZ().Length();
             float yawChange = MathF.Abs(MathX.WrapAngle(pawn.Yaw - _movementInputTestYaw));
             float pitchChange = MathF.Abs(pawn.Pitch - _movementInputTestPitch);
-            bool passed = travel >= 1.5f && yawChange <= 0.02f && pitchChange <= 0.02f;
+            float cameraYawChange = MathF.Abs(MathX.WrapAngle(_cameras[0].Yaw
+                - _movementInputTestCameraYaw));
+            float cameraPitchChange = MathF.Abs(_cameras[0].Pitch - _movementInputTestCameraPitch);
+            bool passed = travel >= 1.5f && yawChange <= 0.02f && pitchChange <= 0.02f
+                && cameraYawChange <= 0.02f && cameraPitchChange <= 0.02f;
             Console.WriteLine($"MOVEMENT_INPUT {(passed ? "PASS" : "FAIL")} " +
                               $"travel={travel:0.00} yaw={yawChange:0.000} pitch={pitchChange:0.000} " +
+                              $"cameraYaw={cameraYawChange:0.000} cameraPitch={cameraPitchChange:0.000} " +
+                              $"maxLook={_movementInputTestMaxLook.X:0.0},{_movementInputTestMaxLook.Y:0.0} " +
+                              $"totalLook={_movementInputTestTotalLook.X:0.0},{_movementInputTestTotalLook.Y:0.0} " +
                               $"downFrames={_movementInputTestDownFrames} injected={_movementInputTestInjected} " +
-                              $"rawMessages={_input.Raw?.MessagesReceived ?? 0}");
+                              $"rawMessages={_input.Raw?.MessagesReceived ?? 0} " +
+                              $"mouse={_playerDevices[0].MouseName}/0x{_playerDevices[0].MouseHandle:X}");
+            if (!passed) Console.WriteLine(InputDiagnostics.Report(_input.Raw));
             if (!passed) ExitCode = 1;
             _window.Close();
         }

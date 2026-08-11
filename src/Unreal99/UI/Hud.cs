@@ -516,37 +516,39 @@ public sealed class Hud
     }
 
     /// <summary>
-    /// Original-style persistent weapon inventory. Every slot uses the actual in-engine pickup
-    /// model and communicates ownership, remaining ammo and that player's direct-select binding;
-    /// the selected weapon gets a strong outline.
+    /// Eleven original-style weapon positions. Cross-generation equivalents share a position,
+    /// so a full custom-map arsenal remains legible instead of shrinking two dozen cards into a
+    /// strip. Pressing the same numeric binding again cycles the usable weapons in that position.
     /// </summary>
     private void DrawWeaponInventory(UiRenderer ui, Pawn pawn, BindingProfile bindings,
         int width, int height, float s, Vector3 accent)
     {
         bool compact = CompactLayout(width, height);
         bool bottomRow = CompactBottomRow(width, height);
-        WeaponKind[] order = Weapons.CycleOrder;
+        WeaponKind[][] groups = Weapons.HudGroups;
         float gap = compact ? 3f : 4f * s;
         float available = bottomRow
             ? width - (CompactSidePanelWidth(width, height) + 18f) * 2f
             : compact ? width - 16f
             : width - MathF.Min(width * 0.38f, 560f * s);
         float cardWidth = MathX.Clamp(
-            (available - gap * (order.Length - 1)) / order.Length,
+            (available - gap * (groups.Length - 1)) / groups.Length,
             bottomRow ? 36f : compact ? 48f : 58f, compact ? 70f : 84f * s);
         float cardHeight = bottomRow ? 74f : compact ? 64f : MathF.Max(70f, 70f * s);
-        float totalWidth = order.Length * cardWidth + (order.Length - 1) * gap;
+        float totalWidth = groups.Length * cardWidth + (groups.Length - 1) * gap;
         float startX = width * 0.5f - totalWidth * 0.5f;
         float y = bottomRow ? height - cardHeight - 10f
             : compact ? height - 151f : height - cardHeight - 10f * s;
         float font = LayoutFont(compact ? 22f : 18f * s);
 
-        for (int i = 0; i < order.Length; i++)
+        for (int i = 0; i < groups.Length; i++)
         {
-            WeaponKind weapon = order[i];
+            WeaponKind[] group = groups[i];
+            WeaponKind weapon = DisplayWeaponForGroup(pawn, group);
             WeaponDef def = Weapons.Get(weapon);
-            bool owned = pawn.HasWeapon[(int)weapon];
-            bool selected = weapon == pawn.Weapon;
+            int ownedCount = group.Count(w => pawn.HasWeapon[(int)w]);
+            bool owned = ownedCount > 0;
+            bool selected = Weapons.HudGroupForWeapon(pawn.Weapon) == i;
             int ammo = def.Ammo == AmmoKind.None ? 999 : pawn.AmmoFor(weapon);
             bool usable = owned && (def.Ammo == AmmoKind.None || ammo > 0);
             float x = startX + i * (cardWidth + gap);
@@ -579,8 +581,9 @@ public sealed class Hud
                 selected ? UiRenderer.Rgba(weaponColor * 1.35f, 1f)
                 : UiRenderer.Rgba(owned ? weaponColor : new Vector3(0.3f), 0.66f));
 
-            GameAction? action = DirectWeaponAction(weapon);
-            string key = action.HasValue ? BindingNames.CompactControl(bindings[action.Value]) : "";
+            GameAction action = i < 9 ? GameAction.Weapon1 + i : GameAction.Weapon10;
+            string key = BindingNames.CompactControl(bindings[action]);
+            if (i == 9 && !string.IsNullOrEmpty(key)) key += "×2";
             if (!string.IsNullOrEmpty(key))
             {
                 key = FitText(ui, FaceBold, font, key, cardWidth - 8f);
@@ -604,15 +607,27 @@ public sealed class Hud
                 ammoWidth, font + 4f, 3f, UiRenderer.Rgba(0.01f, 0.015f, 0.025f, 0.80f));
             ui.Text(FaceBold, font, x + cardWidth - 6f, y + cardHeight - font - 6f, ammoText,
                 UiRenderer.Rgba(ammoColor, owned ? 1f : 0.50f), TextAlign.Right);
+
+            if (ownedCount > 1)
+            {
+                string alternatives = $"+{ownedCount - 1}";
+                ui.Text(FaceBold, font, x + 5f, y + cardHeight - font - 6f, alternatives,
+                    UiRenderer.Rgba(0.72f, 0.88f, 1f, 0.95f));
+            }
         }
     }
 
-    private static GameAction? DirectWeaponAction(WeaponKind weapon)
+    private static WeaponKind DisplayWeaponForGroup(Pawn pawn, WeaponKind[] group)
     {
-        int slot = (int)weapon;
-        if (slot <= (int)WeaponKind.RocketLauncher) return GameAction.Weapon1 + slot;
-        if (weapon == WeaponKind.Redeemer) return GameAction.Weapon10;
-        return null; // Sniper rifle has no fixed slot in the original 1–9/0 scheme.
+        WeaponKind current = pawn.PendingWeapon != WeaponKind.Count ? pawn.PendingWeapon : pawn.Weapon;
+        if (Array.IndexOf(group, current) >= 0) return current;
+        foreach (WeaponKind weapon in group)
+            if (pawn.HasWeapon[(int)weapon]
+                && (Weapons.Get(weapon).Ammo == AmmoKind.None || pawn.AmmoFor(weapon) > 0))
+                return weapon;
+        foreach (WeaponKind weapon in group)
+            if (pawn.HasWeapon[(int)weapon]) return weapon;
+        return group[0];
     }
 
     private void DrawPowerups(UiRenderer ui, Pawn pawn, int width, int height, float s)

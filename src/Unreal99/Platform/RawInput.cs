@@ -1,3 +1,4 @@
+using System.Numerics;
 using System.Runtime.InteropServices;
 
 namespace Unreal99.Platform;
@@ -143,6 +144,9 @@ public sealed class RawInput : IDisposable
     [DllImport("user32.dll")]
     private static extern nint GetForegroundWindow();
 
+    [DllImport("user32.dll")]
+    private static extern int GetSystemMetrics(int index);
+
     private delegate nint WndProcDelegate(nint window, uint msg, nint wParam, nint lParam);
 
     // ---------------------------------------------------------------- state
@@ -155,6 +159,10 @@ public sealed class RawInput : IDisposable
     private readonly HashSet<nint> _changedDeviceHandles = new();
 
     private readonly Dictionary<nint, RawMouseState> _mice = new();
+    private RawMouseState _sharedMouse;
+    private readonly HashSet<nint> _remoteMouseHandles = new();
+    private readonly HashSet<nint> _remoteKeyboardHandles = new();
+    private readonly Dictionary<nint, Vector2> _absoluteMousePositions = new();
     private readonly Dictionary<nint, bool[]> _keyboards = new();
     private readonly Dictionary<nint, bool[]> _keyboardsPressed = new();
     private readonly List<RawDevice> _mouseDevices = new();
@@ -173,6 +181,8 @@ public sealed class RawInput : IDisposable
     public long MessagesReceived { get; private set; }
     public bool SubclassInstalled => _originalWndProc != 0;
     public bool RegistrationSucceeded { get; private set; }
+    /// <summary>Remote Desktop cannot provide stable relative cursor capture.</summary>
+    public bool RemoteSession => GetSystemMetrics(0x1000) != 0; // SM_REMOTESESSION
     /// <summary>Changes after Windows reports a device arrival or removal and the list refreshes.</summary>
     public int DeviceRevision { get; private set; }
 
@@ -268,9 +278,18 @@ public sealed class RawInput : IDisposable
         {
             if (entry.Type != RimTypeMouse && entry.Type != RimTypeKeyboard) continue;
             string name = QueryDeviceName(entry.Device);
-            // RDP and other virtual devices report as real HIDs but never produce useful input.
-            if (name.Contains("RDP_MOU", StringComparison.OrdinalIgnoreCase)
-                || name.Contains("RDP_KBD", StringComparison.OrdinalIgnoreCase)) continue;
+            // RDP devices are shared input, not independent local seats. Remember their handles
+            // so their packets can still drive player one without entering automatic assignment.
+            if (name.Contains("RDP_MOU", StringComparison.OrdinalIgnoreCase))
+            {
+                _remoteMouseHandles.Add(entry.Device);
+                continue;
+            }
+            if (name.Contains("RDP_KBD", StringComparison.OrdinalIgnoreCase))
+            {
+                _remoteKeyboardHandles.Add(entry.Device);
+                continue;
+            }
 
             bool isMouse = entry.Type == RimTypeMouse;
             var target = isMouse ? nextMice : nextKeyboards;
@@ -411,15 +430,32 @@ public sealed class RawInput : IDisposable
 
     private void HandleMouse(nint device, in RawMouse mouse)
     {
-        if (device == 0) return;   // synthetic input; already handled by the ordinary cursor path
-        if (!_mice.TryGetValue(device, out RawMouseState state)) state = default;
+        // RDP and device-less packets belong to the shared pointer, but remain preferable to
+        // Silk/GLFW's captured Position: that coordinate can be recentered and was the source of
+        // the immediate upward spin when a movement key was held.
+        bool shared = device == 0 || _remoteMouseHandles.Contains(device);
+        RawMouseState state = shared ? _sharedMouse
+            : _mice.TryGetValue(device, out RawMouseState existing) ? existing : default;
 
         // Absolute-mode devices (tablets, some KVMs and virtual mice) report screen coordinates
-        // rather than deltas; a delta from those would be nonsense, so only relative motion counts.
+        // rather than deltas. RDP uses normalised desktop coordinates, so convert only that shared
+        // stream to pixels; enumerated local absolute devices remain unsuitable for FPS aiming.
         if ((mouse.Flags & MouseMoveAbsolute) == 0)
         {
             state.DeltaX += mouse.LastX;
             state.DeltaY += mouse.LastY;
+        }
+        else if (shared)
+        {
+            Vector2 position = new(mouse.LastX, mouse.LastY);
+            if (_absoluteMousePositions.TryGetValue(device, out Vector2 previous))
+            {
+                const int SmCxScreen = 0, SmCyScreen = 1;
+                Vector2 delta = position - previous;
+                state.DeltaX += delta.X * Math.Max(1, GetSystemMetrics(SmCxScreen)) / 65535f;
+                state.DeltaY += delta.Y * Math.Max(1, GetSystemMetrics(SmCyScreen)) / 65535f;
+            }
+            _absoluteMousePositions[device] = position;
         }
 
         ushort flags = mouse.ButtonFlags;
@@ -441,6 +477,12 @@ public sealed class RawInput : IDisposable
         if ((flags & RiMouseButton5Up) != 0) state.ButtonsDown &= ~16;
         if ((flags & RiMouseWheel) != 0) state.Wheel += (short)mouse.ButtonData / 120f;
 
+        if (shared)
+        {
+            _sharedMouse = state;
+            return;
+        }
+
         _mice[device] = state;
         TrackActivity(_mouseDevices, device,
             MathF.Abs(mouse.LastX) + MathF.Abs(mouse.LastY) + (flags != 0 ? 40f : 0f));
@@ -451,6 +493,7 @@ public sealed class RawInput : IDisposable
     private void HandleKeyboard(nint device, in RawKeyboard key)
     {
         int virtualKey = NormalizeVirtualKey(key.VKey, key.MakeCode, key.Flags);
+        if (_remoteKeyboardHandles.Contains(device)) device = -2;
         if (device == 0)
         {
             if (!AcceptSyntheticKeyboardInput) return;
@@ -561,6 +604,8 @@ public sealed class RawInput : IDisposable
     /// <summary>Clears per-frame deltas and edges. Call after every frame's input has been read.</summary>
     public void EndFrame(float dt)
     {
+        _sharedMouse.DeltaX = _sharedMouse.DeltaY = _sharedMouse.Wheel = 0f;
+        _sharedMouse.ButtonsPressed = 0;
         foreach (nint key in _mice.Keys.ToArray())
         {
             var s = _mice[key];
@@ -591,13 +636,22 @@ public sealed class RawInput : IDisposable
     public RawMouseState Mouse(nint device)
         => device != 0 && _mice.TryGetValue(device, out RawMouseState s) ? s : default;
 
+    public RawMouseState SharedMouse => _sharedMouse;
+
     public bool HasMouse(nint handle) => handle != 0 && _mouseDevices.Any(d => d.Handle == handle);
     public bool HasKeyboard(nint handle) => handle != 0 && _keyboardDevices.Any(d => d.Handle == handle);
 
     /// <summary>Discards arrival/rebind motion so it cannot rotate a player's camera.</summary>
     public void ClearMouseTransient(nint handle)
     {
-        if (handle == 0 || !_mice.TryGetValue(handle, out RawMouseState state)) return;
+        if (handle == 0)
+        {
+            _sharedMouse.DeltaX = _sharedMouse.DeltaY = _sharedMouse.Wheel = 0f;
+            _sharedMouse.ButtonsPressed = 0;
+            _absoluteMousePositions.Clear();
+            return;
+        }
+        if (!_mice.TryGetValue(handle, out RawMouseState state)) return;
         state.DeltaX = state.DeltaY = state.Wheel = 0f;
         state.ButtonsPressed = 0;
         _mice[handle] = state;

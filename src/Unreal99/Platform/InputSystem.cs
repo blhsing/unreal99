@@ -178,6 +178,10 @@ public sealed class InputSystem : IDisposable
     /// <summary>Call once per frame before reading anything. Computes deltas and edge states.</summary>
     public void BeginFrame()
     {
+        // An RDP session can attach or detach while the game remains open. Re-apply the logical
+        // capture mode only when that transport changes, so local Raw capture and remote hidden
+        // pointer routing switch without requiring a restart.
+        if (_pointerMode == PointerMode.Captured) SetPointerMode(PointerMode.Captured);
         if (_mouse != null)
         {
             Vector2 pos = _mouse.Position;
@@ -224,8 +228,13 @@ public sealed class InputSystem : IDisposable
         if (binding.IsMouse)
         {
             if (!device.MouseLook) return false;
-            if (RawAvailable && device.MouseHandle != 0)
-                return (Raw.Mouse(device.MouseHandle).ButtonsDown & (1 << binding.MouseButton)) != 0;
+            if (UseSilkSharedInput(device)) return MouseButtonDown((MouseButton)binding.MouseButton);
+            if (RawAvailable)
+            {
+                RawMouseState state = device.MouseHandle != 0
+                    ? Raw.Mouse(device.MouseHandle) : Raw.SharedMouse;
+                return (state.ButtonsDown & (1 << binding.MouseButton)) != 0;
+            }
             return MouseButtonDown((MouseButton)binding.MouseButton);
         }
 
@@ -243,8 +252,13 @@ public sealed class InputSystem : IDisposable
         if (binding.IsMouse)
         {
             if (!device.MouseLook) return false;
-            if (RawAvailable && device.MouseHandle != 0)
-                return (Raw.Mouse(device.MouseHandle).ButtonsPressed & (1 << binding.MouseButton)) != 0;
+            if (UseSilkSharedInput(device)) return MouseButtonPressed((MouseButton)binding.MouseButton);
+            if (RawAvailable)
+            {
+                RawMouseState state = device.MouseHandle != 0
+                    ? Raw.Mouse(device.MouseHandle) : Raw.SharedMouse;
+                return (state.ButtonsPressed & (1 << binding.MouseButton)) != 0;
+            }
             return MouseButtonPressed((MouseButton)binding.MouseButton);
         }
 
@@ -258,10 +272,15 @@ public sealed class InputSystem : IDisposable
     public Vector2 LookDelta(PlayerDevice device)
     {
         if (!device.MouseLook) return Vector2.Zero;
-        if (RawAvailable && device.MouseHandle != 0)
+        if (UseSilkSharedInput(device)) return _mouseDelta;
+        if (RawAvailable)
         {
-            RawMouseState s = Raw.Mouse(device.MouseHandle);
-            return new Vector2(s.DeltaX, s.DeltaY);
+            // Local sessions use per-device Raw motion. Remote sessions are routed above through
+            // a non-recentering hidden Silk pointer; interpreting their captured absolute packets
+            // here produced the reported immediate upward view and spin.
+            RawMouseState state = device.MouseHandle != 0
+                ? Raw.Mouse(device.MouseHandle) : Raw.SharedMouse;
+            return new Vector2(state.DeltaX, state.DeltaY);
         }
         return _mouseDelta;
     }
@@ -290,10 +309,34 @@ public sealed class InputSystem : IDisposable
         return pass ? 0 : 1;
     }
 
+    /// <summary>Only the non-recentering RDP/shared route may use pointer coordinates.</summary>
+    public static int RunLookRoutingSelfTest()
+    {
+        bool pass = !ShouldUseSharedPointerForLook(rawAvailable: true, remoteSession: false,
+                mouseHandle: 0)
+            && !ShouldUseSharedPointerForLook(rawAvailable: true, remoteSession: true,
+                mouseHandle: 44)
+            && ShouldUseSharedPointerForLook(rawAvailable: true, remoteSession: true,
+                mouseHandle: 0)
+            && ShouldUseSharedPointerForLook(rawAvailable: false, remoteSession: false,
+                mouseHandle: 0);
+        Console.WriteLine($"本機 Raw／遠端隱藏游標視角路由: {(pass ? "通過" : "失敗")}");
+        return pass ? 0 : 1;
+    }
+
+    internal static bool ShouldUseSharedPointerForLook(bool rawAvailable, bool remoteSession,
+        nint mouseHandle) => mouseHandle == 0 && (!rawAvailable || remoteSession);
+
+    private bool UseSilkSharedInput(PlayerDevice device)
+        => ShouldUseSharedPointerForLook(RawAvailable, Raw?.RemoteSession == true,
+            device.MouseHandle);
+
     public float WheelDelta(PlayerDevice device)
     {
         if (!device.MouseLook) return 0f;
-        if (RawAvailable && device.MouseHandle != 0) return Raw.Mouse(device.MouseHandle).Wheel;
+        if (UseSilkSharedInput(device)) return _scroll;
+        if (RawAvailable) return (device.MouseHandle != 0
+            ? Raw.Mouse(device.MouseHandle) : Raw.SharedMouse).Wheel;
         return _scroll;
     }
 
@@ -374,17 +417,23 @@ public sealed class InputSystem : IDisposable
     public enum PointerMode { Normal, Hidden, Captured }
 
     private PointerMode _pointerMode = PointerMode.Normal;
+    private bool _remoteCaptured;
 
     public void SetPointerMode(PointerMode mode)
     {
-        if (_mouse == null || mode == _pointerMode) return;
+        bool remoteShared = mode == PointerMode.Captured && Raw?.RemoteSession == true;
+        if (_mouse == null || mode == _pointerMode && remoteShared == _remoteCaptured) return;
         _pointerMode = mode;
+        _remoteCaptured = remoteShared;
         MouseCaptured = mode == PointerMode.Captured;
         try
         {
+            // GLFW's disabled/raw cursor mode recentres the pointer. Over RDP those absolute
+            // recenter packets feed back as enormous deltas, so keep the remote pointer hidden
+            // but free. BeginFrame can then subtract stable desktop coordinates without warping.
             _mouse.Cursor.CursorMode = mode switch
             {
-                PointerMode.Captured => CursorMode.Raw,
+                PointerMode.Captured => remoteShared ? CursorMode.Hidden : CursorMode.Raw,
                 PointerMode.Hidden => CursorMode.Hidden,
                 _ => CursorMode.Normal,
             };

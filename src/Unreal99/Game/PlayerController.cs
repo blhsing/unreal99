@@ -26,6 +26,10 @@ public sealed class PlayerController : Controller
     private Vector2 _lastMoveAxis;
     private float _weaponWheelCooldown;
     private float _padDodgeCooldown;
+    private int _lastDirectWeaponBinding = -1;
+    private float _lastDirectWeaponTap = float.NegativeInfinity;
+
+    private const float DirectWeaponDoubleTapSeconds = 0.38f;
 
     public bool ScoreboardHeld { get; private set; }
     public float ZoomBlend { get; private set; }
@@ -212,9 +216,13 @@ public sealed class PlayerController : Controller
         {
             var action = GameAction.Weapon1 + i;
             if (!_input.ActionPressed(Device, action)) continue;
-            // Slots 1-9 map to the first nine weapons; slot 10 is the Redeemer.
-            int slot = i < 9 ? i : (int)WeaponKind.Redeemer;
-            if (slot < (int)WeaponKind.Count) input.WeaponSelect = slot;
+            bool doubleTap = i == 9 && _lastDirectWeaponBinding == i
+                && _time - _lastDirectWeaponTap <= DirectWeaponDoubleTapSeconds;
+            int group = Weapons.HudGroupForBinding(i, doubleTap);
+            WeaponKind? selection = Weapons.NextInHudGroup(Pawn, group);
+            if (selection.HasValue) input.WeaponSelect = (int)selection.Value;
+            _lastDirectWeaponBinding = i;
+            _lastDirectWeaponTap = _time;
         }
 
         _lastMoveAxis = axis;

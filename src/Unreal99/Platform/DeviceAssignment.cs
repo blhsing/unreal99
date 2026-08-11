@@ -38,14 +38,17 @@ public static class DeviceAssignment
         }
 
         // A replacement mouse has no saved identity. Once it actually moves, give it to the first
-        // empty automatic slot. Explicit manual slots wait for their selected device instead.
+        // empty slot. A manually selected mouse gets first refusal by identity above, but must not
+        // leave a player permanently on the shared cursor path when that old device is gone. That
+        // path is especially unsafe in captured mode because cursor coordinates are not raw motion.
         foreach (PlayerDevice player in players)
         {
-            if (player.MouseHandle != 0 || player.MouseAssignedManually) continue;
+            if (player.MouseHandle != 0) continue;
             RawDevice match = mice.FirstOrDefault(m => m.SeenInput && !claimed.Contains(m.Handle));
             if (match == null) continue;
             player.MouseHandle = match.Handle;
             player.MouseName = match.Name;
+            player.MouseAssignedManually = false;
             claimed.Add(match.Handle);
         }
 
@@ -76,11 +79,22 @@ public static class DeviceAssignment
             && players[1].MouseHandle == 33 && players[1].MouseName == "滑鼠 B"
             && players[2].MouseHandle == 0;
 
+        // If the explicitly selected B later disappears, an active replacement must take over
+        // rather than making that player consume Silk's captured cursor coordinates as look input.
+        changed = ReconcileMice(players,
+        [
+            new() { Handle = 44, Name = "滑鼠 C", IsMouse = true },
+            new() { Handle = 55, Name = "滑鼠 D", IsMouse = true, SeenInput = true },
+        ]);
+        pass &= changed && players[0].MouseHandle == 44
+            && players[1].MouseHandle == 55 && players[1].MouseName == "滑鼠 D"
+            && !players[1].MouseAssignedManually;
+
         // Removing both devices clears their ephemeral handles without losing the identities
         // needed to reclaim the same slots after a later arrival notification.
         changed = ReconcileMice(players, []);
         pass &= changed && players[0].MouseHandle == 0 && players[0].MouseName == "滑鼠 C"
-            && players[1].MouseHandle == 0 && players[1].MouseName == "滑鼠 B";
+            && players[1].MouseHandle == 0 && players[1].MouseName == "滑鼠 D";
 
         Console.WriteLine($"滑鼠熱插拔與自動重新指派: {(pass ? "通過" : "失敗")}");
         return pass ? 0 : 1;

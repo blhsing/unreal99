@@ -18,10 +18,12 @@ if (args.Contains("--vehiclecoverage")) return VehicleCoverageSelfTest.Run();
 if (args.Contains("--weaponcoverage")) return WeaponCoverageSelfTest.Run();
 if (args.Contains("--weaponmechanicstest")) return WeaponMechanicsSelfTest.Run();
 if (args.Contains("--hotplugtest"))
-    return DeviceAssignment.RunSelfTest() | InputSystem.RunPointerResetSelfTest();
+    return DeviceAssignment.RunSelfTest() | InputSystem.RunPointerResetSelfTest()
+        | InputSystem.RunLookRoutingSelfTest();
 if (args.Contains("--bindingtest"))
     return BindingProfile.RunSelfTest() | SettingsStore.RunPlayerThreeMigrationSelfTest()
-        | SettingsStore.RunVehicleUseMigrationSelfTest() | RawInput.RunKeyNormalizationSelfTest();
+        | SettingsStore.RunVehicleUseMigrationSelfTest() | RawInput.RunKeyNormalizationSelfTest()
+        | SettingsStore.RunHoverboardMigrationSelfTest() | Weapons.RunHudGroupSelfTest();
 
 using var app = new App();
 try
