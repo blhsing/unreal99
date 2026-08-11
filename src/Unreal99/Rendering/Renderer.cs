@@ -327,11 +327,13 @@ public sealed class Renderer : IDisposable
 
         var scene = new RenderScene
         {
+            // Neutral high-key studio lighting. The atlas is tiny on screen, so deep game-world
+            // contrast turns useful silhouette detail into black pixels.
             SunDirection = Vector3.Normalize(new Vector3(-0.42f, -0.78f, -0.33f)),
-            SunColor = new Vector3(3.7f, 3.45f, 3.15f),
-            AmbientSky = new Vector3(0.24f, 0.29f, 0.41f),
-            AmbientGround = new Vector3(0.065f, 0.075f, 0.10f),
-            EnvIntensity = 0.82f,
+            SunColor = new Vector3(4.6f, 4.5f, 4.35f),
+            AmbientSky = new Vector3(0.68f, 0.72f, 0.80f),
+            AmbientGround = new Vector3(0.30f, 0.33f, 0.39f),
+            EnvIntensity = 1.15f,
             FogDensity = 0f,
         };
         const float aspect = cellWidth / (float)cellHeight;
@@ -360,15 +362,20 @@ public sealed class Renderer : IDisposable
                 transform, center, 2.2f, castShadow: false);
 
             Vector3 tint = Weapons.Get(weapon).Tint;
+            // Soft key, cool fill, warm rim: readable metal and coloured accents from every
+            // direction without flattening the weapon into an unlit icon.
             scene.AddLight(center + new Vector3(1.7f, 1.8f, 1.3f), 6f,
-                tint * 0.48f + new Vector3(0.52f), 4.2f, 2f);
+                tint * 0.18f + new Vector3(0.82f, 0.80f, 0.76f), 5.8f, 2f);
             scene.AddLight(center + new Vector3(-1.2f, 0.45f, -1.3f), 5f,
-                new Vector3(1f, 0.34f, 0.14f), 2.2f, 1.5f);
+                new Vector3(0.62f, 0.74f, 1f), 3.6f, 1.5f);
+            scene.AddLight(center + new Vector3(-0.2f, 1.4f, 1.8f), 5f,
+                new Vector3(1f, 0.62f, 0.34f), 2.6f, 1.5f);
 
             int nLights = scene.SelectLights(camera.Position, camera.Frustum, _lightPos, _lightColor,
                 Settings.LightBudget);
             _world.Use();
-            SetupWorldUniforms(_world, camera, scene, nLights, receiveShadows: false);
+            SetupWorldUniforms(_world, camera, scene, nLights, receiveShadows: false,
+                outputSrgb: true);
             foreach (var draw in scene.Opaque) DrawWorldItem(_world, scene, draw);
 
             if (scene.Transparent.Count > 0)
@@ -659,7 +666,7 @@ public sealed class Renderer : IDisposable
     }
 
     private void SetupWorldUniforms(Shader sh, in Camera camera, RenderScene scene, int nLights,
-        bool receiveShadows = true)
+        bool receiveShadows = true, bool outputSrgb = false)
     {
         sh.Set("uViewProj", camera.ViewProj);
         sh.Set("uView", camera.View);
@@ -670,6 +677,7 @@ public sealed class Renderer : IDisposable
         sh.Set("uAmbientSky", scene.AmbientSky);
         sh.Set("uAmbientGround", scene.AmbientGround);
         sh.Set("uEnvIntensity", scene.EnvIntensity);
+        sh.Set("uOutputSrgb", outputSrgb ? 1f : 0f);
         sh.Set("uShadowTexel", 1f / Settings.EffectiveShadowMapSize);
         sh.Set("uShadowStrength", receiveShadows && Settings.Shadows ? 1f : 0f);
         sh.Set("uNumLights", nLights);

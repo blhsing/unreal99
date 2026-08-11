@@ -152,8 +152,7 @@ public sealed class AssaultState
     /// you cannot work ahead, which is what forces the push to move as a front rather than
     /// scatter across the map.
     /// </summary>
-    public ObjectiveEvent Touch(Team by, Vector3 position, bool defenderPresent, float dt,
-        out AssaultObjective objective)
+    public ObjectiveEvent Touch(Team by, Vector3 position, float dt, out AssaultObjective objective)
     {
         objective = null;
         int index = Current;
@@ -166,8 +165,9 @@ public sealed class AssaultState
 
         if (o.Kind == ObjectiveKind.Touch) return Complete(o);
 
-        // Hold: a defender inside the ring stalls the plant rather than reversing it.
-        if (defenderPresent) return ObjectiveEvent.Progress;
+        // Hold: progress exists only while an attacker remains in range. Defenders stop it by
+        // killing or displacing that attacker; merely sharing the radius is not an objective
+        // rule and must not turn a surviving attacker's interaction off.
         o.HoldProgress += dt;
         if (o.HoldProgress < o.HoldSeconds) return ObjectiveEvent.Progress;
         return Complete(o);

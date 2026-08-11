@@ -1928,7 +1928,11 @@ public sealed class BotController : Controller
         // after walking to the locker the vehicle is behind the bot and no longer shortens the
         // route, so the previous 40 m threshold made the entire Assault fleet decorative.
         float objectiveDistance = Vector3.Distance(Pawn.Position, objective.Position);
-        if (attacking && objectiveDistance > 22f
+        // Both roles use transport. Attackers need to reach the next breach before the clock
+        // runs out; defenders need to fall back to that breach before the attackers arrive.
+        // Convoy supplies vehicles to both sides specifically for these two journeys.
+        float boardDistance = attacking ? 22f : 30f;
+        if (objectiveDistance > boardDistance
             && TryBoardVehicle(world, nav, objective.Position)) return true;
 
         bool noRangedAmmo = !HasUsableRangedWeapon(Pawn);
@@ -1942,7 +1946,8 @@ public sealed class BotController : Controller
 
         if (!attacking)
         {
-            // Defenders on a hold objective stand in the ring on purpose — that is what stalls it.
+            // Once an attacker starts interacting, collapse onto that location to kill or push
+            // them away. Presence alone does not cancel progress; the defence must win the fight.
             if (objective.Kind == ObjectiveKind.Hold && objective.HoldProgress > 0.01f)
                 return SetPreciseGoal(nav, objective.Position, objective: true, radius: objective.Radius * 0.6f,
                     refresh: 0.8f);
@@ -2259,6 +2264,10 @@ public sealed class BotController : Controller
 
         Vector3 destination = VehicleDestination(world, target);
         Vector3 aimAt = targetVisible && target != null ? target.Center : destination;
+        AssaultObjective assaultTarget = world.Mode.Kind == GameModeKind.Assault
+            ? world.Assault.CurrentObjective : null;
+        if (!targetVisible && assaultTarget is { Kind: ObjectiveKind.Destroy })
+            aimAt = assaultTarget.Position + MathX.Up * 1.5f;
         // Lead a moving target: at vehicle-weapon ranges the flight time is long enough to miss by
         // a whole body length otherwise.
         if (targetVisible && target != null)
@@ -2348,18 +2357,40 @@ public sealed class BotController : Controller
         if (def.Seats.Length > 0 && def.Seats[0].Armed && !input.AltFire)
         {
             bool aimed = turret || MathF.Abs(yawError) < 0.22f;
+            bool assaultObjectiveShot = Pawn.Team == world.Assault.Attackers
+                && assaultTarget is { Kind: ObjectiveKind.Destroy };
+            bool clearAssaultObjectiveShot = true;
+            if (assaultObjectiveShot)
+            {
+                Vector3 muzzle = v.SeatWorld(0);
+                Vector3 shot = aimAt - muzzle;
+                float shotDistance = shot.Length();
+                if (shotDistance > 1.8f)
+                {
+                    Vector3 direction = shot / shotDistance;
+                    clearAssaultObjectiveShot = !world.Level.Collision.Raycast(muzzle,
+                        muzzle + direction * (shotDistance - 1.6f)).Hit;
+                }
+            }
             // Objectives are legitimate targets in their own right: shelling a node or a
             // generator from outside its defenders' range is what the heavy vehicles are for.
-            bool objectiveInRange = world.Mode.Kind is GameModeKind.Onslaught or GameModeKind.Assault
-                    or GameModeKind.Warfare
-                && distance < hold * 1.6f;
+            bool objectiveInRange = distance < hold * 1.6f && world.Mode.Kind switch
+            {
+                GameModeKind.Assault => assaultObjectiveShot && clearAssaultObjectiveShot,
+                GameModeKind.Onslaught or GameModeKind.Warfare => true,
+                _ => false,
+            };
             input.Fire = aimed && ((targetVisible && target != null && target.Team != Pawn.Team)
                 || objectiveInRange);
         }
 
         // --- obstacle recovery and bail-out conditions ---
         float frameTravel = Vector3.Distance(v.Position, _lastVehiclePosition);
-        _vehicleStuckTimer = frameTravel < 0.30f
+        // Compare against a speed-sized per-frame distance. The old fixed 0.30 m threshold
+        // classified every vehicle below 18 m/s as stationary at 60 Hz, so tanks could enter
+        // recovery while they were visibly still advancing.
+        float stationaryDistance = MathF.Max(0.025f, dt * 0.75f);
+        _vehicleStuckTimer = frameTravel < stationaryDistance
             ? _vehicleStuckTimer + dt
             : 0f;
         _vehicleProgressTimer += dt;
@@ -2398,8 +2429,23 @@ public sealed class BotController : Controller
 
         bool wrecked = v.Health < def.Health * 0.14f;
         bool arrivedOnTransport = def.Kind == VehicleKind.Hoverboard && distance < 8f;
-        bool jammed = (_vehicleStuckTimer > 4.5f || _vehicleRecoveryAttempts >= 3)
-            && throttle != 0f;
+        bool hasArmedPassenger = false;
+        for (int seat = 1; seat < v.Occupants.Length; seat++)
+            if (v.Occupants[seat] >= 0 && def.Seats[seat].Armed) { hasArmedPassenger = true; break; }
+        bool arrivedUnarmedTransport = !def.Seats[0].Armed && !hasArmedPassenger && distance < 10f;
+        // A vehicle deliberately stops at its class hold distance. The dismount threshold must
+        // therefore include that distance; using only objective radius left a Manta parked at
+        // 6 m forever while waiting to get within a 5.4 m interaction radius.
+        bool arrivedAtInfantryObjective = assaultTarget is { Kind: not ObjectiveKind.Destroy }
+            && distance <= MathF.Max(assaultTarget.Radius + 2f, hold + 0.5f);
+        // At a destroy objective, stationary firing with a clear line is useful. Stationary and
+        // unable to shoot is a blocked approach, even though the standoff controller has set
+        // throttle to zero; bail out so the pawn can finish on foot instead of looking stuck.
+        bool blockedAtAssaultObjective = Pawn.Team == world.Assault.Attackers
+            && assaultTarget is { Kind: ObjectiveKind.Destroy }
+            && distance <= hold * 1.1f && !input.Fire;
+        bool jammed = _vehicleRecoveryAttempts >= 3
+            || _vehicleStuckTimer > 4.5f && (throttle != 0f || blockedAtAssaultObjective);
         if (_vehicleStuckTimer > 2.25f && _vehicleRecoveryTimer <= 0f)
         {
             // Give a blocked vehicle one fresh route before abandoning it. This prevents a wide
@@ -2408,7 +2454,8 @@ public sealed class BotController : Controller
             input.Move.Y = -0.8f;
             input.Move.X = Pawn.Id % 2 == 0 ? 1f : -1f;
         }
-        if ((wrecked || arrivedOnTransport || jammed) && _vehicleBoardTimer <= 0f)
+        if ((wrecked || arrivedOnTransport || arrivedUnarmedTransport
+             || arrivedAtInfantryObjective || jammed) && _vehicleBoardTimer <= 0f)
         {
             _vehicleBoardTimer = 0.8f;
             _vehicleStuckTimer = 0f;

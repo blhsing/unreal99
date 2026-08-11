@@ -148,7 +148,7 @@ public enum ObjectiveKind
 {
     /// <summary>Shoot it until it breaks: a generator, a panel, a door mechanism.</summary>
     Destroy,
-    /// <summary>Stand in the radius uncontested for a while: planting a charge, holding a switch.</summary>
+    /// <summary>Remain in the radius for a while: planting a charge, holding a switch.</summary>
     Hold,
     /// <summary>Reach it. Grabbing the missile at the end of Convoy is this.</summary>
     Touch,

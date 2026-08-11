@@ -1020,15 +1020,25 @@ public sealed class Hud
         if (state.Objectives.Count == 0) return;
 
         bool compact = CompactLayout(width, height);
+        bool sideLayout = CompactBottomRow(width, height);
+        bool attacking = pawn.Team == state.Attackers;
         float titleFont = LayoutFont(16f * s);
         float statusFont = LayoutFont(13f * s);
-        float cardWidth = compact ? MathF.Min(300f, width - 24f) : 340f * s;
-        float cardHeight = MathF.Max(72f, 66f * s);
-        float x = width * 0.5f - cardWidth * 0.5f;
-        float y = CompactBottomRow(width, height) ? height - 173f
+        float cardWidth = sideLayout ? CompactSidePanelWidth(width, height)
+            : compact ? MathF.Min(300f, width - 24f) : 340f * s;
+        // In a quarter-screen viewport the target-to-beat gets its own line. Keeping it inside
+        // the same status line is what made the two strings overlap at 1920x1080 four-player.
+        float cardHeight = sideLayout && state.Round == 2
+            ? 92f : MathF.Max(72f, 66f * s);
+        float x = sideLayout
+            ? attacking ? 10f : width - 10f - cardWidth
+            : width * 0.5f - cardWidth * 0.5f;
+        // Anchor the objective immediately above the matching bottom-side status card: attack
+        // on the left, defence on the right. This clears the central sightline and weapon strip
+        // in both four-player quadrants and the two split-screen orientations.
+        float y = sideLayout ? height - 101f - cardHeight
             : compact ? height - 238f : height - 174f * s;
 
-        bool attacking = pawn.Team == state.Attackers;
         Vector3 col = attacking ? new Vector3(1f, 0.72f, 0.28f) : new Vector3(0.42f, 0.72f, 1f);
 
         ui.ChamferRect(x, y, cardWidth, cardHeight, 7f * s, UiRenderer.Rgba(col * 0.30f, 0.66f));
@@ -1043,8 +1053,24 @@ public sealed class Hud
         string role = attacking ? Loc.AsAttacking : Loc.AsDefending;
         string round = state.Round == 1 ? Loc.AsRoundOne : Loc.AsRoundTwo;
         string counter = $"{state.CompletedCount}/{state.Objectives.Count}";
-        ui.Text(FaceRegular, statusFont, x + MathF.Max(10f, 12f * s), y + 28f,
-            $"{round}　{role}　{counter}", UiRenderer.Rgba(col * 1.2f, 0.98f));
+        string status = $"{round}　{role}　{counter}";
+        float textInset = MathF.Max(10f, 12f * s);
+        if (sideLayout)
+        {
+            // Keep the numeric progress visible even when a localized round/role phrase is long.
+            // Ellipsizing the combined line previously hid the most useful part (for example 1/7).
+            float counterWidth = ui.MeasureText(FaceBold, statusFont, counter);
+            string compactStatus = FitText(ui, FaceRegular, statusFont, $"{round}·{role}",
+                cardWidth - textInset * 2f - counterWidth - 8f);
+            ui.Text(FaceRegular, statusFont, x + textInset, y + 28f, compactStatus,
+                UiRenderer.Rgba(col * 1.2f, 0.98f));
+            ui.Text(FaceBold, statusFont, x + cardWidth - textInset, y + 28f, counter,
+                UiRenderer.Rgba(col * 1.2f, 0.98f), TextAlign.Right);
+        }
+        else
+            ui.Text(FaceRegular, statusFont, x + textInset, y + 28f,
+                FitText(ui, FaceRegular, statusFont, status, cardWidth - 20f),
+                UiRenderer.Rgba(col * 1.2f, 0.98f));
 
         // Round two runs against a clock, so the target is the most important number on screen.
         if (state.Round == 2)
@@ -1052,8 +1078,13 @@ public sealed class Hud
             string target = state.TargetTime < float.MaxValue
                 ? $"{Loc.AsTargetTime} {(int)(state.TargetTime / 60f):0}:{(int)(state.TargetTime % 60f):00}"
                 : $"{Loc.AsTargetTime} {Loc.AsNoTarget}";
-            ui.Text(FaceRegular, statusFont, x + cardWidth - MathF.Max(10f, 12f * s), y + 28f, target,
-                UiRenderer.Rgba(0.92f, 0.86f, 0.62f, 0.95f), TextAlign.Right);
+            if (sideLayout)
+                ui.Text(FaceRegular, statusFont, x + MathF.Max(10f, 12f * s), y + 48f,
+                    FitText(ui, FaceRegular, statusFont, target, cardWidth - 20f),
+                    UiRenderer.Rgba(0.92f, 0.86f, 0.62f, 0.95f));
+            else
+                ui.Text(FaceRegular, statusFont, x + cardWidth - MathF.Max(10f, 12f * s), y + 28f,
+                    target, UiRenderer.Rgba(0.92f, 0.86f, 0.62f, 0.95f), TextAlign.Right);
         }
 
         if (objective != null)

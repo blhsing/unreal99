@@ -171,6 +171,8 @@ public sealed class GameWorld
     public readonly List<Vehicle> Vehicles = new(16);
     /// <summary>Behavioral-test telemetry accumulated through production gameplay paths.</summary>
     public int VehicleBoardings { get; private set; }
+    public int AssaultAttackerVehicleBoardings { get; private set; }
+    public int AssaultDefenderVehicleBoardings { get; private set; }
     public readonly HashSet<VehicleKind> VehicleKindsDriven = new();
     public int OnslaughtNodeCaptures { get; private set; }
     public int WarfareOrbPickups { get; private set; }
@@ -242,6 +244,11 @@ public sealed class GameWorld
         pawn.VehicleId = vehicle.Id;
         pawn.VehicleSeat = seat;
         VehicleBoardings++;
+        if (Mode.Kind == GameModeKind.Assault)
+        {
+            if (pawn.Team == Assault.Attackers) AssaultAttackerVehicleBoardings++;
+            else if (pawn.Team == Assault.Defenders) AssaultDefenderVehicleBoardings++;
+        }
         if (seat == 0) VehicleKindsDriven.Add(vehicle.Kind);
         OnSound?.Invoke(SoundId.Respawn, vehicle.Position, 0.7f);
         return true;
@@ -335,6 +342,8 @@ public sealed class GameWorld
         LavaDeaths = 0;
         EnvironmentalDeathDetails.Clear();
         VehicleBoardings = 0;
+        AssaultAttackerVehicleBoardings = 0;
+        AssaultDefenderVehicleBoardings = 0;
         VehicleKindsDriven.Clear();
         OnslaughtNodeCaptures = 0;
         WarfareOrbPickups = 0;
@@ -2511,22 +2520,16 @@ public sealed class GameWorld
         var target = st.CurrentObjective;
         if (target != null && target.Kind != ObjectiveKind.Destroy)
         {
-            // A defender inside the ring stalls the plant; that contest is the fight the mode
-            // is actually about, so it is resolved before anyone's progress ticks.
-            bool defenderPresent = false;
-            foreach (var p in Pawns)
-            {
-                if (!p.Alive || p.Team != st.Defenders) continue;
-                if (Vector3.Distance(p.Position, target.Position) <= target.Radius) { defenderPresent = true; break; }
-            }
-
             // Exactly one attacker advances the objective per frame. Charges are planted by a
             // person, not by a crowd — letting every body in the ring add its own dt would make
             // a four-man rush complete a nine-second plant in two.
             Pawn planter = null;
             foreach (var pawn in Pawns)
             {
-                if (!pawn.Alive || pawn.Team != st.Attackers) continue;
+                // Touch/hold objectives are infantry interactions. AI drivers dismount as they
+                // arrive, and this simulation-level check also prevents a human from capturing
+                // one while insulated inside a vehicle hull.
+                if (!pawn.Alive || pawn.InVehicle || pawn.Team != st.Attackers) continue;
                 if (Vector3.Distance(pawn.Position, target.Position) > target.Radius) continue;
                 planter = pawn;
                 break;
@@ -2534,11 +2537,7 @@ public sealed class GameWorld
 
             if (planter != null)
             {
-                var evt = st.Touch(planter.Team, planter.Position, defenderPresent, dt, out var touched);
-                if (evt == ObjectiveEvent.Progress && defenderPresent)
-                    foreach (var pawn in Pawns)
-                        if (pawn.PlayerIndex >= 0 && pawn.Team == st.Attackers)
-                            FeedbackFor(pawn).Sub(Loc.AsContested, 0.4f);
+                var evt = st.Touch(planter.Team, planter.Position, dt, out var touched);
                 if (HandleObjectiveEvent(evt, touched, planter)) return;
             }
         }

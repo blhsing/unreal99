@@ -169,14 +169,66 @@ public static class ObjectiveModeSelfTest
         {
             Position = new Vector3(10f, 0f, 0f), Kind = ObjectiveKind.Touch, Radius = 2f,
         });
-        Check(ordered.Touch(Team.Red, new Vector3(10f, 0f, 0f), false, 1f, out _)
+        Check(ordered.Touch(Team.Red, new Vector3(10f, 0f, 0f), 1f, out _)
               == ObjectiveEvent.None, "Assault objectives cannot be completed out of order", failures);
-        ordered.Touch(Team.Red, Vector3.Zero, true, 2f, out AssaultObjective held);
-        Check(held != null && held.HoldProgress == 0f,
-            "defender contests a hold objective without reversing it", failures);
-        Check(ordered.Touch(Team.Red, Vector3.Zero, false, 2f, out _)
+        Check(ordered.Touch(Team.Blue, Vector3.Zero, 2f, out _) == ObjectiveEvent.None
+              && ordered.Objectives[0].HoldProgress == 0f,
+            "defenders cannot advance an attacker objective", failures);
+        Check(ordered.Touch(Team.Red, new Vector3(3f, 0f, 0f), 2f, out _) == ObjectiveEvent.None
+              && ordered.Objectives[0].HoldProgress == 0f,
+            "hold progress pauses while no attacker is in range", failures);
+        Check(ordered.Touch(Team.Red, Vector3.Zero, 2f, out _)
               == ObjectiveEvent.Completed && ordered.SpawnGroup == 0,
-            "uncontested hold objective completes", failures);
+            "an attacker in range completes a hold objective", failures);
+
+        var tiedProgress = new AssaultState
+        {
+            Attackers = Team.Red,
+            FirstAttackers = Team.Red,
+            Elapsed = 90f,
+        };
+        tiedProgress.Objectives.Add(new AssaultObjective { Completed = true });
+        tiedProgress.Objectives.Add(new AssaultObjective());
+        tiedProgress.SwapSides(attackersFinished: false);
+        tiedProgress.Objectives[0].Completed = true;
+        Check(tiedProgress.ResolveWinner(secondRoundFinished: false) == Team.None,
+            "equal partial progress is an Assault draw", failures);
+        tiedProgress.Objectives[0].Completed = false;
+        Check(tiedProgress.ResolveWinner(secondRoundFinished: false) == Team.Red,
+            "first attackers win when second attackers make less partial progress", failures);
+
+        var failedReply = new AssaultState
+        {
+            Attackers = Team.Red,
+            FirstAttackers = Team.Red,
+            Elapsed = 55f,
+        };
+        failedReply.Objectives.Add(new AssaultObjective { Completed = true });
+        failedReply.SwapSides(attackersFinished: true);
+        Check(failedReply.ResolveWinner(secondRoundFinished: false) == Team.Red,
+            "first attackers win when their completed run is not answered", failures);
+
+        var resetRound = new AssaultState
+        {
+            Attackers = Team.Red,
+            FirstAttackers = Team.Red,
+            Elapsed = 42f,
+            SpawnGroup = 3,
+        };
+        resetRound.Objectives.Add(new AssaultObjective
+        {
+            Kind = ObjectiveKind.Destroy, Completed = true, Health = 0f, MaxHealth = 100f,
+        });
+        resetRound.Objectives.Add(new AssaultObjective
+        {
+            Kind = ObjectiveKind.Hold, HoldProgress = 2f, HoldSeconds = 4f,
+        });
+        resetRound.SwapSides(attackersFinished: true);
+        Check(resetRound.Attackers == Team.Blue && resetRound.Round == 2
+              && resetRound.SpawnGroup == 0 && resetRound.Elapsed == 0f
+              && !resetRound.Objectives[0].Completed && resetRound.Objectives[0].Health == 100f
+              && resetRound.Objectives[1].HoldProgress == 0f,
+            "side swap restores objectives, progress, clock, and attacker spawn group", failures);
 
         foreach (string failure in failures) Console.Error.WriteLine($"MODE_RULE_TEST FAIL: {failure}");
         Console.WriteLine(failures.Count == 0

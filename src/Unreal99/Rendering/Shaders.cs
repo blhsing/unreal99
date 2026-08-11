@@ -177,6 +177,9 @@ public static class Shaders
         uniform float uShadowTexel;
         uniform float uShadowStrength;
         uniform float uEnvIntensity;
+        // Runtime HUD atlases bypass the normal post chain, so they opt into the same final
+        // linear-to-sRGB encoding here. Gameplay remains linear for tone mapping and bloom.
+        uniform float uOutputSrgb;
 
         uniform int uNumLights;
         uniform vec4 uLightPosRadius[24];
@@ -272,6 +275,8 @@ public static class Shaders
             color += uEmissive * emissiveMask;
 
             color = applyFog(color, vWorldPos, uCamPos, uSunDir);
+
+            color = mix(color, pow(max(color, vec3(0.0)), vec3(1.0 / 2.2)), uOutputSrgb);
 
             oColor = vec4(color, uAlpha * uBaseColor.a);
             oNormal = vec4(vViewNormal * 0.5 + 0.5, 1.0);

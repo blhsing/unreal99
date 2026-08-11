@@ -208,7 +208,6 @@ public static class Loc
     public const string VehDeployed = "已架設";
 
     public const string AsHoldPosition = "佔住位置";
-    public const string AsContested = "位置遭爭奪";
     public const string AsDefendersHold = "防守成功";
     public const string AsObjectivesCleared = "所有目標完成！";
     public static string AsObjectiveDone(string who, string objective) => $"{who} 完成了 {objective}";

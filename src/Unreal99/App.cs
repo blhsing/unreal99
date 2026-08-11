@@ -3262,14 +3262,24 @@ public sealed class App : IDisposable
             if (_world.Mode.Kind == GameModeKind.Assault)
             {
                 if (_world.AssaultObjectiveCompletions <= 0) failures.Add("assault-objectives=0");
-                // Only require a boarding when a vehicle is actually available from the opening
-                // spawns. Glacier's Ion Tank is the third objective — demanding that a
-                // sixty-second harness reach it is asserting the wrong thing about the map.
-                Team attackers = _world.Assault.Attackers;
-                bool vehicleAtStart = _world.Level.VehicleSpawns.Any(v =>
-                    _world.Level.Spawns.Any(s => s.AssaultGroup == 0 && s.Team == attackers
+                // Validate each opening role independently. A nearby team-owned or neutral pad
+                // is authored as a tactical option, so a passing bot run must not leave it as
+                // scenery. Later objective vehicles (Glacier's tank) are covered by the
+                // aggregate gate when the run reaches them.
+                Team firstAttackers = _world.Assault.FirstAttackers;
+                Team firstDefenders = firstAttackers == Team.Red ? Team.Blue : Team.Red;
+                bool OpeningVehicleFor(Team role) => _world.Level.VehicleSpawns.Any(v =>
+                    (v.Team == Team.None || v.Team == role)
+                    && _world.Level.Spawns.Any(s => s.AssaultGroup == 0 && s.Team == role
                         && Vector3.Distance(s.Position, v.Position) < 60f));
-                if (vehicleAtStart && _world.VehicleBoardings <= 0) failures.Add("vehicle-boardings=0");
+                if (OpeningVehicleFor(firstAttackers)
+                    && _world.AssaultAttackerVehicleBoardings <= 0)
+                    failures.Add("assault-attacker-vehicle-boardings=0");
+                if (OpeningVehicleFor(firstDefenders)
+                    && _world.AssaultDefenderVehicleBoardings <= 0)
+                    failures.Add("assault-defender-vehicle-boardings=0");
+                if (_world.Level.VehicleSpawns.Count > 0 && _world.VehicleBoardings <= 0)
+                    failures.Add("vehicle-boardings=0");
             }
             bool passed = failures.Count == 0;
             allPassed &= passed;
@@ -3326,6 +3336,8 @@ public sealed class App : IDisposable
                 DominationScoreRed = MathF.Round(_world.Mode.DominationScores[0], 2),
                 DominationScoreBlue = MathF.Round(_world.Mode.DominationScores[1], 2),
                 VehicleBoardings = _world.VehicleBoardings,
+                AssaultAttackerVehicleBoardings = _world.AssaultAttackerVehicleBoardings,
+                AssaultDefenderVehicleBoardings = _world.AssaultDefenderVehicleBoardings,
                 VehicleKindsDriven = _world.VehicleKindsDriven.Select(k => k.ToString()).Order().ToArray(),
                 OnslaughtNodeCaptures = _world.OnslaughtNodeCaptures,
                 OnslaughtNodesHeldRed = _world.Onslaught?.NodesHeldBy(Team.Red) ?? 0,

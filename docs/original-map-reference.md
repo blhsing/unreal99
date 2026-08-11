@@ -58,12 +58,16 @@ SniperRifle。
 - 若第一隊沒有完成全圖，第二隊不必空等整個時限：一完成第一隊未完成的第一個目標、也就是在
   目標序列中取得更遠進度，便立即獲勝；兩隊同樣遠則和局。
 - 攻方每完成一個目標，通常可獲得**更靠近下一個目標的重生點**。
+- 佔位／操作型目標由仍在範圍內的攻方持續推進；攻方離開或死亡即暫停。防守者要靠擊殺、阻擋或
+  逼退攻方阻止進度，而不是僅憑同站在互動範圍內自動凍結它。
 
 原作地圖：UT99 為 AS-Frigate、AS-Guardia、AS-HiSpeed、AS-Mazon、AS-OceanFloor、AS-Overlord、
 AS-Rook；UT2004 為 AS-Convoy、AS-FallenCity、AS-Glacier、AS-Junkyard、AS-Mothership、
 AS-RobotFactory。
 
-規則依據：[UT2004 官方手冊](https://ut2.weba.ru/.ut2004_files/Manual/Manual.pdf)、
+規則依據：[《Unreal Tournament GOTY》官方手冊](https://www.mogelpower.de/manuals/Unreal_Tournament_Game_of_the_Year_Edition_Manual_Englisch.pdf)、
+[原作 UnrealEd Assault AI 文件](https://unrealarchive.org/unreal-tournament/documents/reference/unrealed/unreal-tournament-ai/index.html)、
+[UT2004 官方手冊](https://ut2.weba.ru/.ut2004_files/Manual/Manual.pdf)、
 [原作 `ASGameInfo` UnrealScript 文件](https://www.ericdives.com/UT2004-UnCodex/ut2k4assault/asgameinfo.html)、
 [The Liandri Archives — Assault](https://unrealarchive.org/wikis/the-liandri-archives/Assault.html)
 
