@@ -5,8 +5,8 @@ param(
     [switch]$NoBuild,
     [switch]$SkipActionFootage,
     [Alias("SkipProfiles")][switch]$SkipTurntables,
-    [ValidateRange(0, 10)][int]$StartWeapon = 0,
-    [ValidateRange(0, 10)][int]$EndWeapon = 10
+    [ValidateRange(0, 23)][int]$StartWeapon = 0,
+    [ValidateRange(0, 23)][int]$EndWeapon = 23
 )
 
 $ErrorActionPreference = "Stop"
@@ -121,9 +121,14 @@ function Invoke-GameCaptureChecked {
     throw "Capture kept producing empty frames: $($Arguments -join ' ')"
 }
 
+# Index order must match WeaponKind in Game/GameTypes.cs exactly: the index is passed
+# straight through to --weaponfootage.
 $slugs = @(
     "impact-hammer", "enforcer", "bio-rifle", "shock-rifle", "pulse-gun", "ripper",
-    "minigun", "flak-cannon", "rocket-launcher", "sniper-rifle", "redeemer"
+    "minigun", "flak-cannon", "rocket-launcher", "sniper-rifle", "redeemer",
+    "shield-gun", "assault-rifle", "link-gun", "lightning-gun", "mine-layer",
+    "grenade-launcher", "avril", "ion-painter", "target-painter", "translocator",
+    "super-shock-rifle", "stinger", "ball-launcher"
 )
 if ($StartWeapon -gt $EndWeapon) { throw "StartWeapon must not exceed EndWeapon." }
 if ($SkipActionFootage -and $SkipTurntables) {

@@ -218,6 +218,27 @@ public sealed class BotController : Controller
     private float _vehicleProgressTimer;
     private float _vehicleProgressPath;
     private Vector3 _vehicleProgressOrigin;
+    /// <summary>
+    /// Closest the bot has come to its current vehicle destination, and how long it has gone
+    /// without beating that. Displacement alone cannot catch a vehicle circling its goal: the
+    /// odometer and the net-motion window both look healthy every sample while the bot never
+    /// actually arrives. Distance to the destination is the only measure that notices.
+    /// </summary>
+    private float _vehicleBestDistance = float.MaxValue;
+    private float _vehicleNoGainTimer;
+    private Vector3 _vehicleBestDestination;
+    /// <summary>The same measure for the hoverboard, which has no other way out of a snag.</summary>
+    private float _boardBestDistance = float.MaxValue;
+    private float _boardNoGainTimer;
+    private float _boardBanTimer;
+    /// <summary>The same measure for the Warfare orb-fetch role, which is otherwise permanent.</summary>
+    private float _orbFetchBestDistance = float.MaxValue;
+    private float _orbFetchStallSince;
+    private float _orbFetchBanUntil;
+    /// <summary>How long this bot has stood still without a reason to. See the anti-park backstop.</summary>
+    private float _parkedTimer;
+    private Vector3 _parkedLastPosition;
+    private int _parkedLastShots;
     private float _vehicleRecoveryTimer;
     private int _vehicleRecoveryAttempts;
     private readonly List<int> _vehiclePath = new(64);
@@ -331,6 +352,8 @@ public sealed class BotController : Controller
         _vehicleProgressTimer = 0f;
         _vehicleProgressPath = 0f;
         _vehicleProgressOrigin = Pawn.Position;
+        _vehicleBestDistance = float.MaxValue;
+        _vehicleNoGainTimer = 0f;
         _vehicleRecoveryTimer = 0f;
         _vehicleRecoveryAttempts = 0;
         _vehiclePath.Clear();
@@ -432,9 +455,45 @@ public sealed class BotController : Controller
         // the ledge avoidance all describe a body running around, none of which applies to
         // something with a turning circle.
         _vehicleBoardTimer = MathF.Max(0f, _vehicleBoardTimer - dt);
+
+        // --- anti-park backstop ---
+        // A bot that has covered no ground for several seconds is not playing the match, whatever
+        // branch chose its goal. Each selector has its own way of sending a bot somewhere it then
+        // has nothing to do — a node already held, an orb it cannot reach, a shielded enemy core
+        // it cannot shoot — and patching them one at a time only moves the symptom to the next
+        // map. Measured against the same 0.20 m/s bar the traversal gate uses, and from position
+        // rather than velocity, because a passenger's velocity does not track the hull it rides.
+        // Two kinds of standing still are deliberate: holding an Assault objective, which is the
+        // objective, and fighting somebody.
+        float parkedStep = (pawn.Position - _parkedLastPosition).FlatXZ().Length();
+        _parkedLastPosition = pawn.Position;
+        // Seeing an enemy is not enough to justify standing still — on an open arena a bot can
+        // hold a target in view for the whole round without ever having a shot. Actually shooting
+        // is, and it is also exactly what the gate forgives.
+        bool firedRecently = pawn.ShotsFired != _parkedLastShots;
+        _parkedLastShots = pawn.ShotsFired;
+        bool deliberateHold = firedRecently
+            || (world.Mode.Kind == GameModeKind.Assault
+                && world.Assault.CurrentObjective is { Kind: not ObjectiveKind.Destroy } ring
+                && Vector3.Distance(pawn.Position, ring.Position) <= ring.Radius + 1.5f)
+            || (world.Mode.Kind == GameModeKind.Warfare
+                && world.Warfare.OrbOf(pawn.Team) is { } orb && orb.CarrierId == pawn.Id);
+        _parkedTimer = pawn.Alive && !deliberateHold && parkedStep < 0.20f * dt
+            ? _parkedTimer + dt
+            : 0f;
+
         if (pawn.InVehicle)
         {
             _vehicleTargetId = -1;
+            // Inside a vehicle the only useful move is to get out. The driving controller has
+            // already concluded it is where it wants to be, so another tick of it changes nothing.
+            if (_parkedTimer > 5f && _vehicleBoardTimer <= 0f)
+            {
+                _parkedTimer = 0f;
+                _vehicleBoardTimer = 1.2f;
+                input.UseVehicle = true;
+                return input;
+            }
             DriveVehicle(world, target, targetVisible, ref input, dt);
             return input;
         }
@@ -490,6 +549,8 @@ public sealed class BotController : Controller
                 _vehicleProgressOrigin = boardable.Position;
                 _vehicleProgressTimer = 0f;
                 _vehicleProgressPath = 0f;
+                _vehicleBestDistance = float.MaxValue;
+                _vehicleNoGainTimer = 0f;
                 _vehicleRecoveryAttempts = 0;
             }
         }
@@ -520,7 +581,36 @@ public sealed class BotController : Controller
         // shoot anyway, and the whole point of the run is arriving before the defence forms up.
         bool carryingOrb = world.Mode.Kind == GameModeKind.Warfare
             && world.Warfare.OrbOf(pawn.Team) is { } orb && orb.CarrierId == pawn.Id;
-        bool want = pawn.CanRideHoverboard && !threatened
+        // The board is fast and turns badly, so a rider that clips a kerb can grind against it
+        // indefinitely — and a rider cannot shoot, so nothing else interrupts the state. Stow it
+        // after a stretch with no ground made towards the goal and finish the trip on foot. The
+        // ban afterwards is what makes that stick: without it the bot stows, immediately sees a
+        // distant goal again, remounts into the same kerb, and the whole trip becomes a stutter.
+        _boardBanTimer = MathF.Max(0f, _boardBanTimer - dt);
+        if (pawn.OnHoverboard && toGoal > 0f)
+        {
+            // Speed is not the signal — a board wedged against a kerb keeps sliding along it at
+            // full tilt while the goal stays exactly as far away as it was. Closing distance is
+            // the only thing that separates a useful run from a grind.
+            if (toGoal < _boardBestDistance - 1.5f)
+            {
+                _boardBestDistance = toGoal;
+                _boardNoGainTimer = 0f;
+            }
+            else if ((_boardNoGainTimer += dt) > 4f)
+            {
+                _boardBanTimer = 8f;
+                _boardNoGainTimer = 0f;
+                _boardBestDistance = float.MaxValue;
+            }
+        }
+        else if (!pawn.OnHoverboard)
+        {
+            _boardBestDistance = float.MaxValue;
+            _boardNoGainTimer = 0f;
+        }
+
+        bool want = pawn.CanRideHoverboard && !threatened && _boardBanTimer <= 0f
             && (carryingOrb || toGoal > 45f);
 
         if (want == pawn.OnHoverboard || _boardToggleTimer > 0f) return;
@@ -1044,6 +1134,16 @@ public sealed class BotController : Controller
             _repathTimer = 0f;
         }
 
+        // On foot, the answer to being parked is somewhere else to walk. The timer itself is
+        // maintained in Update, which runs for riders too — see the anti-park backstop there.
+        if (_parkedTimer > 5f
+            && TryChoosePatrolGoal(world.Level.Nav, Pawn.Position, ref _onslaughtPatrolStep, 16f))
+        {
+            _parkedTimer = 0f;
+            _goalTimer = _rng.Range(2.2f, 4.5f);
+            _repathTimer = 0f;
+        }
+
         // --- path planning ---
         if (_repathTimer <= 0f && _goalNode >= 0)
         {
@@ -1535,6 +1635,10 @@ public sealed class BotController : Controller
             && TryChooseAssaultGoal(world, nav))
             return;
 
+        if (world.Mode.Kind == GameModeKind.BombingRun && Pawn.Team != Team.None
+            && TryChooseBombingRunGoal(world, nav))
+            return;
+
         // CTF carriers, recoveries and team roles take priority over ordinary combat.
         if (world.Mode.Kind == GameModeKind.CaptureTheFlag && Pawn.Team != Team.None)
         {
@@ -1806,8 +1910,29 @@ public sealed class BotController : Controller
             int slot = 0;
             foreach (Pawn mate in world.Pawns)
                 if (mate.Team == Pawn.Team && mate.Id < Pawn.Id && IsAiDriven(world, mate)) slot++;
-            if (slot == 0 && Vector3.Distance(ours.Position, Pawn.Position) < 130f)
+            float toOrb = Vector3.Distance(ours.Position, Pawn.Position);
+            // The fetch role is otherwise permanent: the lowest-numbered bot on the team owns it
+            // for the whole match. If it cannot actually reach the orb — blocked route, an orb
+            // parked somewhere the nav graph does not lead — it stands there for the rest of the
+            // round rather than playing. Give the role up for a while once it stops closing.
+            if (toOrb < _orbFetchBestDistance - 1.5f)
+            {
+                _orbFetchBestDistance = toOrb;
+                _orbFetchStallSince = world.Time;
+            }
+            else if (slot == 0 && world.Time - _orbFetchStallSince > 8f)
+            {
+                _orbFetchBanUntil = world.Time + 12f;
+                _orbFetchStallSince = world.Time;
+                _orbFetchBestDistance = float.MaxValue;
+            }
+            if (slot == 0 && world.Time >= _orbFetchBanUntil && toOrb < 130f)
                 return SetPreciseGoal(nav, ours.Position, objective: true, radius: 1.4f, refresh: 0.8f);
+        }
+        else
+        {
+            _orbFetchBestDistance = float.MaxValue;
+            _orbFetchStallSince = world.Time;
         }
 
         // --- defending a node our orb is shielding: stay inside the shield radius.
@@ -1898,8 +2023,13 @@ public sealed class BotController : Controller
         if (distance > 34f && TryBoardVehicle(world, nav, node.Position)) return true;
 
         // Defenders circle their node rather than standing on it, so they are not free frags and
-        // do not block the pad the mode needs them to keep clear.
-        if (defend && node.Team == Pawn.Team)
+        // do not block the pad the mode needs them to keep clear. The same applies to anyone sent
+        // to a node we already hold at full health — that happens through the stalled-front
+        // fallback above, and there is nothing to do on arrival but guard it. Standing on the pad
+        // instead left bots motionless on their own core for the rest of the round.
+        bool nothingToDoHere = node.Team == Pawn.Team && node.IsActive
+            && node.Health >= node.MaxHealth - 0.01f;
+        if (node.Team == Pawn.Team && (defend || nothingToDoHere))
             return TryChoosePatrolGoal(nav, node.Position, ref _onslaughtPatrolStep, 10f);
 
         _ = enemy;
@@ -1915,6 +2045,55 @@ public sealed class BotController : Controller
     /// of a hold objective stalls the plant but a defender standing on a generator is just a
     /// target. The rest is ordinary combat, which the base behaviour already handles.
     /// </summary>
+    /// <summary>
+    /// Bombing Run. Four situations, and the right answer differs sharply between them: holding
+    /// the ball means run for the hoop and pass rather than fight, because the carrier has no
+    /// gun; a team-mate holding it means escort, because the carrier cannot defend themselves;
+    /// an enemy holding it means hunt that one pawn rather than the nearest one; and a loose ball
+    /// means everyone converges on it. Falling through to ordinary combat is only correct when
+    /// the bot is already where it needs to be.
+    /// </summary>
+    private bool TryChooseBombingRunGoal(GameWorld world, NavGraph nav)
+    {
+        var br = world.BombingRun;
+        if (br.Goals.Count == 0) return false;
+
+        if (Pawn.HasBall)
+        {
+            // Run it in. The hoop is the goal and nothing else matters — the carrier holds only
+            // the Ball Launcher, so stopping to fight is never the better play.
+            Vector3 target = br.TargetGoal(Pawn.Team);
+            return SetPreciseGoal(nav, target, objective: true, radius: 1.4f, refresh: 0.7f);
+        }
+
+        var carrier = br.Carrier >= 0 ? world.FindPawn(br.Carrier) : null;
+        if (carrier is { Alive: true })
+        {
+            if (carrier.Team == Pawn.Team)
+            {
+                // Escort: sit between the carrier and the hoop so the screen is ahead of them,
+                // and stay close enough to take a pass.
+                Vector3 ahead = Vector3.Lerp(carrier.Center, br.TargetGoal(Pawn.Team), 0.28f);
+                return SetPreciseGoal(nav, ahead, objective: true, radius: 3.2f, refresh: 0.6f);
+            }
+            // Hunt the enemy carrier specifically. Any other kill leaves the ball moving.
+            return SetPreciseGoal(nav, carrier.Position, objective: true, radius: 2.0f, refresh: 0.5f);
+        }
+
+        // Loose ball. Chase it unless somebody is clearly closer, in which case cover the hoop
+        // this bot is defending so the mode does not collapse into eight players in one spot.
+        float mine = Vector3.Distance(Pawn.Position, br.Position);
+        int closer = 0;
+        foreach (var mate in world.Pawns)
+        {
+            if (mate == Pawn || !mate.Alive || mate.Team != Pawn.Team) continue;
+            if (Vector3.Distance(mate.Position, br.Position) < mine) closer++;
+        }
+        if (closer >= 2)
+            return SetPreciseGoal(nav, br.OwnGoal(Pawn.Team), objective: true, radius: 6f, refresh: 1.2f);
+        return SetPreciseGoal(nav, br.Position, objective: true, radius: 1.2f, refresh: 0.6f);
+    }
+
     private bool TryChooseAssaultGoal(GameWorld world, NavGraph nav)
     {
         var state = world.Assault;
@@ -1959,8 +2138,14 @@ public sealed class BotController : Controller
         // or the bot spends the fight blowing itself up against the thing it is attacking —
         // but a bot down to the hammer has to walk right up to it instead.
         bool ranged = HasUsableRangedWeapon(Pawn);
+        // The standoff is only worth holding while there is actually a shot from it. Bay panels
+        // and doors sit inside their rigs, so a bot that arms itself and then stops at weapon
+        // range can end up staring at the hull it is meant to be shooting through — motionless,
+        // not firing, and waiting out the round. Close in whenever the line is blocked.
+        bool clearShot = ranged && !world.Level.Collision
+            .Raycast(Pawn.Center, objective.Position + MathX.Up * 1.5f).Hit;
         float radius = objective.Kind == ObjectiveKind.Destroy
-            ? (ranged ? MathF.Max(objective.Radius + 6f, 10f) : 1.6f)
+            ? (clearShot ? MathF.Max(objective.Radius + 6f, 10f) : 1.6f)
             : MathF.Max(0.8f, objective.Radius * 0.6f);
 
         // Hold position at weapon range and let ShootObjective do the work. Earlier attempts to
@@ -2386,9 +2571,11 @@ public sealed class BotController : Controller
 
         // --- obstacle recovery and bail-out conditions ---
         float frameTravel = Vector3.Distance(v.Position, _lastVehiclePosition);
-        // Compare against a speed-sized per-frame distance. The old fixed 0.30 m threshold
-        // classified every vehicle below 18 m/s as stationary at 60 Hz, so tanks could enter
-        // recovery while they were visibly still advancing.
+        // Deliberately permissive: this only has to catch a hull that has stopped dead. A fixed
+        // 0.30 m per frame branded every vehicle below 18 m/s stationary at 60 Hz and sent slow
+        // tanks into recovery while they were visibly advancing. Anything subtler than a dead
+        // stop — grinding along a wall, circling the goal — is caught by the no-gain test below,
+        // which measures the only thing that matters: whether the destination is getting closer.
         float stationaryDistance = MathF.Max(0.025f, dt * 0.75f);
         _vehicleStuckTimer = frameTravel < stationaryDistance
             ? _vehicleStuckTimer + dt
@@ -2396,6 +2583,30 @@ public sealed class BotController : Controller
         _vehicleProgressTimer += dt;
         _vehicleProgressPath += frameTravel;
         _lastVehiclePosition = v.Position;
+
+        // Closing on the destination is the only thing that counts as progress. A vehicle that
+        // has stopped closing is either wedged, orbiting, or driving a route that does not
+        // actually reach the goal, and in every one of those cases the bot is better off on
+        // foot. Chasing a visible enemy is exempt: that destination moves by design.
+        bool chasingTarget = targetVisible && target != null;
+        // A goal that advances — the next node in the chain, the next objective — legitimately
+        // puts the bot further away than it has ever been. Start the measurement over instead
+        // of reading that jump as a failure to close.
+        if (Vector3.DistanceSquared(destination, _vehicleBestDestination) > 8f * 8f)
+        {
+            _vehicleBestDestination = destination;
+            _vehicleBestDistance = float.MaxValue;
+            _vehicleNoGainTimer = 0f;
+        }
+        if (chasingTarget || distance < _vehicleBestDistance - 1.5f)
+        {
+            _vehicleBestDistance = MathF.Min(_vehicleBestDistance, distance);
+            _vehicleNoGainTimer = 0f;
+        }
+        else
+        {
+            _vehicleNoGainTimer += dt;
+        }
 
         if (_vehicleProgressTimer >= 1.5f)
         {
@@ -2444,7 +2655,12 @@ public sealed class BotController : Controller
         bool blockedAtAssaultObjective = Pawn.Team == world.Assault.Attackers
             && assaultTarget is { Kind: ObjectiveKind.Destroy }
             && distance <= hold * 1.1f && !input.Fire;
-        bool jammed = _vehicleRecoveryAttempts >= 3
+        // Only judge a lack of gain once the bot is still meaningfully short of where it wanted
+        // to be — a vehicle sitting at its standoff distance has arrived, not stalled. Seven
+        // seconds is long enough to cover a wide craft working its way around an obstacle and
+        // short enough that a wedged one does not strand its passenger for the whole round.
+        bool notClosing = _vehicleNoGainTimer > 7f && distance > hold + 4f;
+        bool jammed = _vehicleRecoveryAttempts >= 3 || notClosing
             || _vehicleStuckTimer > 4.5f && (throttle != 0f || blockedAtAssaultObjective);
         if (_vehicleStuckTimer > 2.25f && _vehicleRecoveryTimer <= 0f)
         {
@@ -2583,7 +2799,12 @@ public sealed class BotController : Controller
         {
             if (!item.Active) continue;
             if (item == _blockedItem && _blockedItemTimer > 0f) continue;
-            if (combatOnly && item.Kind is not (PickupKind.WeaponPickup or PickupKind.AmmoPickup))
+            // A locker is the most combat-relevant pickup on the map — it hands over a whole
+            // arsenal at once — so it has to survive the combat-only filter. Leaving it out made
+            // every locker-armed arena unplayable for bots: they went looking for a gun, found
+            // only lockers, matched nothing, and stood still.
+            if (combatOnly && item.Kind is not (PickupKind.WeaponPickup or PickupKind.AmmoPickup
+                    or PickupKind.WeaponLocker))
                 continue;
             if (opportunistic && !IsUsefulOpportunisticPickup(Pawn, item)) continue;
 
@@ -2598,6 +2819,19 @@ public sealed class BotController : Controller
                 if (!Pawn.HasWeapon[(int)item.Weapon])
                     score += 16f + Weapons.Get(item.Weapon).BotPreference * 5f;
                 if (noRangedAmmo) score += 28f;
+                else if (needsCombatSupply) score += 22f;
+            }
+            else if (item.Kind == PickupKind.WeaponLocker)
+            {
+                // Scored off the best gun on the rack the bot is missing, then weighted like a
+                // weapon pickup — one trip here settles rearming outright, so a bot with nothing
+                // to shoot with should prefer it over a single loose gun at the same range.
+                float bestOnRack = 0f;
+                foreach (WeaponKind w in item.LockerWeapons)
+                    if (!Pawn.HasWeapon[(int)w])
+                        bestOnRack = MathF.Max(bestOnRack, Weapons.Get(w).BotPreference);
+                if (bestOnRack > 0f) score += 18f + bestOnRack * 5f;
+                if (noRangedAmmo) score += 30f;
                 else if (needsCombatSupply) score += 22f;
             }
             else if (item.Kind == PickupKind.AmmoPickup && needsCombatSupply)

@@ -165,6 +165,9 @@ public sealed class GameWorld
     /// <summary>Warfare's orbs and auxiliary-node payouts. Idle on every other mode.</summary>
     public readonly WarfareState Warfare = new();
 
+    /// <summary>The Bombing Run ball and the two hoops. Idle on every other mode.</summary>
+    public readonly BombingRunState BombingRun = new();
+
     /// <summary>True for the two modes built on the power-node network.</summary>
     public bool NodeNetworkMode => Mode.Kind is GameModeKind.Onslaught or GameModeKind.Warfare;
 
@@ -177,6 +180,8 @@ public sealed class GameWorld
     public int OnslaughtNodeCaptures { get; private set; }
     public int WarfareOrbPickups { get; private set; }
     public int WarfareOrbCaptures { get; private set; }
+    public int BallPickups { get; private set; }
+    public int BallGoals { get; private set; }
     public int HoverboardRides { get; private set; }
     public int HoverboardTows { get; private set; }
     public int AssaultObjectiveCompletions { get; private set; }
@@ -373,6 +378,7 @@ public sealed class GameWorld
         Onslaught.Reset(level);
         Assault.Reset(level);
         Warfare.Reset(level, Onslaught);
+        BombingRun.Reset(level);
 
         Vehicles.Clear();
         NextVehicleId = 1;
@@ -651,6 +657,7 @@ public sealed class GameWorld
             HandlePickups(pawn);
             Mode.OnPawnUpdate(this, pawn, dt);
             UpdateCarriedFlag(pawn);
+            UpdateBallCarry(pawn);
         }
 
         UpdateProjectiles(dt);
@@ -661,6 +668,7 @@ public sealed class GameWorld
         UpdateVehicles(dt);
         UpdateOnslaught(dt);
         UpdateAssault(dt);
+        UpdateBombingRun(dt);
 
         for (int i = KillFeed.Count - 1; i >= 0; i--)
         {
@@ -855,6 +863,33 @@ public sealed class GameWorld
         var def = pawn.WeaponDef;
         FireDef fire = alt ? def.Alt : def.Primary;
         if (fire.Mode == FireMode.Beam) return;
+
+        // The Ball Launcher does not fire a projectile — it hands the mode's one ball back to the
+        // world with a velocity. Primary throws it hard at whatever is being aimed at; alternate
+        // lobs it to the nearest team-mate ahead, which is how a team advances it under fire.
+        if (pawn.Weapon == WeaponKind.BallLauncher)
+        {
+            if (!pawn.HasBall) return;
+            pawn.FireCooldown = fire.Interval;
+            pawn.FireBlend = 1f;
+            pawn.ShotsFired++;
+            Vector3 launch = pawn.ViewDirection * fire.ProjectileSpeed;
+            if (alt && NearestPassTarget(pawn) is { } mate)
+            {
+                Vector3 to = mate.Center - pawn.Center;
+                float range = to.Length();
+                if (range > 0.5f)
+                {
+                    // Lead the arc so the pass lands on the team-mate rather than short of them.
+                    float flight = range / fire.ProjectileSpeed;
+                    launch = to / flight;
+                    launch.Y += 0.5f * Physics.Gravity * Level.GravityScale * flight;
+                }
+            }
+            ReleaseBall(pawn, launch, thrown: true);
+            OnSound?.Invoke(SoundId.FlagTaken, pawn.Position, 0.9f);
+            return;
+        }
 
         pawn.ConsumeAmmo(alt);
         pawn.FireCooldown = fire.Interval;
@@ -1810,6 +1845,8 @@ public sealed class GameWorld
 
         DropFlag(victim, type);
         DropCarriedOrb(victim);
+        // A killed carrier drops the ball where they fell, still live for either side to take.
+        if (victim.HasBall) ReleaseBall(victim, Vector3.Zero, thrown: false);
         victim.OnHoverboard = false;
         victim.GrappleVehicleId = -1;
 
@@ -2275,6 +2312,165 @@ public sealed class GameWorld
                 OnSound?.Invoke(SoundId.FlagTaken, pawn.Position, 1.2f);
             }
         }
+    }
+
+    // ---------------------------------------------------------------- bombing run
+
+    /// <summary>
+    /// Picks the ball up, and carries it. Holding it costs the carrier every weapon but the Ball
+    /// Launcher: that restriction is the mode, because it means a runner cannot clear their own
+    /// path and the ball has to be moved by a team rather than an individual.
+    /// </summary>
+    private void UpdateBallCarry(Pawn pawn)
+    {
+        if (Mode.Kind != GameModeKind.BombingRun
+            || Mode.State is MatchState.Warmup or MatchState.Finished) return;
+        var br = BombingRun;
+
+        if (br.Carrier == pawn.Id)
+        {
+            br.Position = pawn.Center;
+            br.LooseTimer = 0f;
+            pawn.HasBall = true;
+            // Re-assert every frame rather than only at pickup: walking over a weapon while
+            // carrying would otherwise auto-switch the carrier back onto a gun, which is exactly
+            // the thing the mode forbids.
+            if (pawn.Weapon != WeaponKind.BallLauncher) ForceBallLauncher(pawn);
+            return;
+        }
+        if (br.Carrier >= 0 || !pawn.Alive) return;
+        if (Vector3.Distance(pawn.Center, br.Position) > BombingRunState.PickupRadius) return;
+
+        br.Carrier = pawn.Id;
+        br.LastTouch = pawn.Team;
+        br.LastTouchPawn = pawn.Id;
+        br.LooseTimer = 0f;
+        br.InFlight = false;
+        pawn.HasBall = true;
+        BallPickups++;
+        ForceBallLauncher(pawn);
+        Broadcast(pawn.Team == Team.Red ? Loc.AnnBallTakenRed : Loc.AnnBallTakenBlue,
+            GameTypes.TeamColor(pawn.Team), 2.0f);
+        OnSound?.Invoke(SoundId.FlagTaken, pawn.Position, 1.2f);
+    }
+
+    /// <summary>
+    /// The carrier's inventory is replaced by the Ball Launcher for as long as they hold the ball.
+    /// The weapons themselves are untouched, so dropping it hands everything straight back.
+    /// </summary>
+    private static void ForceBallLauncher(Pawn pawn)
+    {
+        pawn.HasWeapon[(int)WeaponKind.BallLauncher] = true;
+        pawn.Weapon = WeaponKind.BallLauncher;
+        pawn.PendingWeapon = WeaponKind.BallLauncher;
+    }
+
+    /// <summary>
+    /// The team-mate an alternate-fire pass should go to: the closest one ahead of the carrier
+    /// with a clear line, so a pass cannot be thrown into the wall the carrier is hiding behind.
+    /// </summary>
+    private Pawn NearestPassTarget(Pawn pawn)
+    {
+        Pawn best = null;
+        float bestDist = float.MaxValue;
+        Vector3 goal = BombingRun.TargetGoal(pawn.Team);
+        float carrierToGoal = Vector3.Distance(pawn.Center, goal);
+        foreach (var mate in Pawns)
+        {
+            if (mate == pawn || !mate.Alive || mate.Team != pawn.Team) continue;
+            float d = Vector3.Distance(pawn.Center, mate.Center);
+            if (d > 55f || d >= bestDist) continue;
+            // Only pass forwards. A backward pass is legal but never what the bot wanted.
+            if (Vector3.Distance(mate.Center, goal) > carrierToGoal - 2f) continue;
+            if (Level.Collision.Raycast(pawn.Center, mate.Center).Hit) continue;
+            best = mate;
+            bestDist = d;
+        }
+        return best;
+    }
+
+    /// <summary>Hands the ball back: the carrier gets their guns, the ball gets its physics.</summary>
+    public void ReleaseBall(Pawn pawn, Vector3 velocity, bool thrown)
+    {
+        var br = BombingRun;
+        if (br.Carrier != pawn.Id) return;
+        br.Carrier = -1;
+        br.Position = pawn.Center;
+        br.Velocity = velocity;
+        br.InFlight = thrown;
+        br.LooseTimer = 0f;
+        br.LastTouch = pawn.Team;
+        br.LastTouchPawn = pawn.Id;
+        pawn.HasBall = false;
+        pawn.HasWeapon[(int)WeaponKind.BallLauncher] = false;
+        if (pawn.Weapon == WeaponKind.BallLauncher) pawn.SwitchToBestAvailable();
+    }
+
+    /// <summary>
+    /// Moves a loose ball, tests both hoops, and returns an abandoned ball to midfield. A goal is
+    /// only credited to the side that last touched it, so a defender booting it clear of their own
+    /// ring can never score on themselves.
+    /// </summary>
+    private void UpdateBombingRun(float dt)
+    {
+        if (Mode.Kind != GameModeKind.BombingRun
+            || Mode.State is MatchState.Warmup or MatchState.Finished) return;
+        var br = BombingRun;
+
+        if (!br.Held)
+        {
+            br.Velocity.Y -= Physics.Gravity * Level.GravityScale * dt;
+            Vector3 next = br.Position + br.Velocity * dt;
+            var hit = Level.Collision.Raycast(br.Position, next);
+            if (hit.Hit)
+            {
+                // Bounces, losing most of its energy, so a missed shot stays near the hoop
+                // instead of skittering back to midfield on its own.
+                br.Position = hit.Point + hit.Normal * 0.2f;
+                br.Velocity = Vector3.Reflect(br.Velocity, hit.Normal) * 0.32f;
+                br.InFlight = false;
+            }
+            else
+            {
+                br.Position = next;
+            }
+
+            br.LooseTimer += dt;
+            if (br.Position.Y < Level.KillPlaneY || br.LooseTimer >= BombingRunState.ReturnSeconds)
+            {
+                br.ReturnToMidfield();
+                Broadcast(Loc.AnnBallReturned, new Vector3(0.9f, 0.85f, 0.5f), 1.8f);
+                return;
+            }
+        }
+
+        var evt = br.CheckGoal(out Team scorer, out int scorerPawn);
+        if (evt is BallEvent.None) return;
+
+        var by = FindPawn(scorerPawn);
+        int points = br.ScoreFor(evt);
+        BallGoals++;
+        if (scorer != Team.None) Mode.TeamScores[(int)scorer] += points;
+        if (by != null)
+        {
+            by.Captures++;
+            AddKillFeed(evt == BallEvent.RunGoal ? Loc.BrRunGoal(by.Name) : Loc.BrThrowGoal(by.Name),
+                GameTypes.TeamColor(scorer));
+        }
+        Broadcast(scorer == Team.Red ? Loc.AnnRedScores : Loc.AnnBlueScores,
+            GameTypes.TeamColor(scorer), 2.4f);
+        OnSound?.Invoke(SoundId.FlagCapture, br.Position, 1.4f);
+
+        // Running it in drops the carrier through the ring. On Anubis that is a pit, and the
+        // original kills you for it; here the ring simply hands the ball back to midfield and
+        // whatever is under it decides the runner's fate.
+        if (by != null && evt == BallEvent.RunGoal)
+        {
+            by.HasBall = false;
+            by.HasWeapon[(int)WeaponKind.BallLauncher] = false;
+            if (by.Weapon == WeaponKind.BallLauncher) by.SwitchToBestAvailable();
+        }
+        br.ReturnToMidfield();
     }
 
     /// <summary>
@@ -3275,6 +3471,7 @@ public sealed class GameWorld
         SubmitPickups(scene);
         SubmitFlags(scene);
         SubmitOrbs(scene);
+        SubmitBall(scene);
         SubmitHoverboards(scene);
         SubmitVehicles(scene);
         SubmitControlPoints(scene);
@@ -3985,6 +4182,50 @@ public sealed class GameWorld
             for (int i = 1; i <= 6; i++)
                 scene.AddLight(pos + new Vector3(0f, i * 3.5f, 0f), 9f, col, 2.4f, 1.4f);
         }
+    }
+
+    /// <summary>
+    /// Draws the Bombing Run ball, in a carrier's hands or loose on the field. It is lit brightly
+    /// on purpose: with only one ball in play, everyone needs to be able to find it instantly.
+    /// </summary>
+    private void SubmitBall(RenderScene scene)
+    {
+        if (Mode.Kind != GameModeKind.BombingRun) return;
+        var br = BombingRun;
+        Vector3 col = br.Carrier >= 0 && FindPawn(br.Carrier) is { } holder
+            ? GameTypes.TeamColor(holder.Team)
+            : new Vector3(0.95f, 0.85f, 0.42f);
+        Vector3 pos = br.Held
+            ? br.Position + new Vector3(0f, 0.45f, 0f)
+            : br.Position + new Vector3(0f, MathF.Sin(Time * 2.4f) * 0.10f, 0f);
+        Matrix4x4 xf = Matrix4x4.CreateScale(0.46f)
+            * Matrix4x4.CreateRotationY(Time * 2.0f)
+            * Matrix4x4.CreateTranslation(pos);
+        Mesh mesh = _pickupModels.MeshFor(PickupKind.DamageAmp);
+        if (mesh == null) return;
+        foreach (var section in _pickupModels.SectionsFor(PickupKind.DamageAmp))
+        {
+            Material mat = Materials.Get(section.Material);
+            scene.Opaque.Add(new DrawCall
+            {
+                Mesh = mesh,
+                IndexOffset = section.IndexOffset,
+                IndexCount = section.IndexCount,
+                Material = mat,
+                Transform = xf,
+                BoneBase = -1,
+                Tint = new Vector4(col, 1f),
+                Emissive = col * 3.2f,
+                OverrideEmissive = true,
+                Alpha = 1f,
+                Center = pos,
+                Radius = 1f,
+                CastShadow = false,
+                UvScale = mat.UvScale,
+                OwnerView = -1,
+            });
+        }
+        scene.AddLight(pos, br.Held ? 15f : 11f, col, br.Held ? 6f : 4f, 1.6f);
     }
 
     /// <summary>Draws the board under anyone riding one, using the real vehicle mesh.</summary>

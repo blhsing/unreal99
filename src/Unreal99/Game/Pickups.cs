@@ -94,14 +94,18 @@ public sealed class PickupEntity
                 }
             case PickupKind.WeaponLocker:
                 {
-                    // Worth exactly as much as the best thing on it that the bot does not have.
-                    float best = 0.1f;
+                    // Worth exactly as much as the best thing on it that the bot does not have —
+                    // and worth nothing at all once it holds every gun on the rack at healthy
+                    // ammo. A residual floor here reads as a permanently mildly-interesting
+                    // destination, so a bot with a full inventory parks at the rack and waits
+                    // out its respawn instead of going back to the objective.
+                    float best = 0f;
                     foreach (WeaponKind w in LockerWeapons)
                     {
                         var def = Weapons.Get(w);
                         float value = !p.HasWeapon[(int)w]
                             ? 0.7f + def.BotPreference * 0.9f
-                            : p.AmmoFor(w) < def.MaxAmmo / 3 ? 0.5f + def.BotPreference * 0.3f : 0.1f;
+                            : p.AmmoFor(w) < def.MaxAmmo / 3 ? 0.5f + def.BotPreference * 0.3f : 0f;
                         best = MathF.Max(best, value);
                     }
                     return best;

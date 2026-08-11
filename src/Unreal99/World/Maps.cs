@@ -36,6 +36,8 @@ public enum MapId
     // Onslaught. Built for the mode: open ground, a node chain, vehicles at every node.
     Torlan,
     Primeval,
+    Crossfire,
+    Dria,
     // Assault. One-way maps: a fixed objective sequence and forward spawns behind it.
     Convoy,
     Frigate,
@@ -47,6 +49,9 @@ public enum MapId
     Avalanche,
     OnyxCoast,
     Islander,
+    // Bombing Run. Symmetrical ball arenas: a hoop at each end and one ball at midfield.
+    Anubis,
+    Colossus,
     Count
 }
 
@@ -85,6 +90,8 @@ public static partial class Maps
         MapId.Cinder => Loc.MapCinder,
         MapId.Torlan => Loc.MapTorlan,
         MapId.Primeval => Loc.MapPrimeval,
+        MapId.Crossfire => Loc.MapCrossfire,
+        MapId.Dria => Loc.MapDria,
         MapId.Convoy => Loc.MapConvoy,
         MapId.Frigate => Loc.MapFrigate,
         MapId.Glacier => Loc.MapGlacier,
@@ -94,6 +101,8 @@ public static partial class Maps
         MapId.Avalanche => Loc.MapAvalanche,
         MapId.OnyxCoast => Loc.MapOnyxCoast,
         MapId.Islander => Loc.MapIslander,
+        MapId.Anubis => Loc.MapAnubis,
+        MapId.Colossus => Loc.MapColossus,
         _ => Loc.MapDeck16,
     };
 
@@ -122,6 +131,8 @@ public static partial class Maps
         MapId.Cinder => Loc.MapCinderDesc,
         MapId.Torlan => Loc.MapTorlanDesc,
         MapId.Primeval => Loc.MapPrimevalDesc,
+        MapId.Crossfire => Loc.MapCrossfireDesc,
+        MapId.Dria => Loc.MapDriaDesc,
         MapId.Convoy => Loc.MapConvoyDesc,
         MapId.Frigate => Loc.MapFrigateDesc,
         MapId.Glacier => Loc.MapGlacierDesc,
@@ -131,6 +142,8 @@ public static partial class Maps
         MapId.Avalanche => Loc.MapAvalancheDesc,
         MapId.OnyxCoast => Loc.MapOnyxCoastDesc,
         MapId.Islander => Loc.MapIslanderDesc,
+        MapId.Anubis => Loc.MapAnubisDesc,
+        MapId.Colossus => Loc.MapColossusDesc,
         _ => Loc.MapDeck16Desc,
     };
 
@@ -138,7 +151,8 @@ public static partial class Maps
         => id is MapId.Coret or MapId.November or MapId.FacingWorlds or MapId.LavaGiant;
 
     /// <summary>Onslaught needs a node graph, so only the ONS arenas can host it.</summary>
-    public static bool SupportsOnslaught(MapId id) => id is MapId.Torlan or MapId.Primeval;
+    public static bool SupportsOnslaught(MapId id)
+        => id is MapId.Torlan or MapId.Primeval or MapId.Crossfire or MapId.Dria;
 
     /// <summary>Assault needs an objective sequence, so only the AS arenas can host it.</summary>
     public static bool SupportsAssault(MapId id)
@@ -148,6 +162,10 @@ public static partial class Maps
     public static bool SupportsWarfare(MapId id)
         => id is MapId.WarTorlan or MapId.WarTorlanNecris or MapId.Serenity or MapId.Avalanche
             or MapId.OnyxCoast or MapId.Islander;
+
+    /// <summary>Bombing Run needs a ball spawn and two hoops, so only the BR arenas can host it.</summary>
+    public static bool SupportsBombingRun(MapId id)
+        => id is MapId.Anubis or MapId.Colossus;
 
     /// <summary>Domination needs control points, so only the DOM arenas can host it.</summary>
     public static bool SupportsDomination(MapId id)
@@ -178,6 +196,8 @@ public static partial class Maps
         MapId.Cinder => BuildCinder(gl),
         MapId.Torlan => BuildTorlan(gl),
         MapId.Primeval => BuildPrimeval(gl),
+        MapId.Crossfire => BuildCrossfire(gl),
+        MapId.Dria => BuildDria(gl),
         MapId.Convoy => BuildConvoy(gl),
         MapId.Frigate => BuildFrigate(gl),
         MapId.Glacier => BuildGlacier(gl),
@@ -187,6 +207,8 @@ public static partial class Maps
         MapId.Avalanche => BuildAvalanche(gl),
         MapId.OnyxCoast => BuildOnyxCoast(gl),
         MapId.Islander => BuildIslander(gl),
+        MapId.Anubis => BuildAnubis(gl),
+        MapId.Colossus => BuildColossus(gl),
         _ => BuildDeck16(gl),
     };
 

@@ -188,14 +188,25 @@ public static partial class Maps
             b.Spawn(new Vector3(96f + i * 6f, Deck + 0.2f, -8f + i * 3f), 180f, Team.Blue, 0);
 
         // ---------------------------------------------------------------- loadout
-        b.Weapon(new Vector3(-140f, Deck + 0.8f, 0f), WeaponKind.FlakCannon);
-        b.Weapon(new Vector3(-130f, Deck + 0.8f, -5f), WeaponKind.RocketLauncher);
-        b.Weapon(new Vector3(-92f, Deck + 0.8f, 6f), WeaponKind.Minigun);
+        // AS-Convoy is UT2004: it carries one loose Shock Rifle and arms the rest of the column
+        // from thirteen lockers, and the Link Gun is on nearly all of them.
         b.Weapon(new Vector3(-52f, Deck + 0.8f, -6f), WeaponKind.ShockRifle);
-        b.Weapon(new Vector3(-14f, Deck + 0.8f, 6f), WeaponKind.RocketLauncher);
-        b.Weapon(new Vector3(26f, Deck + 0.8f, 7f), WeaponKind.SniperRifle);
         b.Weapon(new Vector3(66f, Deck - 2.4f, -7f), WeaponKind.FlakCannon);
-        b.Weapon(new Vector3(120f, Deck + 5.8f, 0f), WeaponKind.SniperRifle);
+        b.Locker(new Vector3(-140f, Deck + 0.2f, 0f),
+            WeaponKind.Minigun, WeaponKind.RocketLauncher, WeaponKind.SniperRifle);
+        b.Locker(new Vector3(-100f, Deck + 0.2f, 8f),
+            WeaponKind.ShockRifle, WeaponKind.LinkGun, WeaponKind.FlakCannon,
+            WeaponKind.RocketLauncher, WeaponKind.SniperRifle);
+        b.Locker(new Vector3(-46f, Deck + 0.2f, -9f),
+            WeaponKind.BioRifle, WeaponKind.LinkGun, WeaponKind.Minigun, WeaponKind.SniperRifle);
+        b.Locker(new Vector3(-14f, Deck + 0.2f, 9f),
+            WeaponKind.LinkGun, WeaponKind.Minigun, WeaponKind.SniperRifle);
+        b.Locker(new Vector3(26f, Deck + 0.2f, -9f),
+            WeaponKind.LinkGun, WeaponKind.Minigun, WeaponKind.FlakCannon, WeaponKind.SniperRifle);
+        b.Locker(new Vector3(112f, Deck + 0.2f, 6f),
+            WeaponKind.BioRifle, WeaponKind.LinkGun, WeaponKind.Minigun);
+        b.Ammo(new Vector3(-88f, Deck + 0.7f, 6f), AmmoKind.LinkCells);
+        b.Ammo(new Vector3(-84f, Deck + 0.7f, 6f), AmmoKind.LinkCells);
         b.Item(new Vector3(-84f, Deck + 0.7f, 0f), PickupKind.ThighPads);
         b.Item(new Vector3(-34f, Deck + 0.7f, -8f), PickupKind.BodyArmor);
         b.Item(new Vector3(14f, Deck + 0.7f, 8f), PickupKind.HealthPack);
@@ -587,14 +598,40 @@ public static partial class Maps
             b.Spawn(new Vector3(100f + i * 5f, Upper + 0.4f, -12f + i * 8f), -90f, Team.Blue, 1);
 
         // ---------------------------------------------------------------- pickups
-        b.Weapon(new Vector3(-120f, Ice + 0.7f, 0f), WeaponKind.SniperRifle);
-        b.Weapon(new Vector3(-70f, Floor + 0.7f, -26f), WeaponKind.FlakCannon);
-        b.Weapon(new Vector3(-70f, Floor + 0.7f, 26f), WeaponKind.Minigun);
-        b.Weapon(new Vector3(-40f, Floor + 0.7f, 14f), WeaponKind.RocketLauncher);
-        b.Weapon(new Vector3(4f, Floor + 0.7f, -16f), WeaponKind.ShockRifle);
-        b.Weapon(new Vector3(56f, Floor + 1.1f, 0f), WeaponKind.RocketLauncher);
-        b.Weapon(new Vector3(98f, Floor + 1.1f, -14f), WeaponKind.FlakCannon);
-        b.Weapon(new Vector3(140f, Floor + 1.1f, 12f), WeaponKind.SniperRifle);
+        // The original places four loose weapons and arms the rest of the map from lockers: a Bio
+        // Rifle in the storage area, a Shock Rifle inside the primary dam, a Flak Cannon inside the
+        // secondary dam, and a Grenade Launcher on each dam wall.
+        b.Weapon(new Vector3(-70f, Floor + 0.7f, -26f), WeaponKind.BioRifle);
+        b.Weapon(new Vector3(98f, Floor + 1.1f, -14f), WeaponKind.ShockRifle);
+        b.Weapon(new Vector3(140f, Floor + 1.1f, 12f), WeaponKind.FlakCannon);
+        b.Weapon(new Vector3(126f, Floor + 1.1f, 14f), WeaponKind.GrenadeLauncher);
+        b.Weapon(new Vector3(158f, Floor + 1.1f, -14f), WeaponKind.GrenadeLauncher);
+        b.Ammo(new Vector3(-64f, Floor + 0.7f, 26f), AmmoKind.LinkCells);
+        b.Ammo(new Vector3(-56f, Floor + 0.7f, 26f), AmmoKind.LinkCells);
+
+        // Eighteen lockers in the original; nine here, one per fighting area along the route.
+        b.Locker(new Vector3(-176f, Ice + 0.2f, 6f),
+            WeaponKind.ShockRifle, WeaponKind.LinkGun, WeaponKind.Minigun, WeaponKind.SniperRifle);
+        b.Locker(new Vector3(-168f, Ice + 0.2f, -6f),
+            WeaponKind.ShockRifle, WeaponKind.LinkGun, WeaponKind.Minigun, WeaponKind.SniperRifle);
+        b.Locker(new Vector3(-52f, Floor + 0.2f, -14f),
+            WeaponKind.LinkGun, WeaponKind.Minigun, WeaponKind.RocketLauncher, WeaponKind.SniperRifle);
+        b.Locker(new Vector3(-6f, Floor + 0.2f, -18f),
+            WeaponKind.ShockRifle, WeaponKind.LinkGun, WeaponKind.Minigun, WeaponKind.RocketLauncher);
+        b.Locker(new Vector3(-6f, Floor + 0.2f, 18f),
+            WeaponKind.ShockRifle, WeaponKind.LinkGun, WeaponKind.Minigun, WeaponKind.RocketLauncher);
+        b.Locker(new Vector3(52f, Floor + 0.6f, -12f),
+            WeaponKind.ShockRifle, WeaponKind.LinkGun, WeaponKind.Minigun,
+            WeaponKind.RocketLauncher, WeaponKind.SniperRifle);
+        b.Locker(new Vector3(96f, Floor + 0.6f, 14f),
+            WeaponKind.BioRifle, WeaponKind.ShockRifle, WeaponKind.LinkGun,
+            WeaponKind.RocketLauncher, WeaponKind.SniperRifle);
+        b.Locker(new Vector3(104f, Upper + 0.4f, -10f),
+            WeaponKind.ShockRifle, WeaponKind.LinkGun, WeaponKind.Minigun,
+            WeaponKind.GrenadeLauncher, WeaponKind.RocketLauncher);
+        b.Locker(new Vector3(150f, Floor + 0.6f, 0f),
+            WeaponKind.ShockRifle, WeaponKind.LinkGun, WeaponKind.Minigun,
+            WeaponKind.RocketLauncher, WeaponKind.SniperRifle);
         b.Item(new Vector3(-52f, Floor + 0.7f, -20f), PickupKind.BodyArmor);
         b.Item(new Vector3(-52f, Floor + 0.7f, 20f), PickupKind.HealthPack);
         b.Item(new Vector3(60f, Floor + 1.0f, 12f), PickupKind.ThighPads);

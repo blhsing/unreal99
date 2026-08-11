@@ -61,8 +61,8 @@ public struct Projectile
 /// <summary>Procedural meshes for the projectiles that are large enough to need real geometry.</summary>
 public sealed class ProjectileModels : IDisposable
 {
-    private readonly Mesh[] _meshes = new Mesh[16];
-    private readonly MeshSection[][] _sections = new MeshSection[16][];
+    private readonly Mesh[] _meshes = new Mesh[(int)ProjectileKind.Count];
+    private readonly MeshSection[][] _sections = new MeshSection[(int)ProjectileKind.Count][];
 
     public Mesh MeshFor(ProjectileKind k) => _meshes[(int)k];
     public MeshSection[] SectionsFor(ProjectileKind k) => _sections[(int)k];

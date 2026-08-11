@@ -90,9 +90,17 @@ public static partial class Maps
             b.AddVehicle(VehicleKind.Raptor, new Vector3(x - sign * 16f, Ground + 12f, -18f), sign < 0 ? 90f : -90f, team);
             b.AddVehicle(VehicleKind.Cicada, new Vector3(x - sign * 16f, Ground + 14f, 18f), sign < 0 ? 90f : -90f, team);
 
-            b.Weapon(new Vector3(x - sign * 4f, Ground + 2.1f, -6f), WeaponKind.RocketLauncher);
-            b.Weapon(new Vector3(x - sign * 4f, Ground + 2.1f, 6f), WeaponKind.ShockRifle);
-            b.Weapon(new Vector3(x - sign * 8f, Ground + 2.1f, 0f), WeaponKind.SniperRifle);
+            // The original's base loadout: a Grenade Launcher and an AVRiL on the bridge by the
+            // core, with two lockers. Rocket/Shock/Sniper were what this map carried before the
+            // UT2004 arsenal existed here — none of the three is on the real ONS-Torlan.
+            b.Weapon(new Vector3(x - sign * 4f, Ground + 2.1f, -6f), WeaponKind.GrenadeLauncher);
+            b.Weapon(new Vector3(x - sign * 4f, Ground + 2.1f, 6f), WeaponKind.Avril);
+            b.Ammo(new Vector3(x - sign * 6f, Ground + 2.0f, -6f), AmmoKind.Grenades);
+            b.Ammo(new Vector3(x - sign * 6f, Ground + 2.0f, 6f), AmmoKind.AvrilMissiles);
+            b.Locker(new Vector3(x - sign * 9f, Ground + 1.4f, -11f),
+                WeaponKind.ShockRifle, WeaponKind.LinkGun, WeaponKind.FlakCannon);
+            b.Locker(new Vector3(x - sign * 9f, Ground + 1.4f, 11f),
+                WeaponKind.ShockRifle, WeaponKind.LinkGun, WeaponKind.FlakCannon);
             b.Item(new Vector3(x, Ground + 2.0f, -9f), PickupKind.BodyArmor);
             b.Item(new Vector3(x, Ground + 2.0f, 9f), PickupKind.HealthPack);
             for (int i = 0; i < 4; i++)
@@ -138,8 +146,12 @@ public static partial class Maps
             b.Solid(pos + new Vector3(-9f, 0f, -9f), pos + new Vector3(9f, 1.2f, 9f), MatId.Concrete, true, 0.6f);
             for (int i = 0; i < kinds.Length; i++)
                 b.AddVehicle(kinds[i], pos + new Vector3(-6f + i * 6f, 2.6f, 11f), 0f);
-            b.Weapon(pos + new Vector3(-4f, 2.1f, 0f), WeaponKind.FlakCannon);
-            b.Weapon(pos + new Vector3(4f, 2.1f, 0f), WeaponKind.Minigun);
+            // Prime nodes get the Mine Layer locker; the corner Goliath nodes get the Grenade
+            // Launcher and Lightning Gun one, exactly as the original splits them.
+            b.Locker(pos + new Vector3(-4f, 1.4f, 0f),
+                WeaponKind.MineLayer, WeaponKind.LinkGun, WeaponKind.Minigun);
+            b.Locker(pos + new Vector3(4f, 1.4f, 0f),
+                WeaponKind.LinkGun, WeaponKind.GrenadeLauncher, WeaponKind.LightningGun);
             b.Item(pos + new Vector3(0f, 2.0f, -5f), PickupKind.HealthPack);
             b.Spawn(pos + new Vector3(0f, 1.4f, -7f), 0f);
         }
@@ -166,9 +178,13 @@ public static partial class Maps
         b.AddVehicle(VehicleKind.Spma, n3 + new Vector3(0f, 2.6f, 14f), 0f);
         b.AddVehicle(VehicleKind.Hellbender, n3 + new Vector3(-8f, 23.6f, 0f), 0f);
         b.AddVehicle(VehicleKind.Raptor, n3 + new Vector3(8f, 34f, 0f), 0f);
-        b.Weapon(n3 + new Vector3(0f, 23.9f, -6f), WeaponKind.SniperRifle);
+        b.Weapon(n3 + new Vector3(0f, 23.9f, -6f), WeaponKind.LightningGun);
+        b.Ammo(n3 + new Vector3(0f, 23.8f, -9f), AmmoKind.LightningCells);
         b.Item(n3 + new Vector3(0f, 23.8f, 6f), PickupKind.ShieldBelt);
-        b.Weapon(n3 + new Vector3(0f, 2.1f, 6f), WeaponKind.RocketLauncher);
+        // The Redeemer sits on top of the tower bridge in the original.
+        b.Weapon(n3 + new Vector3(0f, 31.0f, 0f), WeaponKind.Redeemer, 100f);
+        b.Locker(n3 + new Vector3(0f, 1.4f, 6f),
+            WeaponKind.ShockRifle, WeaponKind.LinkGun, WeaponKind.Avril);
 
         // --- scattered rock cover so the open ground is not featureless ---
         for (int i = 0; i < 40; i++)
@@ -243,8 +259,12 @@ public static partial class Maps
             b.AddVehicle(VehicleKind.Hellbender, new Vector3(x - sign * 9f, Ground + 1.6f, 9f),
                 sign < 0 ? 90f : -90f, team);
 
-            b.Weapon(new Vector3(x - sign * 3f, Ground + 2.1f, -5f), WeaponKind.RocketLauncher);
-            b.Weapon(new Vector3(x - sign * 3f, Ground + 2.1f, 5f), WeaponKind.FlakCannon);
+            // ONS-Primeval carries no loose weapons whatsoever in the original — ten lockers and
+            // nothing else. Two of them stand in each base.
+            b.Locker(new Vector3(x - sign * 3f, Ground + 1.4f, -5f),
+                WeaponKind.MineLayer, WeaponKind.LinkGun, WeaponKind.FlakCannon, WeaponKind.Avril);
+            b.Locker(new Vector3(x - sign * 3f, Ground + 1.4f, 5f),
+                WeaponKind.MineLayer, WeaponKind.LinkGun, WeaponKind.FlakCannon, WeaponKind.Avril);
             b.Item(new Vector3(x, Ground + 2.0f, 0f), PickupKind.BodyArmor);
             for (int i = 0; i < 3; i++)
                 b.Spawn(new Vector3(x - sign * (2f + i * 3f), Ground + 1.4f, -10f + i * 10f),
@@ -274,8 +294,10 @@ public static partial class Maps
             b.Solid(pos + new Vector3(-8f, 0f, -8f), pos + new Vector3(8f, 1.2f, 8f), MatId.Concrete, true, 0.6f);
             b.AddVehicle(VehicleKind.Manta, pos + new Vector3(-5f, 2.6f, 10f), 0f);
             b.AddVehicle(VehicleKind.Scorpion, pos + new Vector3(5f, 1.9f, 10f), 0f);
-            b.Weapon(pos + new Vector3(-3f, 2.1f, 0f), WeaponKind.Minigun);
-            b.Weapon(pos + new Vector3(3f, 2.1f, 0f), WeaponKind.ShockRifle);
+            b.Locker(pos + new Vector3(-3f, 1.4f, 0f),
+                WeaponKind.ShockRifle, WeaponKind.LinkGun, WeaponKind.Avril);
+            b.Locker(pos + new Vector3(3f, 1.4f, 0f),
+                WeaponKind.ShockRifle, WeaponKind.LinkGun, WeaponKind.Avril);
             b.Spawn(pos + new Vector3(0f, 1.4f, -6f), 0f);
             _ = name;
         }
@@ -288,7 +310,8 @@ public static partial class Maps
             b.Item(n3 + new Vector3(s * 6f, 2.0f, -3f), PickupKind.HealthPack);
             b.Item(n3 + new Vector3(s * 6f, 2.0f, 3f), PickupKind.HealthPack);
         }
-        b.Weapon(n3 + new Vector3(0f, 2.1f, -7f), WeaponKind.SniperRifle);
+        b.Locker(n3 + new Vector3(-3f, 1.4f, -7f), WeaponKind.LinkGun, WeaponKind.RocketLauncher);
+        b.Locker(n3 + new Vector3(3f, 1.4f, -7f), WeaponKind.LinkGun, WeaponKind.RocketLauncher);
         b.Item(n3 + new Vector3(0f, 2.1f, 7f), PickupKind.ShieldBelt);
         b.Spawn(n3 + new Vector3(0f, 1.4f, -9f), 0f);
 

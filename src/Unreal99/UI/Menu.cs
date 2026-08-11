@@ -554,7 +554,7 @@ public sealed class Menu
     private void BuildSetup()
     {
         bool teamMode = ModeKind is GameModeKind.TeamDeathmatch or GameModeKind.CaptureTheFlag
-            or GameModeKind.Domination;
+            or GameModeKind.Domination or GameModeKind.BombingRun;
 
         Add(Loc.OptStartMatch, () => OnStartMatch?.Invoke(), "進入戰場。");
 
@@ -578,6 +578,9 @@ public sealed class Menu
                 Map = World.MapId.WarTorlan;
             if (ModeKind == GameModeKind.Assault && !World.Maps.SupportsAssault(Map))
                 Map = World.MapId.Convoy;
+            // Bombing Run needs a ball spawn and two hoops, which only the BR arenas carry.
+            if (ModeKind == GameModeKind.BombingRun && !World.Maps.SupportsBombingRun(Map))
+                Map = World.MapId.Anubis;
         }, Loc.ModeDescription(ModeKind));
 
         Add($"{Loc.OptChooseMap}　{World.Maps.Name(Map)}", OpenMapGallery, World.Maps.Description(Map));
@@ -700,7 +703,10 @@ public sealed class Menu
                 GameModeKind.Onslaught => World.Maps.SupportsOnslaught(id),
                 GameModeKind.Assault => World.Maps.SupportsAssault(id),
                 GameModeKind.Warfare => World.Maps.SupportsWarfare(id),
-                _ => true,
+                GameModeKind.BombingRun => World.Maps.SupportsBombingRun(id),
+                // The mode-specific arenas are built around rules the other modes do not run:
+                // a Bombing Run hoop is scenery in Deathmatch, and its ball never spawns.
+                _ => !World.Maps.SupportsBombingRun(id),
             };
             Add(World.Maps.Name(id), () =>
             {

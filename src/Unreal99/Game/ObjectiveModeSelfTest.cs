@@ -130,6 +130,45 @@ public static class ObjectiveModeSelfTest
         Check(orb.Dropped && WarfareOrb.DropTimeout == 18f,
             "a dropped orb runs the original's 18-second timer", failures);
 
+        // Bombing Run. The two scoring values and the last-touch rule are the whole mode: get
+        // either wrong and a defender clearing their own ring scores for the attackers.
+        var br = new BombingRunState { Home = Vector3.Zero };
+        br.Goals[Team.Red] = new Vector3(-50f, 0f, 0f);
+        br.Goals[Team.Blue] = new Vector3(50f, 0f, 0f);
+        br.ReturnToMidfield();
+        Check(BombingRunState.RunGoalScore == 7 && BombingRunState.ThrowGoalScore == 3,
+            "carried goals are worth seven and thrown goals three", failures);
+        Check(br.TargetGoal(Team.Red) == br.Goals[Team.Blue]
+              && br.OwnGoal(Team.Red) == br.Goals[Team.Red],
+            "a team scores in the hoop it does not defend", failures);
+        Check(br.CheckGoal(out _, out _) == BallEvent.None,
+            "an untouched ball at midfield scores nothing", failures);
+
+        br.Position = br.Goals[Team.Blue];
+        Check(br.CheckGoal(out _, out _) == BallEvent.None,
+            "a ball in a hoop scores nothing until somebody has touched it", failures);
+        br.LastTouch = Team.Blue;
+        br.LastTouchPawn = 3;
+        Check(br.CheckGoal(out _, out _) == BallEvent.None,
+            "a defender cannot score in their own hoop", failures);
+
+        br.LastTouch = Team.Red;
+        br.LastTouchPawn = 8;
+        var thrown = br.CheckGoal(out Team scorer, out int scorerPawn);
+        Check(thrown == BallEvent.ThrowGoal && scorer == Team.Red && scorerPawn == 8
+              && br.ScoreFor(thrown) == 3,
+            "a loose ball through the enemy hoop is a three-point throw", failures);
+        br.Carrier = 8;
+        var run = br.CheckGoal(out _, out _);
+        Check(run == BallEvent.RunGoal && br.ScoreFor(run) == 7,
+            "carrying it through the same hoop is worth seven", failures);
+
+        br.ReturnToMidfield();
+        Check(!br.Held && br.LastTouch == Team.None && br.Position == br.Home,
+            "a returned ball is unheld, unowned and back at midfield", failures);
+        Check(BombingRunState.ReturnSeconds == 15f,
+            "an abandoned ball returns after fifteen seconds", failures);
+
         var assault = new AssaultState
         {
             Attackers = Team.Red,

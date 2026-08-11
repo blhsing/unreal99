@@ -153,9 +153,14 @@ public static partial class Maps
                 new Vector3(x, Ground + 9f, -14f), sign < 0 ? 90f : -90f, team);
             b.AddOrbSpawn(corePos + new Vector3(-sign * 5f, 1.1f, 0f), team);
 
-            b.Weapon(new Vector3(x - sign * 5f, Ground + 2.1f, -7f), WeaponKind.RocketLauncher);
+            // Every Warfare base carries a Longbow AVRiL — these are vehicle maps, and the
+            // original hands infantry the answer to armour at the door.
+            b.Weapon(new Vector3(x - sign * 5f, Ground + 2.1f, -7f), WeaponKind.Avril);
             b.Weapon(new Vector3(x - sign * 5f, Ground + 2.1f, 7f), WeaponKind.ShockRifle);
             b.Weapon(new Vector3(x, Ground + 8.9f, -14f), WeaponKind.SniperRifle);
+            b.Ammo(new Vector3(x - sign * 8f, Ground + 2.0f, -7f), AmmoKind.AvrilMissiles);
+            b.Locker(new Vector3(x - sign * 8f, Ground + 1.4f, 0f),
+                WeaponKind.ShockRifle, WeaponKind.LinkGun, WeaponKind.Stinger, WeaponKind.FlakCannon);
             b.Item(new Vector3(x, Ground + 2.0f, -10f), PickupKind.BodyArmor);
             b.Item(new Vector3(x, Ground + 2.0f, 10f), PickupKind.HealthPack);
             for (int i = 0; i < 4; i++)
@@ -204,7 +209,9 @@ public static partial class Maps
                 b.Solid(pos + new Vector3(-12f + i * 11f, 0f, -12f),
                         pos + new Vector3(-8f + i * 11f, 4.5f, -9f), MatId.TechPanelDark, true, 0.7f);
             b.Weapon(pos + new Vector3(-6f, 1f, 6f), WeaponKind.FlakCannon);
-            b.Weapon(pos + new Vector3(6f, 1f, 6f), WeaponKind.Minigun);
+            b.Locker(pos + new Vector3(0f, 0.4f, 11f),
+                WeaponKind.ShockRifle, WeaponKind.LinkGun, WeaponKind.Stinger, WeaponKind.Avril);
+            b.Weapon(pos + new Vector3(6f, 1f, 6f), WeaponKind.Stinger);
             b.Item(pos + new Vector3(0f, 0.9f, -6f), PickupKind.ThighPads);
             b.Spawn(pos + new Vector3(0f, 0.4f, 9f), 0f, team);
 
@@ -224,7 +231,9 @@ public static partial class Maps
             NodePad(b, pos, 11f, MatId.Concrete);
             NodeShelter(b, pos, 7f, 7.5f, MatId.RustMetal, MatId.MetalGrate);
             b.Solid(pos + new Vector3(-11f, 0f, 6f), pos + new Vector3(11f, 5f, 9f), MatId.RustMetal, true, 0.8f);
-            b.Weapon(pos + new Vector3(0f, 1f, -6f), WeaponKind.RocketLauncher);
+            b.Weapon(pos + new Vector3(0f, 1f, -6f), WeaponKind.Avril);
+            b.Locker(pos + new Vector3(-6f, 0.4f, -6f),
+                WeaponKind.LinkGun, WeaponKind.Stinger, WeaponKind.RocketLauncher, WeaponKind.SniperRifle);
             b.Item(pos + new Vector3(-5f, 0.9f, -6f), PickupKind.HealthPack);
             b.Spawn(pos + new Vector3(5f, 0.4f, -8f), 180f);
             b.AddVehicle(VehicleKind.Spma, pos + new Vector3(0f, 1.4f, 0f), 180f,
@@ -367,7 +376,9 @@ public static partial class Maps
             b.AddOrbSpawn(corePos + new Vector3(-5f, 1.1f, 0f), team);
 
             b.Weapon(corePos + new Vector3(-4f, 0.9f, -6f), WeaponKind.SniperRifle);
-            b.Weapon(corePos + new Vector3(-4f, 0.9f, 6f), WeaponKind.RocketLauncher);
+            b.Weapon(corePos + new Vector3(-4f, 0.9f, 6f), WeaponKind.Avril);
+            b.Locker(corePos + new Vector3(-8f, 0.2f, 0f),
+                WeaponKind.ShockRifle, WeaponKind.LinkGun, WeaponKind.Stinger, WeaponKind.FlakCannon);
             b.Item(corePos + new Vector3(0f, 0.8f, -9f), PickupKind.ShieldBelt);
             b.Item(corePos + new Vector3(-24f, 0.8f, 0f), PickupKind.SuperHealth);
             for (int i = 0; i < 4; i++)
@@ -427,7 +438,9 @@ public static partial class Maps
         // underneath and then stand beneath forever.
         b.AddOrbSpawn(mine + new Vector3(-6f, 7.2f, -15f), Team.Red, iMine);
         b.AddOrbSpawn(mine + new Vector3(-6f, 7.2f, 15f), Team.Blue, iMine);
-        b.Weapon(mine + new Vector3(0f, 0.9f, -10f), WeaponKind.RocketLauncher);
+        b.Weapon(mine + new Vector3(0f, 0.9f, -10f), WeaponKind.Avril);
+        b.Locker(mine + new Vector3(-6f, 0.2f, -10f),
+            WeaponKind.ShockRifle, WeaponKind.LinkGun, WeaponKind.Stinger, WeaponKind.RocketLauncher);
         b.Item(mine + new Vector3(6f, 0.8f, 0f), PickupKind.BodyArmor);
         b.Spawn(mine + new Vector3(-8f, 0.2f, -8f), -90f);
         b.Spawn(mine + new Vector3(-8f, 0.2f, 8f), -90f);
@@ -545,7 +558,9 @@ public static partial class Maps
                     b.AddVehicle(VehicleKind.Hellbender, corePos + new Vector3(-sign * 16f, 1.6f, i * 12f), 90f, team);
             }
 
-            b.Weapon(corePos + new Vector3(-sign * 4f, 0.9f, -7f), WeaponKind.RocketLauncher);
+            b.Weapon(corePos + new Vector3(-sign * 4f, 0.9f, -7f), WeaponKind.Avril);
+            b.Locker(corePos + new Vector3(-sign * 8f, 0.2f, 0f),
+                WeaponKind.ShockRifle, WeaponKind.LinkGun, WeaponKind.Stinger, WeaponKind.RocketLauncher);
             b.Weapon(corePos + new Vector3(-sign * 4f, 0.9f, 7f), WeaponKind.FlakCannon);
             b.Item(corePos + new Vector3(0f, 0.8f, -11f), PickupKind.BodyArmor);
             b.Item(corePos + new Vector3(0f, 0.8f, 11f), PickupKind.HealthPack);
@@ -577,7 +592,7 @@ public static partial class Maps
             NodeShelter(b, pos, 9f, 8.5f, MatId.TechPanelDark, MatId.ArmorPlate);
             b.Solid(pos + new Vector3(-13f, 0f, -14f), pos + new Vector3(13f, 5f, -11f), MatId.Rock, true, 0.7f);
             b.Solid(pos + new Vector3(-13f, 0f, 11f), pos + new Vector3(13f, 5f, 14f), MatId.Rock, true, 0.7f);
-            b.Weapon(pos + new Vector3(0f, 1f, -8f), WeaponKind.Minigun);
+            b.Weapon(pos + new Vector3(0f, 1f, -8f), WeaponKind.Stinger);
             b.Item(pos + new Vector3(0f, 0.9f, 8f), PickupKind.ThighPads);
             b.Spawn(pos + new Vector3(0f, 0.4f, 0f), 0f, team);
             b.AddVehicle(team == Team.Red ? VehicleKind.Scorpion : VehicleKind.Viper,
@@ -686,7 +701,9 @@ public static partial class Maps
             b.AddVehicle(VehicleKind.Manta, new Vector3(x + 2f, Ground + 8.4f, -8f), -90f, Team.Red);
             b.AddVehicle(VehicleKind.Manta, new Vector3(x + 8f, Ground + 8.4f, -8f), -90f, Team.Red);
             b.Weapon(new Vector3(x, Ground + 8.9f, 0f), WeaponKind.SniperRifle);
-            b.Weapon(new Vector3(x - 4f, Ground + 2.1f, 16f), WeaponKind.RocketLauncher);
+            b.Weapon(new Vector3(x - 4f, Ground + 2.1f, 16f), WeaponKind.Avril);
+            b.Locker(new Vector3(x - 8f, Ground + 1.4f, 16f),
+                WeaponKind.ShockRifle, WeaponKind.LinkGun, WeaponKind.Stinger, WeaponKind.RocketLauncher);
             b.Item(new Vector3(x + 6f, Ground + 2.0f, 16f), PickupKind.BodyArmor);
             for (int i = 0; i < 4; i++)
                 b.Spawn(new Vector3(x - 4f - i * 3f, Ground + 1.4f, 14f - i * 5f), -90f, Team.Red);
@@ -712,7 +729,7 @@ public static partial class Maps
             b.AddVehicle(VehicleKind.Viper, new Vector3(x + 16f, Ground + 2.6f, -6f), 90f, Team.Blue);
             b.AddVehicle(VehicleKind.Viper, new Vector3(x + 16f, Ground + 2.6f, 6f), 90f, Team.Blue);
             b.Weapon(new Vector3(x + 4f, Ground + 2.1f, -8f), WeaponKind.FlakCannon);
-            b.Weapon(new Vector3(x + 4f, Ground + 2.1f, 8f), WeaponKind.Minigun);
+            b.Weapon(new Vector3(x + 4f, Ground + 2.1f, 8f), WeaponKind.Stinger);
             b.Item(new Vector3(x - 8f, Ground + 2.0f, 0f), PickupKind.ShieldBelt);
             for (int i = 0; i < 4; i++)
                 b.Spawn(new Vector3(x + 4f + i * 3f, Ground + 1.4f, -12f + i * 8f), 90f, Team.Blue);
@@ -738,7 +755,9 @@ public static partial class Maps
             b.Stairs(pos + new Vector3(4f, 0f, -4f), pos + new Vector3(4f, 8f, 4f), 5f, 11,
                 MatId.Concrete, alongX: false);
             b.Weapon(pos + new Vector3(-6f, 9.9f, 0f), WeaponKind.SniperRifle);
-            b.Weapon(pos + new Vector3(6f, 1f, 0f), WeaponKind.RocketLauncher);
+            b.Weapon(pos + new Vector3(6f, 1f, 0f), WeaponKind.Avril);
+            b.Locker(pos + new Vector3(0f, 0.4f, -9f),
+                WeaponKind.ShockRifle, WeaponKind.LinkGun, WeaponKind.Stinger, WeaponKind.RocketLauncher);
             b.Item(pos + new Vector3(0f, 0.9f, 9f), PickupKind.HealthPack);
             b.Spawn(pos + new Vector3(8f, 0.4f, 0f), 0f, team);
         }
@@ -830,7 +849,9 @@ public static partial class Maps
             b.AddVehicle(VehicleKind.Goliath, corePos + new Vector3(10f, 1.8f, 9f), 90f, Team.Red);
             b.AddVehicle(VehicleKind.Paladin, corePos + new Vector3(16f, 1.6f, 0f), 90f, Team.Red);
             b.AddVehicle(VehicleKind.Hellbender, corePos + new Vector3(4f, 1.6f, 13f), 90f, Team.Red);
-            b.Weapon(corePos + new Vector3(2f, 0.9f, -8f), WeaponKind.RocketLauncher);
+            b.Weapon(corePos + new Vector3(2f, 0.9f, -8f), WeaponKind.Avril);
+            b.Locker(corePos + new Vector3(2f, 0.2f, 4f),
+                WeaponKind.ShockRifle, WeaponKind.LinkGun, WeaponKind.Stinger, WeaponKind.FlakCannon);
             b.Item(corePos + new Vector3(-6f, 0.8f, 0f), PickupKind.BodyArmor);
             for (int i = 0; i < 4; i++)
                 b.Spawn(corePos + new Vector3(3f + i * 3f, 0.2f, -10f + i * 6f), 90f, Team.Red);
@@ -876,9 +897,11 @@ public static partial class Maps
         b.Solid(prime + new Vector3(-14f, 0f, -14f), prime + new Vector3(14f, 9f, -11f), MatId.TechPanelDark, true, 0.8f);
         b.Solid(prime + new Vector3(-14f, 0f, 11f), prime + new Vector3(14f, 9f, 14f), MatId.TechPanelDark, true, 0.8f);
         b.Solid(prime + new Vector3(-14f, 9f, -14f), prime + new Vector3(14f, 10f, 14f), MatId.MetalGrate, true, 0.9f);
-        b.Weapon(prime + new Vector3(0f, 10.9f, 0f), WeaponKind.RocketLauncher);
+        b.Weapon(prime + new Vector3(0f, 10.9f, 0f), WeaponKind.Avril);
+        b.Locker(prime + new Vector3(0f, 0.4f, -8f),
+            WeaponKind.ShockRifle, WeaponKind.LinkGun, WeaponKind.Stinger, WeaponKind.RocketLauncher);
         b.Item(prime + new Vector3(-6f, 10.8f, 0f), PickupKind.BodyArmor);
-        b.Weapon(prime + new Vector3(6f, 1f, 0f), WeaponKind.Minigun);
+        b.Weapon(prime + new Vector3(6f, 1f, 0f), WeaponKind.Stinger);
         b.Spawn(prime + new Vector3(0f, 0.4f, 8f), 0f);
         for (int s = -1; s <= 1; s += 2)
             b.AddJumpPad(prime + new Vector3(s * 9f, 0.2f, 0f), prime + new Vector3(s * 7f, 12f, 0f),

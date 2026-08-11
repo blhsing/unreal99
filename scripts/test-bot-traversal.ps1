@@ -28,7 +28,7 @@ Skips the Release build. Use only for focused reruns against a known-current bui
 #>
 param(
     [int]$Frames = 3600,
-    [int[]]$MapIds = (0..31),
+    [int[]]$MapIds = (0..35),
     [string]$OutputDirectory = (Join-Path $PSScriptRoot '..\artifacts\bot-traversal'),
     [switch]$NoBuild
 )
@@ -41,7 +41,7 @@ $outputRoot = [System.IO.Path]::GetFullPath($OutputDirectory)
 
 if ($Frames -lt 600) { throw 'Frames must be at least 600 (10 active-play seconds).' }
 foreach ($mapId in $MapIds) {
-    if ($mapId -lt 0 -or $mapId -gt 31) { throw "Map id is outside 0..31: $mapId" }
+    if ($mapId -lt 0 -or $mapId -gt 35) { throw "Map id is outside 0..35: $mapId" }
 }
 
 if (-not $NoBuild) {
@@ -56,9 +56,11 @@ $mapNames = @(
     'turbine', 'phobos', 'peak', 'liandri', 'morpheus', 'hyperblast',
     'coret', 'november', 'facing-worlds', 'lava-giant',
     'leadworks', 'sesmar', 'olden', 'cinder',
-    'ons-torlan', 'ons-primeval', 'as-convoy', 'as-frigate', 'as-glacier',
+    'ons-torlan', 'ons-primeval', 'ons-crossfire', 'ons-dria',
+    'as-convoy', 'as-frigate', 'as-glacier',
     'war-torlan', 'war-torlan-necris', 'war-serenity', 'war-avalanche',
-    'war-onyxcoast', 'war-islander'
+    'war-onyxcoast', 'war-islander',
+    'br-anubis', 'br-colossus'
 )
 
 $results = [System.Collections.Generic.List[object]]::new()
@@ -72,8 +74,9 @@ try {
         $name = $mapNames[$mapId]
         # Each arena is exercised in the ruleset it was authored for. Onslaught and Assault also
         # gate the vehicle and objective code paths, which nothing else reaches.
-        $mode = if ($mapId -ge 26) { 8 }
-                elseif ($mapId -ge 23) { 7 }
+        $mode = if ($mapId -ge 34) { 9 }
+                elseif ($mapId -ge 28) { 8 }
+                elseif ($mapId -ge 25) { 7 }
                 elseif ($mapId -ge 21) { 6 }
                 elseif ($mapId -ge 17) { 5 }
                 elseif ($mapId -ge 13) { 2 }
@@ -119,6 +122,7 @@ try {
                     6 { 'Onslaught' }
                     7 { 'Assault' }
                     8 { 'Warfare' }
+                    9 { 'BombingRun' }
                     default { 'Deathmatch' }
                 }
                 Passed = $false

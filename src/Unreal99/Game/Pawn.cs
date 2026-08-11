@@ -139,6 +139,8 @@ public sealed class Pawn
     public int ShotsHit;
     public bool HasFlag;
     public Team CarriedFlag = Team.None;
+    /// <summary>Bombing Run: holding the ball, and therefore holding nothing else.</summary>
+    public bool HasBall;
 
     public int LastAttackerId = -1;
     public float LastDamageTime;
@@ -289,6 +291,7 @@ public sealed class Pawn
         SpawnProtection = 1.6f;
         HasFlag = false;
         CarriedFlag = Team.None;
+        HasBall = false;
         ShieldRaised = false;
         OnHoverboard = false;
         GrappleVehicleId = -1;

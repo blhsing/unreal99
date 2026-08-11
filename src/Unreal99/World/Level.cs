@@ -88,6 +88,18 @@ public struct FlagBase
 }
 
 /// <summary>
+/// A Bombing Run hoop. <see cref="Team"/> is the side that defends it, so the other side is the
+/// one trying to put the ball through. The position is the centre of the ring, not its base —
+/// scoring is a proximity test against that point.
+/// </summary>
+public struct GoalHoop
+{
+    public Vector3 Position;
+    public Team Team;
+    public float Yaw;
+}
+
+/// <summary>
 /// What a node does beyond sitting in the chain. Onslaught only has <see cref="Link"/>; the rest
 /// are Warfare's auxiliary nodes, which sit outside the link network and pay out in other ways.
 /// </summary>
@@ -255,6 +267,9 @@ public sealed class Level : IDisposable
     public readonly List<PowerNodeDef> PowerNodes = new();
     public readonly List<OrbSpawn> OrbSpawns = new();
     public readonly List<AssaultObjectiveDef> Objectives = new();
+    public readonly List<GoalHoop> GoalHoops = new();
+    /// <summary>Bombing Run only: where the ball starts and where it returns to.</summary>
+    public Vector3 BallSpawn;
     /// <summary>Assault only: which side attacks in round one. Defenders get the other colour.</summary>
     public Team AssaultAttackers = Team.Red;
     public NavGraph Nav = new();
@@ -904,6 +919,39 @@ public sealed class LevelBuilder
         _mesh.AddCylinder(position + new Vector3(0, 0.16f, 0), 1.05f, 1.05f, 0.08f, 20);
         _mesh.WorldUv = true;
         AddLight(position + new Vector3(0, 1.6f, 0), col, 11f, 3.6f);
+    }
+
+    /// <summary>
+    /// A Bombing Run hoop: a standing ring on two posts, lit in the defending team's colour.
+    /// <paramref name="team"/> is whoever defends it. The ring itself carries no collision —
+    /// the ball and the players both have to be able to pass through the middle of it.
+    /// </summary>
+    public void AddGoalHoop(Vector3 position, Team team, float yawDegrees = 0f)
+    {
+        _level.GoalHoops.Add(new GoalHoop
+        {
+            Position = position, Team = team, Yaw = yawDegrees * MathX.Deg2Rad,
+        });
+        Vector3 col = GameTypes.TeamColor(team);
+        _mesh.Material = (int)MatId.Trim;
+        _mesh.WorldUv = false;
+        _mesh.AddTorus(position, 2.3f, 0.22f, 28, 10);
+        _mesh.WorldUv = true;
+        // Two posts down to the deck so the ring reads as a structure rather than a floating
+        // decal. They are decor: a post you could snag on would change how the mode plays.
+        foreach (float s in new[] { -1f, 1f })
+            Decor(position + new Vector3(s * 2.3f - 0.16f, -position.Y, -0.16f),
+                  position + new Vector3(s * 2.3f + 0.16f, -0.2f, 0.16f), MatId.TechPanelDark, 0.9f);
+        AddLight(position, col, 14f, 4.2f);
+    }
+
+    /// <summary>Where the Bombing Run ball starts. One per arena, at midfield.</summary>
+    public void AddBallSpawn(Vector3 position)
+    {
+        _level.BallSpawn = position;
+        Decor(position - new Vector3(1.6f, 0.20f, 1.6f), position + new Vector3(1.6f, -0.06f, 1.6f),
+            MatId.EnergyPanel, 1.2f);
+        AddLight(position + new Vector3(0f, 1.4f, 0f), new Vector3(0.95f, 0.85f, 0.45f), 12f, 3.4f);
     }
 
     /// <summary>

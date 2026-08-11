@@ -42,6 +42,7 @@ public enum ProjectileKind
     TranslocatorDisc,
     /// <summary>Bombing Run ball, in flight between hands or towards the hoop.</summary>
     Ball,
+    Count,
 }
 
 /// <summary>Static tuning for one weapon's primary or alternate fire.</summary>

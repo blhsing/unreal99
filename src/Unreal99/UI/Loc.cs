@@ -114,6 +114,8 @@ public static class Loc
     public const string ModeAssaultDesc = "一隊依序攻下目標，另一隊防守；攻守交換後比誰更快。";
     public const string ModeWarfare = "戰爭模式";
     public const string ModeWarfareDesc = "節點戰的進化版：支援節點不必連線就能搶，能量球可瞬間佔領節點，人人配有氣墊滑板。";
+    public const string ModeBombingRun = "投彈模式";
+    public const string ModeBombingRunDesc = "把中場的球送進敵方球門：帶球衝進去得七分，遠射投進得三分。持球時只能用發球器。";
 
     public const string MapTorlan = "ONS-托蘭";
     public const string MapTorlanDesc = "乾涸的叢林邊緣，五個節點連成一線，中央通訊塔俯瞰整片戰場。";
@@ -123,6 +125,10 @@ public static class Loc
     public const string MapConvoyDesc = "橫越沙漠的運輸車隊，攻方從尾車逐節推進，直到取出前方的飛彈。";
     public const string MapFrigate = "AS-護衛艦";
     public const string MapFrigateDesc = "停泊中的復原軍艦；木橋與水下通道兩條路線，通往艦橋控制室。";
+    public const string MapCrossfire = "ONS-交叉火網";
+    public const string MapCrossfireDesc = "耶路撒冷地底的九座節點台；預設連線只點亮五座，兩處高地分踞離子指示器與目標指示器。";
+    public const string MapDria = "ONS-德里亞冰河";
+    public const string MapDriaDesc = "納帕利的結凍大河；兩座高塔各架一具目標指示器，四把閃電槍俯瞰全場。";
     public const string MapGlacier = "AS-冰河研究站";
     public const string MapGlacierDesc = "封凍的伊邪那岐研究站；攻方奪下離子電漿戰車，一路轟開水壩與爆破門逃出。";
 
@@ -140,6 +146,12 @@ public static class Loc
     public const string MapIslander = "WAR-群島通訊站";
     public const string MapIslanderDesc = "攻守失衡的群島：西側輕裝快攻，東側要塞死守，空中節點通往救世主核彈。";
 
+    // ---------------------------------------------------------------- bombing run maps
+    public const string MapAnubis = "BR-阿努比斯神殿";
+    public const string MapAnubisDesc = "埃及神殿的對稱球場；兩座球門都懸在雷射深坑上，射歪就跟著球一起摔下去。";
+    public const string MapColossus = "BR-巨像基地";
+    public const string MapColossusDesc = "岩地上的巨型設施；彈射墊直達球門，中場同時擺著救世主與超級護盾。";
+
     public const string NodeRedPrime = "紅隊主節點";
     public const string NodeBluePrime = "藍隊主節點";
     public const string NodeNorthTank = "北側戰車節點";
@@ -154,6 +166,14 @@ public static class Loc
     public const string NodeBridgeControl = "橋樑控制節點";
     public const string NodeAir = "空中節點";
     public const string NodePrime = "前線主節點";
+    public const string NodeNorthPrime = "北側主節點";
+    public const string NodeSouthPrime = "南側主節點";
+    public const string NodeEastPrime = "東側主節點";
+    public const string NodeWestPrime = "西側主節點";
+    public const string NodeMiddleNorth = "中央北節點";
+    public const string NodeMiddleSouth = "中央南節點";
+    public const string NodeSupport = "支援節點";
+    public const string NodeMiddle = "中央節點";
 
     public const string NodeRedCore = "紅隊核心";
     public const string NodeBlueCore = "藍隊核心";
@@ -202,6 +222,7 @@ public static class Loc
     public const string AsNoTarget = "無紀錄";
     public const string ScoreNodes = "節點";
     public const string ScoreObjectives = "目標";
+    public const string ScoreGoals = "進門";
 
     public const string VehShieldUp = "護盾展開";
     public const string VehDeploying = "架設中";
@@ -451,6 +472,17 @@ public static class Loc
     public const string HudHasFlag = "持有旗幟";
     public const string HudFlagCaptured = "完成奪旗";
     public const string HudFlagAtBase = "旗幟在基地";
+    // ---------------------------------------------------------------- bombing run
+    public const string HudHasBall = "持球中";
+    public const string HudBallLoose = "球在場上";
+    public const string HudBallAtMidfield = "球在中場";
+    public const string HudBallTaken = "球被奪走";
+    public const string HudBallReturned = "球已回到中場";
+    public const string AnnBallTakenRed = "紅隊取得球";
+    public const string AnnBallTakenBlue = "藍隊取得球";
+    public const string AnnBallReturned = "球已回到中場";
+    public static string BrRunGoal(string who) => $"{who} 帶球攻門，得七分";
+    public static string BrThrowGoal(string who) => $"{who} 遠射進門，得三分";
     // ---------------------------------------------------------------- scoreboard
     public const string ScoreboardTitle = "戰績排行";
     public const string ScoreName = "名稱";
@@ -604,6 +636,7 @@ public static class Loc
     public static string PickedUp(string item) => $"取得 {item}";
     public static string NeedWeapon(string weapon) => $"沒有 {weapon} 的彈藥";
     public static string FlagHeldBy(string player) => $"持旗：{player}";
+    public static string BallHeldBy(string player) => $"持球：{player}";
     public static string YouHoldFlag(string team) => $"你持有{team}旗幟";
     public static string FlagCarrierMarker(string team) => $"持有{team}旗幟";
     public static string DamageDealtNumber(int amount) => $"造成 {amount}";
@@ -627,6 +660,7 @@ public static class Loc
         GameModeKind.Onslaught => ModeOnslaught,
         GameModeKind.Assault => ModeAssault,
         GameModeKind.Warfare => ModeWarfare,
+        GameModeKind.BombingRun => ModeBombingRun,
         _ => ModeDeathmatch,
     };
 
@@ -641,6 +675,7 @@ public static class Loc
         GameModeKind.Onslaught => ModeOnslaughtDesc,
         GameModeKind.Assault => ModeAssaultDesc,
         GameModeKind.Warfare => ModeWarfareDesc,
+        GameModeKind.BombingRun => ModeBombingRunDesc,
         _ => ModeDeathmatchDesc,
     };
 
@@ -683,4 +718,5 @@ public enum GameModeKind
     Onslaught,
     Assault,
     Warfare,
+    BombingRun,
 }

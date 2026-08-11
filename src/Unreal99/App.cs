@@ -2762,10 +2762,17 @@ public sealed class App : IDisposable
             // destroy a compressor, and counting that as a navigation stall produced a false
             // failure even as objective health fell. Only genuine zero-motion, zero-action spans
             // accumulate stationary time.
+            // Standing still is also the whole task on a hold objective: the attacker has to keep
+            // a body inside the ring while the timer runs, and the defence has to shift it. That
+            // is the most productive thing the pawn can be doing, and reading it as a navigation
+            // stall failed the map for playing the mode correctly.
             int previousShots = _autoShotLastShotsFired.GetValueOrDefault(pawnId, pawn.ShotsFired);
             bool fired = pawn.ShotsFired > previousShots;
             _autoShotLastShotsFired[pawnId] = pawn.ShotsFired;
-            float stall = !fired && delta.Length() / MathF.Max(dt, 1e-4f) < 0.20f
+            bool workingObjective = _world.Mode.Kind == GameModeKind.Assault
+                && _world.Assault.CurrentObjective is { Kind: not ObjectiveKind.Destroy } held
+                && Vector3.Distance(pawn.Position, held.Position) <= held.Radius + 1.5f;
+            float stall = !fired && !workingObjective && delta.Length() / MathF.Max(dt, 1e-4f) < 0.20f
                 ? _autoShotStallTimes.GetValueOrDefault(pawnId) + dt
                 : 0f;
             _autoShotStallTimes[pawnId] = stall;
@@ -3259,6 +3266,12 @@ public sealed class App : IDisposable
                 if (_world.WarfareOrbPickups <= 0) failures.Add("warfare-orb-pickups=0");
                 if (_world.HoverboardRides <= 0) failures.Add("hoverboard-rides=0");
             }
+            if (_world.Mode.Kind == GameModeKind.BombingRun)
+            {
+                // The ball is the mode. A run where nobody ever picked it up was a team
+                // deathmatch that happened to have two hoops in it.
+                if (_world.BallPickups <= 0) failures.Add("ball-pickups=0");
+            }
             if (_world.Mode.Kind == GameModeKind.Assault)
             {
                 if (_world.AssaultObjectiveCompletions <= 0) failures.Add("assault-objectives=0");
@@ -3344,6 +3357,8 @@ public sealed class App : IDisposable
                 OnslaughtNodesHeldBlue = _world.Onslaught?.NodesHeldBy(Team.Blue) ?? 0,
                 WarfareOrbPickups = _world.WarfareOrbPickups,
                 WarfareOrbCaptures = _world.WarfareOrbCaptures,
+                BallPickups = _world.BallPickups,
+                BallGoals = _world.BallGoals,
                 HoverboardRides = _world.HoverboardRides,
                 HoverboardTows = _world.HoverboardTows,
                 AssaultObjectiveCompletions = _world.AssaultObjectiveCompletions,

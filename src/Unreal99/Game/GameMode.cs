@@ -66,7 +66,7 @@ public sealed class GameMode
             TimeLimit = timeLimitMinutes * 60f,
             TeamBased = kind is GameModeKind.TeamDeathmatch or GameModeKind.CaptureTheFlag
                 or GameModeKind.Domination or GameModeKind.Onslaught or GameModeKind.Assault
-                or GameModeKind.Warfare,
+                or GameModeKind.Warfare or GameModeKind.BombingRun,
         };
         // Assault has to have a round clock. "No time limit" means the first round never ends
         // when the attackers stall, so the sides never swap and there is nothing to beat in
@@ -90,6 +90,8 @@ public sealed class GameMode
         // scoreboard has to weigh them well above the frags picked up on the way.
         GameModeKind.Onslaught or GameModeKind.Assault or GameModeKind.Warfare
             => p.Frags + p.Captures * 5,
+        // A goal is worth three to seven team points, so it has to outweigh frags here too.
+        GameModeKind.BombingRun => p.Frags + p.Captures * 7,
         _ => p.Frags,
     };
 
@@ -101,6 +103,9 @@ public sealed class GameMode
         // overtime wins one, and the original default goal is three. Assault compares rounds.
         GameModeKind.Onslaught or GameModeKind.Warfare => OnslaughtState.GoalScore,
         GameModeKind.Assault => 0,
+        // Goals are worth 7 and 3, so the capture limit is read as a points target rather than
+        // a count of goals — the original's default is 15 points.
+        GameModeKind.BombingRun => CaptureLimit * 3,
         _ => FragLimit,
     };
 

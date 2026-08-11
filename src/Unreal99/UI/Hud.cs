@@ -1159,6 +1159,11 @@ public sealed class Hud
             DrawAssaultObjective(ui, world, pawn, width, height, s);
             return;
         }
+        if (world.Mode.Kind == GameModeKind.BombingRun)
+        {
+            DrawBallStatus(ui, world, pawn, width, height, s);
+            return;
+        }
         if (world.Mode.Kind != GameModeKind.CaptureTheFlag) return;
 
         bool compact = CompactLayout(width, height);
@@ -1211,6 +1216,47 @@ public sealed class Hud
                 Loc.YouHoldFlag(GameTypes.TeamName(pawn.CarriedFlag)), width - 24f);
             ui.TextShadow(FaceBold, LayoutFont(22f * s), width * 0.5f, y - 30f, held,
                 UiRenderer.Rgba(GameTypes.TeamColor(pawn.CarriedFlag) * 1.3f, 1f), TextAlign.Center, 2f * s);
+        }
+    }
+
+    /// <summary>
+    /// Bombing Run's one status line. There is a single ball, so one card says who has it; the
+    /// carrier also gets the large banner, because losing your weapons is worth announcing.
+    /// </summary>
+    private void DrawBallStatus(UiRenderer ui, GameWorld world, Pawn pawn, int width, int height, float s)
+    {
+        var br = world.BombingRun;
+        bool compact = CompactLayout(width, height);
+        float titleFont = LayoutFont(15f * s);
+        float statusFont = LayoutFont(13f * s);
+        float cardWidth = compact ? CompactSidePanelWidth(width, height) : 240f * s;
+        float cardHeight = MathF.Max(54f, 48f * s);
+        float x = compact ? 10f : 22f * s;
+        float y = CompactBottomRow(width, height) ? height - 151f
+            : compact ? height - 216f : height - 152f * s;
+
+        Pawn carrier = br.Carrier >= 0 ? world.FindPawn(br.Carrier) : null;
+        bool midfield = br.Carrier < 0 && Vector3.Distance(br.Position, br.Home) < 0.6f;
+        string status = carrier != null ? Loc.BallHeldBy(carrier.Name)
+            : midfield ? Loc.HudBallAtMidfield : Loc.HudBallLoose;
+        Vector3 col = carrier != null ? GameTypes.TeamColor(carrier.Team) : new Vector3(0.9f, 0.82f, 0.45f);
+        Vector3 statusColor = carrier != null ? new Vector3(1f, 0.76f, 0.25f)
+            : midfield ? new Vector3(0.48f, 1f, 0.58f) : new Vector3(1f, 0.62f, 0.30f);
+
+        ui.ChamferRect(x, y, cardWidth, cardHeight, 6f * s, UiRenderer.Rgba(col * 0.3f, 0.62f));
+        string title = FitText(ui, FaceBold, titleFont, Loc.ModeBombingRun,
+            cardWidth - MathF.Max(16f, 20f * s));
+        status = FitText(ui, FaceRegular, statusFont, status, cardWidth - MathF.Max(16f, 20f * s));
+        ui.Text(FaceBold, titleFont, x + MathF.Max(8f, 10f * s), y + 3f, title,
+            UiRenderer.Rgba(col * 1.3f, 0.95f));
+        ui.Text(FaceRegular, statusFont, x + MathF.Max(8f, 10f * s), y + 28f, status,
+            UiRenderer.Rgba(statusColor, 0.98f));
+
+        if (pawn.HasBall)
+        {
+            string held = FitText(ui, FaceBold, LayoutFont(22f * s), Loc.HudHasBall, width - 24f);
+            ui.TextShadow(FaceBold, LayoutFont(22f * s), width * 0.5f, y - 30f, held,
+                UiRenderer.Rgba(new Vector3(1f, 0.88f, 0.42f), 1f), TextAlign.Center, 2f * s);
         }
     }
 
@@ -1320,6 +1366,7 @@ public sealed class Hud
                 GameModeKind.Domination => Loc.ScoreDomCaptures,
                 GameModeKind.Onslaught or GameModeKind.Warfare => Loc.ScoreNodes,
                 GameModeKind.Assault => Loc.ScoreObjectives,
+                GameModeKind.BombingRun => Loc.ScoreGoals,
                 _ => Loc.ScoreRatio,
             },
             headerCol, TextAlign.Right);
@@ -1352,6 +1399,7 @@ public sealed class Hud
 
             string extra = mode.Kind is GameModeKind.CaptureTheFlag or GameModeKind.Domination
                     or GameModeKind.Onslaught or GameModeKind.Assault or GameModeKind.Warfare
+                    or GameModeKind.BombingRun
                 ? p.Captures.ToString()
                 : $"{(p.Deaths > 0 ? p.Frags / (float)p.Deaths : p.Frags):0.0}";
             ui.Text(FaceRegular, 17f * s, colExtra, ry + 1f * s, extra,

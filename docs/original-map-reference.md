@@ -113,8 +113,24 @@ AS-Mothership、AS-RobotFactory。
 
 時限 6 分鐘。
 
+**ONS-Crossfire**（耶路撒冷地底的埃克隆遺跡，10–18 人）：
+
+- 全圖共有**九座節點台**，但三種連線設定各只點亮其中一部分。本作採用 **Default link setup**：
+  `紅核心 → 北主節點(5) → 中央(8) → 藍南主節點(4) → 藍核心`，另有一條
+  `北主節點(5) → 中北(7) → 中南(6) → 南主節點(4)` 的並行路線。其餘四座（紅東、紅東北、
+  藍西、藍西南）在預設設定下不參與連線，本作把它們建成擺著原本武器、置物櫃與載具的地標。
+- 武器：全圖唯一一把**佈雷器**在紅東北節點（附四箱地雷）；**閃電槍**在俯瞰中南節點與紅東節點的
+  高地上，**救世主**就在該高地下方；**目標指示器**在中央附近、俯瞰中北與藍西的高地；
+  **離子指示器**在俯瞰中央節點的高地。榴彈與 AVRiL 只提供彈藥，不放武器本體。
+- 十三座武器置物櫃：核心各兩座，紅東／中北／中南／藍西各一座，紅東北與藍西南各一座，
+  中央一座，兩座主節點各一座。
+- 載具：Manta ×9、Scorpion ×9、Hellbender ×8、Raptor ×3（中北／中央／中南）、
+  Goliath ×2（中北／中南）、能量砲塔 ×4（核心各兩座）。
+- 道具：中央節點放**雙倍傷害**，紅東北與藍西南各一個大血瓶與一個護盾包。
+
 資料來源：[ONS-Torlan](https://unrealarchive.org/wikis/the-liandri-archives/ONS-Torlan.html)、
 [ONS-Primeval](https://unrealarchive.org/wikis/the-liandri-archives/ONS-Primeval.html)、
+[ONS-Crossfire](https://unreal.fandom.com/wiki/ONS-Crossfire)、
 [AS-Convoy](https://unrealarchive.org/wikis/the-liandri-archives/AS-Convoy.html)、
 [AS-Frigate](https://unrealarchive.org/wikis/the-liandri-archives/AS-Frigate.html)、
 [UT2004 地圖總表](https://unrealarchive.org/wikis/the-liandri-archives/Unreal_Tournament_2004.html)
@@ -216,6 +232,40 @@ UT2004 的太空戰特殊關卡，與攻堅／突擊無關，因此未收錄。
 
 另外，原作多數攻堅地圖在基地放有**能量砲塔**（固定式，非載具）。本作尚未實作砲塔實體，
 ONS-原始林的基地因此少了這一項。
+
+## 投彈模式（Bombing Run，UT2003／2004）規則
+
+原作規則：場上只有一顆球，中場生成。把球送進**敵方**球門即得分，**帶球衝進得七分、投射進門
+得三分**。持球者的武器全部被收起，只留下不造成傷害的**投球器**（主要射擊擲球、次要射擊傳給
+隊友），所以跑球的人無法自己開路，球必須靠傳遞推進。持球者陣亡即掉球，任一隊皆可撿；無人碰觸
+的球會自動回到中場。
+
+原作投彈地圖：BR-Anubis、BR-Bifrost、BR-BridgeOfFate、BR-Canyon、BR-Colossus、BR-Disclosure、
+BR-IceFields、BR-Serenity、BR-Skyline、BR-Slaughterhouse、BR-TwinTombs。
+
+### 本作採用的兩張投彈地圖
+
+**BR-Anubis**（埃及神殿，6–10 人，對稱）：
+
+- 分區為紅／藍基地（球門所在）、兩座前庭（Courtyard）、南北重生走廊、南北上層入口、
+  中央區，以及夾在中央與兩座沙丘之間的**破片加農砲室**（北）與**火箭發射器室**（南）。
+- **兩座球門都懸在雷射深坑正上方**——原作明言任何人穿過球門（不論有沒有帶球）都會摔死。
+- 武器：生化步槍 ×2、震盪步槍 ×2、連結槍 ×2、速射機槍 ×2、閃電槍 ×2（皆為兩座前庭各一），
+  破片加農砲 ×1（破片砲室）、火箭發射器 ×1（火箭室）、**救世主 ×1**（南沙丘的方尖碑之間）。
+- 道具：小血瓶 ×36、醫療包 ×10、**超級護盾**在北沙丘。
+
+**BR-Colossus**（岩地上的巨型設施，6–14 人，對稱）：
+
+- 分區為後方基地（球門與**直達球門的彈射墊**）、前進基地（平台、坡道、風洞）、
+  掩體（三個入口，內有一座彈射墊通往前進基地上層）、東西兩棟建築，以及中立區。
+- **中立區同時放著球的生成點、救世主（西側平台）與超級護盾（東側平台）**。
+- 武器：震盪步槍 ×4、連結槍 ×4、速射機槍 ×4、破片加農砲 ×4、火箭發射器 ×2、閃電槍 ×2、
+  救世主 ×1；突擊步槍只提供彈藥。
+- 道具：小血瓶 ×20、醫療包 ×16、護盾包 ×4、超級護盾 ×1、**雙倍傷害 ×2（兩座掩體各一）**。
+- 原作已知的不對稱：藍方多一份震盪步槍彈藥、紅方在對稱位置多一份連結槍彈藥。
+
+資料來源：[BR-Anubis](https://unreal.fandom.com/wiki/BR-Anubis_(UT200X_map))、
+[BR-Colossus](https://unreal.fandom.com/wiki/BR-Colossus)
 
 ## 統治模式規則
 

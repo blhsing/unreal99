@@ -81,12 +81,14 @@ public static class WeaponCoverageSelfTest
     }
 
     /// <summary>
-    /// Three weapons are never map pickups in the originals either, so counting arenas is the
-    /// wrong measure for them — they still have to pass the model-density check.
+    /// Weapons that are not map pickups in the originals either, so counting arenas is the wrong
+    /// measure for them. Every one of them is handed out some other way — at spawn, by a gametype,
+    /// or by picking up the ball. They still have to pass the model-density check.
     /// </summary>
     private static bool Exempt(WeaponKind kind) => kind
         is WeaponKind.Translocator or WeaponKind.SuperShockRifle or WeaponKind.BallLauncher
-        or WeaponKind.ShieldGun or WeaponKind.AssaultRifle;
+        or WeaponKind.ShieldGun or WeaponKind.AssaultRifle
+        or WeaponKind.ImpactHammer or WeaponKind.Enforcer;
 
     private static string ExemptionReason(WeaponKind kind) => kind switch
     {
@@ -94,6 +96,7 @@ public static class WeaponCoverageSelfTest
         WeaponKind.SuperShockRifle => "瞬殺模式專用",
         WeaponKind.BallLauncher => "轟炸模式專用；拿到球才會自動裝備",
         WeaponKind.ShieldGun or WeaponKind.AssaultRifle => "UT2004 地圖的出生武器",
+        WeaponKind.ImpactHammer or WeaponKind.Enforcer => "1999／UT3 地圖的出生武器",
         _ => "",
     };
 }
