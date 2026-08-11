@@ -69,10 +69,11 @@ $authored = @{
     31 = '100 40 180 10'    # Avalanche    — from over the red base, straight down the mountain mouth
     32 = '78 34 210 8'      # Onyx Coast   — across the channel at the bridge node and the Necris base
     33 = '74 32 215 8'      # Islander     — down the island spine, air-node mesa on the right
-    # Both Bombing Run arenas are long and narrow: frame down the length so the ball spawn sits
-    # in the middle of the shot with a goal hoop at each end.
-    34 = '86 30 180 6'      # Anubis       — along the temple axis, both courtyards in frame
-    35 = '96 34 180 6'      # Colossus     — down the facility, neutral zone centred
+    # Both Bombing Run arenas are long and narrow, but shooting straight down the length hides
+    # the one thing that makes them Bombing Run maps: the goal hoop. A three-quarter angle from
+    # nearer one base puts a ring in frame with the midfield behind it.
+    34 = '58 26 150 4'      # Anubis       — over a courtyard at the hoop above its laser pit
+    35 = '66 30 145 6'      # Colossus     — across the rear base, hoop and jump pad in frame
 }
 
 # Domination arenas: shot in DOM so the control points show their held colours. The ONS and AS
