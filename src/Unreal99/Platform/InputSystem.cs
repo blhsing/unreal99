@@ -312,24 +312,18 @@ public sealed class InputSystem : IDisposable
     /// <summary>Only the non-recentering RDP/shared route may use pointer coordinates.</summary>
     public static int RunLookRoutingSelfTest()
     {
-        bool pass = !ShouldUseSharedPointerForLook(rawAvailable: true, remoteSession: false,
-                mouseHandle: 0)
-            && !ShouldUseSharedPointerForLook(rawAvailable: true, remoteSession: true,
-                mouseHandle: 44)
-            && ShouldUseSharedPointerForLook(rawAvailable: true, remoteSession: true,
-                mouseHandle: 0)
-            && ShouldUseSharedPointerForLook(rawAvailable: false, remoteSession: false,
-                mouseHandle: 0);
-        Console.WriteLine($"本機 Raw／遠端隱藏游標視角路由: {(pass ? "通過" : "失敗")}");
+        bool pass = !ShouldUseSharedPointerForLook(rawAvailable: true, mouseHandle: 0)
+            && !ShouldUseSharedPointerForLook(rawAvailable: true, mouseHandle: 44)
+            && ShouldUseSharedPointerForLook(rawAvailable: false, mouseHandle: 0);
+        Console.WriteLine($"本機專屬／遠端共用 Raw 視角路由: {(pass ? "通過" : "失敗")}");
         return pass ? 0 : 1;
     }
 
-    internal static bool ShouldUseSharedPointerForLook(bool rawAvailable, bool remoteSession,
-        nint mouseHandle) => mouseHandle == 0 && (!rawAvailable || remoteSession);
+    internal static bool ShouldUseSharedPointerForLook(bool rawAvailable, nint mouseHandle)
+        => mouseHandle == 0 && !rawAvailable;
 
     private bool UseSilkSharedInput(PlayerDevice device)
-        => ShouldUseSharedPointerForLook(RawAvailable, Raw?.RemoteSession == true,
-            device.MouseHandle);
+        => ShouldUseSharedPointerForLook(RawAvailable, device.MouseHandle);
 
     public float WheelDelta(PlayerDevice device)
     {

@@ -638,6 +638,17 @@ public sealed class RawInput : IDisposable
 
     public RawMouseState SharedMouse => _sharedMouse;
 
+    /// <summary>Deterministic shared/RDP mouse packet for the match-level input regression.</summary>
+    public void SetSyntheticSharedMouseForTest(float deltaX, float deltaY, int buttonsDown)
+    {
+        if (!AcceptBackgroundInput) return;
+        _sharedMouse.DeltaX += deltaX;
+        _sharedMouse.DeltaY += deltaY;
+        int pressed = buttonsDown & ~_sharedMouse.ButtonsDown;
+        _sharedMouse.ButtonsPressed |= pressed;
+        _sharedMouse.ButtonsDown = buttonsDown;
+    }
+
     public bool HasMouse(nint handle) => handle != 0 && _mouseDevices.Any(d => d.Handle == handle);
     public bool HasKeyboard(nint handle) => handle != 0 && _keyboardDevices.Any(d => d.Handle == handle);
 

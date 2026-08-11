@@ -385,6 +385,17 @@ public sealed class App : IDisposable
                     _cliOverrides.UnionWith(["map", "mode", "players", "bots", "demo"]);
                     _autoStartMatch = true;
                     break;
+                case "--matchmouseinputtest":
+                    _matchMouseInputTest = true;
+                    _windowed = true;
+                    _menu.Map = MapId.Stalwart;
+                    _menu.ModeKind = GameModeKind.Deathmatch;
+                    _menu.LocalPlayers = 1;
+                    _menu.BotCount = 0;
+                    _menu.DemoMode = false;
+                    _cliOverrides.UnionWith(["map", "mode", "players", "bots", "demo"]);
+                    _autoStartMatch = true;
+                    break;
                 case "--menumouseinputtest":
                     _menuMouseInputTest = true;
                     _windowed = true;
@@ -535,7 +546,8 @@ public sealed class App : IDisposable
         _nativeWindowHandle = hwnd;
         bool raw = hwnd != 0 && _input.TryEnableRawInput(hwnd);
         _rawDeviceRevision = raw ? _input.Raw.DeviceRevision : 0;
-        if (raw && (_inputTest || _movementInputTest)) _input.Raw.AcceptBackgroundInput = true;
+        if (raw && (_inputTest || _movementInputTest || _matchMouseInputTest))
+            _input.Raw.AcceptBackgroundInput = true;
         if (raw && _movementInputTest) _input.Raw.AcceptSyntheticKeyboardInput = true;
         Console.WriteLine(raw
             ? $"輸入系統: 多裝置輸入已啟用（滑鼠 {_input.RawMouseCount} · 鍵盤 {_input.RawKeyboardCount}）"
@@ -1338,6 +1350,7 @@ public sealed class App : IDisposable
 
         _input.BeginFrame();
         RefreshHotPlugAssignments();
+        InjectMatchMouseInputSelfTest();
         if (_menuMouseInputTest && _state == AppState.Menu)
             _input.SetSharedPointerForTest(new Vector2(Width * 0.5f, Height * 0.5f));
         HandleGlobalKeys();
@@ -1354,6 +1367,7 @@ public sealed class App : IDisposable
 
         if (_inputTest) UpdateInputSelfTest();
         if (_movementInputTest) UpdateMovementInputSelfTest();
+        if (_matchMouseInputTest) UpdateMatchMouseInputSelfTest();
         if (_menuMouseInputTest) UpdateMenuMouseInputSelfTest();
         if (_saveTest) UpdateSaveSelfTest();
         if (_vehicleTest) UpdateVehicleSelfTest();
@@ -2441,6 +2455,11 @@ public sealed class App : IDisposable
     private Vector2 _movementInputTestTotalLook;
     private bool _menuMouseInputTest;
     private int _menuMouseInputTestFrame;
+    private bool _matchMouseInputTest;
+    private int _matchMouseInputTestFrame;
+    private float _matchMouseInputTestYaw;
+    private float _matchMouseInputTestPitch;
+    private int _matchMouseInputTestButtonFrames;
     /// <summary>Wheel accumulated per slot across the whole test, so a scroll at any moment counts.</summary>
     private readonly float[] _inputTestWheel = new float[4];
 
@@ -2557,6 +2576,48 @@ public sealed class App : IDisposable
             if (!passed) ExitCode = 1;
             _window.Close();
         }
+    }
+
+    /// <summary>Injects shared Raw packets before the production controller consumes the frame.</summary>
+    private void InjectMatchMouseInputSelfTest()
+    {
+        if (!_matchMouseInputTest || _state != AppState.Playing
+            || _world?.Mode.State != MatchState.InProgress || _matchMouseInputTestFrame < 1) return;
+        bool active = _matchMouseInputTestFrame <= 10;
+        _input.Raw.SetSyntheticSharedMouseForTest(active ? 5f : 0f, active ? -2f : 0f,
+            _matchMouseInputTestFrame == 5 ? 1 : 0);
+    }
+
+    /// <summary>RDP/shared mouse motion, buttons and final camera must survive hidden match mode.</summary>
+    private void UpdateMatchMouseInputSelfTest()
+    {
+        if (_state != AppState.Playing || _world?.Mode.State != MatchState.InProgress
+            || _players.Count == 0) return;
+        Pawn pawn = _players[0].Pawn;
+        _matchMouseInputTestFrame++;
+        if (_matchMouseInputTestFrame == 1)
+        {
+            _playerDevices[0].MouseHandle = 0;
+            _playerDevices[0].MouseLook = true;
+            _input.ClearLookDelta(_playerDevices[0]);
+            _matchMouseInputTestYaw = pawn.Yaw;
+            _matchMouseInputTestPitch = pawn.Pitch;
+            return;
+        }
+        if (_input.ActionDown(_playerDevices[0], GameAction.Fire))
+            _matchMouseInputTestButtonFrames++;
+        if (_matchMouseInputTestFrame != 16) return;
+
+        float yaw = MathF.Abs(MathX.WrapAngle(pawn.Yaw - _matchMouseInputTestYaw));
+        float pitch = MathF.Abs(pawn.Pitch - _matchMouseInputTestPitch);
+        float cameraYaw = MathF.Abs(MathX.WrapAngle(_cameras[0].Yaw - _matchMouseInputTestYaw));
+        bool passed = yaw >= 0.12f && pitch >= 0.04f && cameraYaw >= 0.12f
+            && _matchMouseInputTestButtonFrames == 1;
+        Console.WriteLine($"MATCH_MOUSE_INPUT {(passed ? "PASS" : "FAIL")} " +
+                          $"yaw={yaw:0.000} pitch={pitch:0.000} cameraYaw={cameraYaw:0.000} " +
+                          $"buttonFrames={_matchMouseInputTestButtonFrames}");
+        if (!passed) ExitCode = 1;
+        _window.Close();
     }
 
     /// <summary>Verifies initial-menu pointer routing without touching the user's desktop cursor.</summary>
