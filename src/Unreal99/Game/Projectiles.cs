@@ -37,6 +37,25 @@ public struct Projectile
     public bool ComboTarget;        // shock ball: can be detonated by the shock beam
     public float ArmDelay;
     public float TrailTimer;
+
+    // --- UT2004 / UT3 ---
+    /// <summary>Waits for its owner to press the button instead of exploding on its own.</summary>
+    public bool RemoteDetonated;
+    /// <summary>Turns after a target: seeker missiles and spider mines both do this.</summary>
+    public bool Homing;
+    /// <summary>Vehicle this seeker is chasing, or -1.</summary>
+    public int HomingVehicleId;
+    /// <summary>Pawn a spider mine has decided to run down, or -1.</summary>
+    public int HomingPawnId;
+    /// <summary>Point a painted mine flock is converging on, when no target is chosen.</summary>
+    public Vector3 HomingPoint;
+    public bool HasHomingPoint;
+    /// <summary>How hard it can turn, in radians per second.</summary>
+    public float TurnRate;
+    /// <summary>Translocator disc: recallable rather than damaging.</summary>
+    public bool Recallable;
+    /// <summary>Bombing Run ball in flight; touching it picks it up rather than taking damage.</summary>
+    public bool Catchable;
 }
 
 /// <summary>Procedural meshes for the projectiles that are large enough to need real geometry.</summary>
@@ -146,7 +165,8 @@ public static class ProjectileFactory
     /// </summary>
     public static bool AffectedByGravity(ProjectileKind kind) => kind is
         ProjectileKind.Grenade or ProjectileKind.FlakShell or ProjectileKind.FlakShard
-        or ProjectileKind.BioGlob;
+        or ProjectileKind.BioGlob or ProjectileKind.RifleGrenade or ProjectileKind.StickyGrenade
+        or ProjectileKind.SpiderMine or ProjectileKind.TranslocatorDisc or ProjectileKind.Ball;
 
     /// <summary>Extra upward launch velocity added after the aimed muzzle velocity.</summary>
     public static float VerticalLaunchSpeed(ProjectileKind kind, float projectileSpeed) => kind switch
@@ -154,6 +174,11 @@ public static class ProjectileFactory
         ProjectileKind.Grenade => projectileSpeed * 0.24f,
         ProjectileKind.FlakShell => projectileSpeed * 0.20f,
         ProjectileKind.BioGlob => projectileSpeed * 0.13f,
+        ProjectileKind.RifleGrenade => projectileSpeed * 0.22f,
+        ProjectileKind.StickyGrenade => projectileSpeed * 0.20f,
+        ProjectileKind.SpiderMine => projectileSpeed * 0.16f,
+        ProjectileKind.TranslocatorDisc => projectileSpeed * 0.18f,
+        ProjectileKind.Ball => projectileSpeed * 0.26f,
         _ => 0f,
     };
 
@@ -169,6 +194,14 @@ public static class ProjectileFactory
         ProjectileKind.PlasmaBolt => 2.4f,
         ProjectileKind.RipperBlade => 3.2f,
         ProjectileKind.Warhead => 9f,
+        ProjectileKind.RifleGrenade => 3.4f,
+        // Long, because a laid grenade is meant to still be there when somebody walks in.
+        ProjectileKind.StickyGrenade => 22f,
+        ProjectileKind.SpiderMine => 26f,
+        ProjectileKind.SeekerMissile => 8f,
+        ProjectileKind.Shard => 2.2f,
+        ProjectileKind.TranslocatorDisc => 20f,
+        ProjectileKind.Ball => 6f,
         _ => 0f,
     };
 
@@ -231,6 +264,40 @@ public static class ProjectileFactory
                 break;
             case ProjectileKind.Warhead:
                 p.Radius = 0.30f; p.Spin = 2f;
+                break;
+
+            case ProjectileKind.RifleGrenade:
+                p.Radius = 0.09f;
+                p.BouncesLeft = 2; p.ExplodeOnTimeout = true; p.Spin = 14f;
+                break;
+            // Sticks where it lands and waits. Never times out into an explosion — the whole
+            // point is that the thrower chooses the moment.
+            case ProjectileKind.StickyGrenade:
+                p.Radius = 0.11f;
+                p.StickOnImpact = true; p.RemoteDetonated = true; p.Spin = 12f;
+                break;
+            // Lands, then crawls at whatever comes close. Slow enough to run away from, which is
+            // what stops a clip of four from being an instant kill on a corridor.
+            case ProjectileKind.SpiderMine:
+                p.Radius = 0.13f;
+                p.Homing = true; p.HomingPawnId = -1; p.HomingVehicleId = -1;
+                p.TurnRate = 3.4f; p.Spin = 8f; p.ArmDelay = 0.5f;
+                break;
+            case ProjectileKind.SeekerMissile:
+                p.Radius = 0.16f;
+                p.Homing = true; p.HomingPawnId = -1; p.HomingVehicleId = -1;
+                p.TurnRate = 2.6f; p.Spin = 5f;
+                break;
+            case ProjectileKind.Shard:
+                p.Radius = 0.05f; p.Spin = 26f;
+                break;
+            case ProjectileKind.TranslocatorDisc:
+                p.Radius = 0.10f;
+                p.BouncesLeft = 3; p.Recallable = true; p.Spin = 20f;
+                break;
+            case ProjectileKind.Ball:
+                p.Radius = 0.22f;
+                p.BouncesLeft = 6; p.Catchable = true; p.Spin = 6f;
                 break;
         }
         p.Velocity += MathX.Up * VerticalLaunchSpeed(kind, fire.ProjectileSpeed);

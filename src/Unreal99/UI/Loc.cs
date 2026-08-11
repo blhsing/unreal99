@@ -387,6 +387,32 @@ public static class Loc
     public const string WeaponRocketLauncher = "火箭發射器";
     public const string WeaponSniperRifle = "狙擊步槍";
     public const string WeaponRedeemer = "救世主核彈";
+    // UT2004
+    public const string WeaponShieldGun = "護盾槍";
+    public const string WeaponAssaultRifle = "突擊步槍";
+    public const string WeaponLinkGun = "連結槍";
+    public const string WeaponLightningGun = "閃電槍";
+    public const string WeaponMineLayer = "佈雷器";
+    public const string WeaponGrenadeLauncher = "榴彈發射器";
+    public const string WeaponAvril = "反載具飛彈";
+    public const string WeaponIonPainter = "離子指示器";
+    public const string WeaponTargetPainter = "目標指示器";
+    public const string WeaponTranslocator = "傳送器";
+    public const string WeaponSuperShockRifle = "超級震盪步槍";
+    // UT3
+    public const string WeaponStinger = "毒刺機槍";
+    public const string WeaponBallLauncher = "投球器";
+
+    public const string WeaponLocker = "武器架";
+    public const string HudLinked = "連結中";
+    public const string HudLockOn = "鎖定";
+    public const string HudLocked = "已鎖定";
+    public const string HudPainting = "指示中";
+    public const string HudMinesOut = "佈雷";
+    public const string HudGrenadesOut = "待爆榴彈";
+    public const string HudTranslocatorOut = "傳送盤已投出";
+    public static string AnnIonStrike(string who) => $"{who} 呼叫了離子砲轟擊";
+    public static string AnnBomberStrike(string who) => $"{who} 呼叫了鳳凰轟炸機";
 
     // ---------------------------------------------------------------- pickups
     public const string PickupHealthVial = "醫療瓶";

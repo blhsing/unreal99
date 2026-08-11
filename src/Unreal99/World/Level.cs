@@ -37,6 +37,12 @@ public struct PickupPlacement
     public WeaponKind Weapon;
     public AmmoKind Ammo;
     public float RespawnTime;
+    /// <summary>
+    /// For <see cref="PickupKind.WeaponLocker"/>: everything the rack hands out at once. UT2004
+    /// and UT3 distribute most of their arsenal through these rather than through single pickups,
+    /// so a map rebuilt without them ends up with a completely different weapon economy.
+    /// </summary>
+    public WeaponKind[] LockerWeapons;
 }
 
 /// <summary>A brush that translates between two points: lifts and moving platforms.</summary>
@@ -759,6 +765,22 @@ public sealed class LevelBuilder
             Weapon = weapon,
             Ammo = AmmoKind.None,
             RespawnTime = respawn,
+        });
+
+    /// <summary>
+    /// A weapon locker: touching it hands over every weapon on the rack with a full load. This is
+    /// how UT2004 and UT3 arm their maps — placing the same weapons as separate pickups would give
+    /// a completely different pace, because a locker arms you instantly and then goes on cooldown.
+    /// </summary>
+    public void Locker(Vector3 position, params WeaponKind[] weapons)
+        => _level.Pickups.Add(new PickupPlacement
+        {
+            Position = position,
+            Kind = PickupKind.WeaponLocker,
+            Weapon = weapons is { Length: > 0 } ? weapons[0] : WeaponKind.Count,
+            Ammo = AmmoKind.None,
+            RespawnTime = 30f,
+            LockerWeapons = weapons ?? [],
         });
 
     public void Ammo(Vector3 position, AmmoKind ammo, float respawn = 18f)

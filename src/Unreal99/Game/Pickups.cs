@@ -11,6 +11,8 @@ public sealed class PickupEntity
     public PickupKind Kind;
     public WeaponKind Weapon = WeaponKind.Count;
     public AmmoKind Ammo = AmmoKind.None;
+    /// <summary>Everything a <see cref="PickupKind.WeaponLocker"/> hands out at once.</summary>
+    public WeaponKind[] LockerWeapons = [];
     public Vector3 Position;
     public float RespawnTime = 20f;
     public float Timer;
@@ -21,6 +23,8 @@ public sealed class PickupEntity
 
     public float PickupRadius => Kind switch
     {
+        // A locker is a rack you walk up to, not a floating pickup — it needs a wider reach.
+        PickupKind.WeaponLocker => 1.9f,
         PickupKind.WeaponPickup => 1.35f,
         PickupKind.SuperHealth or PickupKind.ShieldBelt => 1.25f,
         _ => 1.15f,
@@ -87,6 +91,20 @@ public sealed class PickupEntity
                     int max = Pawn.MaxAmmoFor(Ammo);
                     float have = p.Ammo[(int)Ammo] / (float)MathF.Max(1, max);
                     return have <= 0f ? 1.4f : have < 0.5f ? 0.7f * (1f - have) : 0.05f;
+                }
+            case PickupKind.WeaponLocker:
+                {
+                    // Worth exactly as much as the best thing on it that the bot does not have.
+                    float best = 0.1f;
+                    foreach (WeaponKind w in LockerWeapons)
+                    {
+                        var def = Weapons.Get(w);
+                        float value = !p.HasWeapon[(int)w]
+                            ? 0.7f + def.BotPreference * 0.9f
+                            : p.AmmoFor(w) < def.MaxAmmo / 3 ? 0.5f + def.BotPreference * 0.3f : 0.1f;
+                        best = MathF.Max(best, value);
+                    }
+                    return best;
                 }
             default:
                 return 0.2f;
@@ -220,6 +238,25 @@ public sealed class PickupModels : IDisposable
         {
             mb.Material = (int)MatId.Trim;
             mb.AddTorus(new Vector3(0, 0.03f, 0), 0.34f, 0.025f, 20, 6);
+        });
+
+        // A weapon locker: a floor-standing rack with a lit back panel and empty slots. It has to
+        // read as furniture rather than as a floating item, because that is what it is — you walk
+        // up to it and take everything, rather than running over one gun.
+        Build(gl, PickupKind.WeaponLocker, mb =>
+        {
+            mb.Material = (int)MatId.TechPanelDark;
+            mb.AddBox(new Vector3(0f, 0.06f, 0f), new Vector3(0.62f, 0.06f, 0.24f));
+            mb.AddBox(new Vector3(0f, 0.80f, 0.18f), new Vector3(0.62f, 0.80f, 0.06f));
+            mb.Material = (int)MatId.Trim;
+            for (int i = -1; i <= 1; i += 2)
+                mb.AddBox(new Vector3(i * 0.58f, 0.80f, 0f), new Vector3(0.045f, 0.80f, 0.22f));
+            mb.AddBox(new Vector3(0f, 1.58f, 0f), new Vector3(0.62f, 0.05f, 0.24f));
+            // Four empty slots across the back panel.
+            mb.Material = (int)MatId.EnergyPanel;
+            for (int i = 0; i < 4; i++)
+                mb.AddBox(new Vector3(-0.42f + i * 0.28f, 0.82f, 0.11f),
+                    new Vector3(0.085f, 0.56f, 0.012f));
         });
 
         Build(gl, PickupKind.AmmoPickup, mb =>

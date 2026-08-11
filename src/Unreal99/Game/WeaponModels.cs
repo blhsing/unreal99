@@ -170,6 +170,19 @@ public sealed class WeaponModels : IDisposable
             case WeaponKind.RocketLauncher: BuildRocketLauncher(mb); break;
             case WeaponKind.SniperRifle: BuildSniperRifle(mb); break;
             case WeaponKind.Redeemer: BuildRedeemer(mb); break;
+            case WeaponKind.ShieldGun: BuildShieldGun(mb); break;
+            case WeaponKind.AssaultRifle: BuildAssaultRifle(mb); break;
+            case WeaponKind.LinkGun: BuildLinkGun(mb); break;
+            case WeaponKind.LightningGun: BuildLightningGun(mb); break;
+            case WeaponKind.MineLayer: BuildMineLayer(mb); break;
+            case WeaponKind.GrenadeLauncher: BuildGrenadeLauncher(mb); break;
+            case WeaponKind.Avril: BuildAvril(mb); break;
+            case WeaponKind.IonPainter: BuildPainter(mb, ion: true); break;
+            case WeaponKind.TargetPainter: BuildPainter(mb, ion: false); break;
+            case WeaponKind.Translocator: BuildTranslocator(mb); break;
+            case WeaponKind.SuperShockRifle: BuildSuperShockRifle(mb); break;
+            case WeaponKind.Stinger: BuildStinger(mb); break;
+            case WeaponKind.BallLauncher: BuildBallLauncher(mb); break;
         }
     }
 
@@ -751,6 +764,494 @@ public sealed class WeaponModels : IDisposable
             new(new Vector3(0f, -0.140f, -0.410f), new Vector2(0.018f, 0.022f)),
         ];
         mb.AddLoft(Sections.Superellipse(1f, 1f, 2.8f, 12), fore, capStart: false, capEnd: false);
+    }
+
+    // ================================================================ UT2004 / UT3
+
+    /// <summary>
+    /// Shield Gun: a riot tool rather than a firearm. Short body, a wide emitter dish at the front
+    /// that the shield projects from, and two capacitor bottles slung underneath — the dish is
+    /// what separates it at a glance from the Impact Hammer's flat percussion head.
+    /// </summary>
+    private static void BuildShieldGun(MeshBuilder mb)
+    {
+        Grip(mb, 0.19f, 0.05f);
+
+        mb.Material = (int)MatId.WeaponMetal;
+        Receiver(mb,
+        [
+            new(0.080f, 0.040f, 0.050f, 0.048f),
+            new(-0.020f, 0.052f, 0.062f, 0.050f),
+            new(-0.160f, 0.048f, 0.058f, 0.050f),
+            new(-0.230f, 0.038f, 0.044f, 0.050f),
+        ]);
+
+        // The emitter: a shallow dish on a short throat, so it reads as a projector.
+        mb.Material = (int)MatId.Trim;
+        Shapes.BarrelBack(mb, new Vector3(0f, 0.050f, -0.236f),
+        [
+            new(0f, 0.038f), new(0.028f, 0.044f), new(0.040f, 0.074f),
+            new(0.062f, 0.104f), new(0.076f, 0.100f), new(0.078f, 0.060f),
+        ], 20);
+        mb.Material = (int)MatId.EnergyPanel;
+        Shapes.BarrelBack(mb, new Vector3(0f, 0.050f, -0.300f),
+            [new Vector2(0f, 0.086f), new Vector2(0.010f, 0.086f)], 20);
+
+        // Capacitor bottles under the barrel.
+        mb.Material = (int)MatId.TechPanelDark;
+        foreach (float sx in new[] { -0.030f, 0.030f })
+            Shapes.Barrel(mb, new Vector3(sx, 0.008f, -0.120f),
+                [new Vector2(0f, 0.018f), new Vector2(0.014f, 0.024f),
+                 new Vector2(0.108f, 0.024f), new Vector2(0.122f, 0.016f)], 12);
+        Sights(mb, 0.108f, -0.190f, 0.010f, 0.9f);
+    }
+
+    /// <summary>
+    /// Assault Rifle: a plain 5.56mm carbine with a curved magazine and the M355 grenade tube
+    /// clamped under the barrel. The tube is the silhouette cue — without it this is any rifle.
+    /// </summary>
+    private static void BuildAssaultRifle(MeshBuilder mb)
+    {
+        Grip(mb, 0.20f, 0.075f);
+
+        mb.Material = (int)MatId.WeaponMetal;
+        Receiver(mb,
+        [
+            new(0.140f, 0.030f, 0.040f, 0.040f),
+            new(0.060f, 0.038f, 0.050f, 0.044f),
+            new(-0.120f, 0.036f, 0.048f, 0.046f),
+            new(-0.220f, 0.028f, 0.036f, 0.046f),
+        ]);
+        // Stock behind the receiver.
+        mb.Material = (int)MatId.TechPanelDark;
+        Receiver(mb,
+        [
+            new(0.150f, 0.022f, 0.030f, 0.030f),
+            new(0.260f, 0.020f, 0.034f, 0.018f),
+        ]);
+        Magazine(mb, new Vector3(0f, 0.014f, -0.030f), 0.016f, 0.034f, 0.115f);
+
+        // Barrel, shroud, then the underslung grenade tube.
+        mb.Material = (int)MatId.WeaponMetal;
+        Shapes.BarrelBack(mb, new Vector3(0f, 0.046f, -0.226f),
+        [
+            new(0f, 0.034f), new(0.014f, 0.030f), new(0.150f, 0.028f),
+            new(0.164f, 0.034f), new(0.176f, 0.030f),
+        ], 14);
+        Vents(mb, new Vector3(0f, 0.046f, -0.300f), 0.030f, 0.070f, 5);
+        mb.Material = (int)MatId.TechPanelDark;
+        Shapes.BarrelBack(mb, new Vector3(0f, 0.006f, -0.190f),
+        [
+            new(0f, 0.026f), new(0.018f, 0.030f), new(0.130f, 0.030f), new(0.142f, 0.024f),
+        ], 12);
+        Sights(mb, 0.086f, -0.290f, 0.060f, 0.9f);
+    }
+
+    /// <summary>
+    /// Link Gun: three prongs around a central emitter, with a translucent energy conduit running
+    /// the length of the body. The prongs are what the beam arcs between, so they have to be the
+    /// thing you notice.
+    /// </summary>
+    private static void BuildLinkGun(MeshBuilder mb)
+    {
+        Grip(mb, 0.20f, 0.07f);
+
+        mb.Material = (int)MatId.WeaponMetal;
+        Receiver(mb,
+        [
+            new(0.100f, 0.034f, 0.044f, 0.046f),
+            new(0.000f, 0.046f, 0.058f, 0.050f),
+            new(-0.180f, 0.044f, 0.056f, 0.050f),
+            new(-0.300f, 0.034f, 0.042f, 0.050f),
+        ]);
+        // Energy conduit along the spine.
+        mb.Material = (int)MatId.EnergyPanel;
+        Receiver(mb,
+        [
+            new(0.020f, 0.014f, 0.012f, 0.104f),
+            new(-0.280f, 0.014f, 0.012f, 0.104f),
+        ]);
+
+        // Central emitter throat.
+        mb.Material = (int)MatId.WeaponMetal;
+        Shapes.BarrelBack(mb, new Vector3(0f, 0.050f, -0.306f),
+        [
+            new(0f, 0.042f), new(0.020f, 0.036f), new(0.130f, 0.032f), new(0.146f, 0.026f),
+        ], 16);
+        // The three prongs, splayed forward around it.
+        mb.Material = (int)MatId.Trim;
+        for (int i = 0; i < 3; i++)
+        {
+            float a = i / 3f * MathX.TwoPi + MathX.HalfPi;
+            float sx = MathF.Cos(a) * 0.044f, sy = MathF.Sin(a) * 0.044f;
+            Shapes.Strut(mb, new Vector3(sx, 0.050f + sy, -0.320f),
+                new Vector3(sx * 0.62f, 0.050f + sy * 0.62f, -0.492f), 0.010f, 0.007f, 8);
+        }
+        mb.Material = (int)MatId.EnergyPanel;
+        Shapes.Collar(mb, new Vector3(0f, 0.050f, -0.470f), 0.030f, 0.008f, 16);
+        Sights(mb, 0.118f, -0.250f, 0.010f, 0.9f);
+    }
+
+    /// <summary>
+    /// Lightning Gun: a long rifle with a coil stack instead of a barrel shroud and a big scope.
+    /// The coils are the whole point — it should read as an electrical instrument, not a firearm.
+    /// </summary>
+    private static void BuildLightningGun(MeshBuilder mb)
+    {
+        Grip(mb, 0.20f, 0.10f);
+
+        mb.Material = (int)MatId.WeaponMetal;
+        Receiver(mb,
+        [
+            new(0.190f, 0.026f, 0.036f, 0.038f),
+            new(0.090f, 0.036f, 0.048f, 0.044f),
+            new(-0.120f, 0.034f, 0.046f, 0.046f),
+            new(-0.260f, 0.026f, 0.034f, 0.046f),
+        ]);
+        mb.Material = (int)MatId.TechPanelDark;
+        Receiver(mb,
+        [
+            new(0.200f, 0.022f, 0.032f, 0.026f),
+            new(0.330f, 0.020f, 0.036f, 0.012f),
+        ]);
+
+        // Barrel with a stack of induction coils along it.
+        mb.Material = (int)MatId.WeaponMetal;
+        Shapes.BarrelBack(mb, new Vector3(0f, 0.046f, -0.268f),
+        [
+            new(0f, 0.028f), new(0.014f, 0.024f), new(0.420f, 0.022f),
+            new(0.440f, 0.030f), new(0.456f, 0.024f),
+        ], 14);
+        mb.Material = (int)MatId.EnergyPanel;
+        for (int i = 0; i < 6; i++)
+            Shapes.Collar(mb, new Vector3(0f, 0.046f, -0.320f - i * 0.062f), 0.038f, 0.012f, 16);
+
+        // Scope on a pair of rings.
+        mb.Material = (int)MatId.TechPanelDark;
+        Shapes.Barrel(mb, new Vector3(0f, 0.116f, -0.040f),
+            [new Vector2(0f, 0.016f), new Vector2(0.012f, 0.022f),
+             new Vector2(0.180f, 0.022f), new Vector2(0.194f, 0.016f)], 14);
+        mb.Material = (int)MatId.Trim;
+        foreach (float z in new[] { -0.060f, -0.170f })
+            mb.AddBox(new Vector3(0f, 0.092f, z), new Vector3(0.010f, 0.020f, 0.008f));
+    }
+
+    /// <summary>
+    /// Mine Layer: a squat launcher with a four-round drum on top and a claw muzzle the drones are
+    /// pushed out through, plus the guidance laser housing under the barrel.
+    /// </summary>
+    private static void BuildMineLayer(MeshBuilder mb)
+    {
+        Grip(mb, 0.20f, 0.06f);
+
+        mb.Material = (int)MatId.WeaponMetal;
+        Receiver(mb,
+        [
+            new(0.110f, 0.040f, 0.048f, 0.046f),
+            new(0.000f, 0.054f, 0.062f, 0.050f),
+            new(-0.160f, 0.050f, 0.058f, 0.050f),
+            new(-0.240f, 0.040f, 0.046f, 0.050f),
+        ]);
+
+        // Drum of four drones sitting proud of the receiver.
+        mb.Material = (int)MatId.TechPanelDark;
+        Shapes.Barrel(mb, new Vector3(0f, 0.112f, -0.060f),
+            [new Vector2(0f, 0.052f), new Vector2(0.014f, 0.058f),
+             new Vector2(0.086f, 0.058f), new Vector2(0.100f, 0.050f)], 16);
+        mb.Material = (int)MatId.Trim;
+        for (int i = 0; i < 4; i++)
+        {
+            float a = i / 4f * MathX.TwoPi;
+            mb.PushTransform(Matrix4x4.CreateTranslation(
+                new Vector3(MathF.Cos(a) * 0.034f, 0.112f + MathF.Sin(a) * 0.034f, -0.060f)));
+            mb.AddBox(Vector3.Zero, new Vector3(0.012f, 0.012f, 0.042f));
+            mb.PopTransform();
+        }
+
+        // Claw muzzle: four fingers around the launch throat.
+        mb.Material = (int)MatId.WeaponMetal;
+        Shapes.BarrelBack(mb, new Vector3(0f, 0.050f, -0.248f),
+            [new Vector2(0f, 0.046f), new Vector2(0.020f, 0.050f), new Vector2(0.090f, 0.048f)], 14);
+        mb.Material = (int)MatId.Trim;
+        for (int i = 0; i < 4; i++)
+        {
+            float a = i / 4f * MathX.TwoPi + MathX.Pi * 0.25f;
+            float sx = MathF.Cos(a) * 0.046f, sy = MathF.Sin(a) * 0.046f;
+            Shapes.Strut(mb, new Vector3(sx, 0.050f + sy, -0.330f),
+                new Vector3(sx * 1.25f, 0.050f + sy * 1.25f, -0.392f), 0.008f, 0.005f, 6);
+        }
+        // Guidance laser under the barrel.
+        mb.Material = (int)MatId.EnergyPanel;
+        Shapes.BarrelBack(mb, new Vector3(0f, 0.006f, -0.230f),
+            [new Vector2(0f, 0.014f), new Vector2(0.096f, 0.012f)], 10);
+    }
+
+    /// <summary>
+    /// Grenade Launcher: a fat drum-fed tube. Almost all of its bulk is the drum, which is what
+    /// tells you at a glance that it holds eight of something heavy.
+    /// </summary>
+    private static void BuildGrenadeLauncher(MeshBuilder mb)
+    {
+        Grip(mb, 0.20f, 0.075f);
+
+        mb.Material = (int)MatId.WeaponMetal;
+        Receiver(mb,
+        [
+            new(0.120f, 0.036f, 0.044f, 0.044f),
+            new(0.020f, 0.048f, 0.056f, 0.048f),
+            new(-0.120f, 0.044f, 0.052f, 0.048f),
+            new(-0.200f, 0.036f, 0.042f, 0.048f),
+        ]);
+
+        // Drum magazine on the side, canted, with visible rounds.
+        mb.Material = (int)MatId.TechPanelDark;
+        mb.PushTransform(Matrix4x4.CreateRotationY(MathX.HalfPi)
+            * Matrix4x4.CreateTranslation(new Vector3(0f, 0.048f, -0.020f)));
+        Shapes.Barrel(mb, Vector3.Zero,
+            [new Vector2(-0.030f, 0.070f), new Vector2(-0.018f, 0.086f),
+             new Vector2(0.018f, 0.086f), new Vector2(0.030f, 0.070f)], 18);
+        mb.PopTransform();
+        mb.Material = (int)MatId.Trim;
+        for (int i = 0; i < 8; i++)
+        {
+            float a = i / 8f * MathX.TwoPi;
+            mb.PushTransform(Matrix4x4.CreateRotationY(MathX.HalfPi)
+                * Matrix4x4.CreateTranslation(new Vector3(
+                    0f, 0.048f + MathF.Sin(a) * 0.062f, -0.020f + MathF.Cos(a) * 0.062f)));
+            mb.AddBox(Vector3.Zero, new Vector3(0.030f, 0.013f, 0.013f));
+            mb.PopTransform();
+        }
+
+        // Short, wide tube.
+        mb.Material = (int)MatId.WeaponMetal;
+        Shapes.BarrelBack(mb, new Vector3(0f, 0.048f, -0.208f),
+        [
+            new(0f, 0.050f), new(0.020f, 0.044f), new(0.170f, 0.042f),
+            new(0.186f, 0.052f), new(0.202f, 0.044f),
+        ], 16);
+        Sights(mb, 0.104f, -0.300f, 0.040f, 0.9f);
+    }
+
+    /// <summary>
+    /// AVRiL: a shoulder tube with a big optical tracker box on top. Blast cone at the back,
+    /// because it fires from the shoulder and the backblast has to go somewhere.
+    /// </summary>
+    private static void BuildAvril(MeshBuilder mb)
+    {
+        Grip(mb, 0.19f, 0.02f);
+
+        mb.Material = (int)MatId.WeaponMetal;
+        Shapes.BarrelBack(mb, new Vector3(0f, 0.062f, 0.260f),
+        [
+            new(0f, 0.066f), new(0.026f, 0.048f), new(0.060f, 0.046f),
+            new(0.760f, 0.046f), new(0.790f, 0.056f), new(0.820f, 0.050f),
+        ], 18);
+        // Reinforcing bands.
+        mb.Material = (int)MatId.Trim;
+        foreach (float z in new[] { 0.120f, -0.060f, -0.240f, -0.400f })
+            Shapes.Collar(mb, new Vector3(0f, 0.062f, z), 0.052f, 0.010f, 16);
+
+        // Optical tracker: a boxy housing with a lens, sitting over the tube.
+        mb.Material = (int)MatId.TechPanelDark;
+        Receiver(mb,
+        [
+            new(0.090f, 0.034f, 0.030f, 0.126f),
+            new(-0.130f, 0.038f, 0.034f, 0.130f),
+            new(-0.200f, 0.030f, 0.026f, 0.126f),
+        ]);
+        mb.Material = (int)MatId.EnergyPanel;
+        Shapes.BarrelBack(mb, new Vector3(0f, 0.130f, -0.206f),
+            [new Vector2(0f, 0.024f), new Vector2(0.016f, 0.018f)], 14);
+        // Forward hand grip under the tube.
+        mb.Material = (int)MatId.TechPanelDark;
+        Shapes.Strut(mb, new Vector3(0f, 0.020f, -0.230f), new Vector3(0f, -0.070f, -0.250f),
+            0.016f, 0.020f, 8);
+    }
+
+    /// <summary>
+    /// The two painters share a chassis — a squat body with a tripod-braced optic and a laser
+    /// aperture. They differ only in the head, which is the honest way round: in the original they
+    /// are the same device pointed at two different things in orbit.
+    /// </summary>
+    private static void BuildPainter(MeshBuilder mb, bool ion)
+    {
+        Grip(mb, 0.19f, 0.06f);
+
+        mb.Material = (int)MatId.WeaponMetal;
+        Receiver(mb,
+        [
+            new(0.110f, 0.032f, 0.042f, 0.044f),
+            new(0.010f, 0.044f, 0.054f, 0.048f),
+            new(-0.140f, 0.040f, 0.050f, 0.048f),
+            new(-0.220f, 0.032f, 0.040f, 0.048f),
+        ]);
+
+        // Optic block with a wide objective.
+        mb.Material = (int)MatId.TechPanelDark;
+        Shapes.Barrel(mb, new Vector3(0f, 0.122f, -0.030f),
+            [new Vector2(0f, 0.026f), new Vector2(0.014f, 0.034f),
+             new Vector2(0.210f, 0.034f), new Vector2(0.226f, 0.026f)], 16);
+        mb.Material = ion ? (int)MatId.EnergyPanel : (int)MatId.Trim;
+        Shapes.BarrelBack(mb, new Vector3(0f, 0.122f, -0.244f),
+            [new Vector2(0f, 0.032f), new Vector2(0.014f, 0.024f)], 16);
+
+        // Laser aperture on the barrel line.
+        mb.Material = (int)MatId.WeaponMetal;
+        Shapes.BarrelBack(mb, new Vector3(0f, 0.046f, -0.226f),
+            [new Vector2(0f, 0.032f), new Vector2(0.018f, 0.026f), new Vector2(0.190f, 0.024f)], 14);
+        mb.Material = (int)MatId.EnergyPanel;
+        Shapes.BarrelBack(mb, new Vector3(0f, 0.046f, -0.420f),
+            [new Vector2(0f, 0.022f), new Vector2(0.010f, 0.014f)], 12);
+
+        // Folding brace under the fore-end, which is how you hold a thing this long steady.
+        mb.Material = (int)MatId.Trim;
+        foreach (float sx in new[] { -0.026f, 0.026f })
+            Shapes.Strut(mb, new Vector3(0f, 0.020f, -0.260f), new Vector3(sx, -0.086f, -0.320f),
+                0.006f, 0.005f, 6);
+        // The head: a ring of emitters for the ion beam, a stubby antenna for the bomber call.
+        if (ion)
+        {
+            mb.Material = (int)MatId.EnergyPanel;
+            Shapes.Collar(mb, new Vector3(0f, 0.046f, -0.396f), 0.040f, 0.012f, 18);
+        }
+        else
+        {
+            mb.Material = (int)MatId.Trim;
+            Shapes.Strut(mb, new Vector3(0f, 0.086f, -0.150f), new Vector3(0f, 0.220f, -0.120f),
+                0.006f, 0.004f, 6);
+        }
+    }
+
+    /// <summary>
+    /// Translocator: a compact launcher with the disc visibly seated in a fork at the front. Barely
+    /// a weapon, and it should look like it — the disc is the only part that matters.
+    /// </summary>
+    private static void BuildTranslocator(MeshBuilder mb)
+    {
+        Grip(mb, 0.18f, 0.05f);
+
+        mb.Material = (int)MatId.WeaponMetal;
+        Receiver(mb,
+        [
+            new(0.080f, 0.028f, 0.038f, 0.040f),
+            new(0.000f, 0.036f, 0.046f, 0.044f),
+            new(-0.100f, 0.032f, 0.042f, 0.044f),
+            new(-0.150f, 0.026f, 0.034f, 0.044f),
+        ]);
+        // Fork holding the disc.
+        mb.Material = (int)MatId.Trim;
+        foreach (float sx in new[] { -0.036f, 0.036f })
+            Shapes.Strut(mb, new Vector3(sx, 0.044f, -0.150f), new Vector3(sx, 0.044f, -0.240f),
+                0.008f, 0.008f, 6);
+        // The disc itself, on edge between the tines.
+        mb.Material = (int)MatId.EnergyPanel;
+        mb.PushTransform(Matrix4x4.CreateRotationX(MathX.HalfPi)
+            * Matrix4x4.CreateTranslation(new Vector3(0f, 0.044f, -0.226f)));
+        Shapes.Barrel(mb, Vector3.Zero,
+            [new Vector2(-0.008f, 0.030f), new Vector2(0f, 0.042f), new Vector2(0.008f, 0.030f)], 18);
+        mb.PopTransform();
+        mb.Material = (int)MatId.TechPanelDark;
+        Magazine(mb, new Vector3(0f, 0.012f, -0.020f), 0.014f, 0.026f, 0.070f);
+    }
+
+    /// <summary>
+    /// Super Shock Rifle: the Shock Rifle with the restraint removed — heavier coils, a longer
+    /// emitter, and everything that glowed on the original glowing harder.
+    /// </summary>
+    private static void BuildSuperShockRifle(MeshBuilder mb)
+    {
+        BuildShockRifle(mb);
+        mb.Material = (int)MatId.EnergyPanel;
+        foreach (float z in new[] { -0.350f, -0.430f, -0.510f })
+            Shapes.Collar(mb, new Vector3(0f, 0.050f, z), 0.058f, 0.014f, 18);
+        Shapes.BarrelBack(mb, new Vector3(0f, 0.050f, -0.628f),
+            [new Vector2(0f, 0.040f), new Vector2(0.034f, 0.020f)], 18);
+    }
+
+    /// <summary>
+    /// Stinger: a mining tool pressed into service. A crystal hopper on top feeding a stubby
+    /// multi-throat muzzle, with raw tarydium visible in the feed — nothing about it should look
+    /// like the machined Minigun it replaced.
+    /// </summary>
+    private static void BuildStinger(MeshBuilder mb)
+    {
+        Grip(mb, 0.20f, 0.09f);
+
+        mb.Material = (int)MatId.RustMetal;
+        Receiver(mb,
+        [
+            new(0.150f, 0.042f, 0.052f, 0.046f),
+            new(0.030f, 0.058f, 0.068f, 0.052f),
+            new(-0.160f, 0.054f, 0.064f, 0.052f),
+            new(-0.260f, 0.042f, 0.050f, 0.052f),
+        ]);
+
+        // Crystal hopper.
+        mb.Material = (int)MatId.TechPanelDark;
+        Receiver(mb,
+        [
+            new(0.080f, 0.036f, 0.030f, 0.118f),
+            new(-0.020f, 0.048f, 0.044f, 0.132f),
+            new(-0.140f, 0.036f, 0.030f, 0.118f),
+        ]);
+        mb.Material = (int)MatId.EnergyPanel;
+        for (int i = 0; i < 5; i++)
+        {
+            float z = 0.050f - i * 0.042f;
+            mb.PushTransform(Matrix4x4.CreateRotationZ(0.4f * (i % 2 == 0 ? 1f : -1f))
+                * Matrix4x4.CreateTranslation(new Vector3(0f, 0.166f, z)));
+            mb.AddBox(Vector3.Zero, new Vector3(0.014f, 0.026f, 0.014f));
+            mb.PopTransform();
+        }
+
+        // Muzzle: four short throats around a common axis.
+        mb.Material = (int)MatId.RustMetal;
+        Shapes.BarrelBack(mb, new Vector3(0f, 0.054f, -0.268f),
+            [new Vector2(0f, 0.052f), new Vector2(0.024f, 0.056f), new Vector2(0.120f, 0.050f)], 16);
+        mb.Material = (int)MatId.WeaponMetal;
+        for (int i = 0; i < 4; i++)
+        {
+            float a = i / 4f * MathX.TwoPi + MathX.Pi * 0.25f;
+            Shapes.BarrelBack(mb,
+                new Vector3(MathF.Cos(a) * 0.030f, 0.054f + MathF.Sin(a) * 0.030f, -0.300f),
+                [new Vector2(0f, 0.014f), new Vector2(0.120f, 0.012f)], 10);
+        }
+        mb.Material = (int)MatId.Trim;
+        Shapes.Collar(mb, new Vector3(0f, 0.054f, -0.400f), 0.050f, 0.012f, 16);
+    }
+
+    /// <summary>
+    /// Ball Launcher: a cradle rather than a barrel. It holds the ball in an open ring and throws
+    /// it, and since it cannot hurt anybody it deliberately has no muzzle at all.
+    /// </summary>
+    private static void BuildBallLauncher(MeshBuilder mb)
+    {
+        Grip(mb, 0.19f, 0.06f);
+
+        mb.Material = (int)MatId.WeaponMetal;
+        Receiver(mb,
+        [
+            new(0.090f, 0.030f, 0.040f, 0.042f),
+            new(0.000f, 0.040f, 0.050f, 0.046f),
+            new(-0.110f, 0.036f, 0.046f, 0.046f),
+            new(-0.170f, 0.028f, 0.036f, 0.046f),
+        ]);
+        // Open cradle: three arms curving forward around where the ball sits.
+        mb.Material = (int)MatId.Trim;
+        for (int i = 0; i < 3; i++)
+        {
+            float a = i / 3f * MathX.TwoPi + MathX.HalfPi;
+            float sx = MathF.Cos(a), sy = MathF.Sin(a);
+            Span<MeshBuilder.LoftStation> arm =
+            [
+                new(new Vector3(sx * 0.030f, 0.046f + sy * 0.030f, -0.176f), 0.009f),
+                new(new Vector3(sx * 0.062f, 0.046f + sy * 0.062f, -0.240f), 0.009f),
+                new(new Vector3(sx * 0.052f, 0.046f + sy * 0.052f, -0.320f), 0.007f),
+            ];
+            mb.AddLoft(Sections.Circle(1f, 7), arm, capStart: false, capEnd: false);
+        }
+        mb.Material = (int)MatId.EnergyPanel;
+        mb.AddSphere(new Vector3(0f, 0.046f, -0.256f), 0.046f, 10, 14);
     }
 
     public void Dispose()

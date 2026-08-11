@@ -66,6 +66,9 @@ public sealed class Pawn
     public bool VehicleUp;
     public bool VehicleDown;
 
+    /// <summary>Shield Gun alt held down: incoming fire from the front is heavily reduced.</summary>
+    public bool ShieldRaised;
+
     // --- hoverboard ---
     /// <summary>
     /// Riding the personal hoverboard. It is a pawn state rather than a vehicle because the rider
@@ -286,6 +289,7 @@ public sealed class Pawn
         SpawnProtection = 1.6f;
         HasFlag = false;
         CarriedFlag = Team.None;
+        ShieldRaised = false;
         OnHoverboard = false;
         GrappleVehicleId = -1;
         HoverboardStun = 0f;

@@ -345,6 +345,7 @@ public sealed class GameWorld
         AssaultAttackerVehicleBoardings = 0;
         AssaultDefenderVehicleBoardings = 0;
         VehicleKindsDriven.Clear();
+        _strikes.Clear();
         OnslaughtNodeCaptures = 0;
         WarfareOrbPickups = 0;
         WarfareOrbCaptures = 0;
@@ -360,6 +361,7 @@ public sealed class GameWorld
                 Kind = p.Kind,
                 Weapon = p.Weapon,
                 Ammo = p.Ammo,
+                LockerWeapons = p.LockerWeapons ?? [],
                 Position = p.Position,
                 RespawnTime = p.RespawnTime,
                 Active = true,
@@ -652,6 +654,7 @@ public sealed class GameWorld
         }
 
         UpdateProjectiles(dt);
+        UpdateAirStrikes(dt);
         UpdatePickups(dt);
         UpdateFlags(dt);
         UpdateControlPoints(dt);
@@ -776,6 +779,8 @@ public sealed class GameWorld
         var def = pawn.WeaponDef;
         bool zoomHeld = input.AltFire && def.Alt.ZoomFov > 0f;
         pawn.ZoomFov = zoomHeld ? def.Alt.ZoomFov : 0f;
+        // The shield is a held state rather than a shot, so it lives here and not in Fire().
+        pawn.ShieldRaised = def.Alt.Mode == FireMode.Shield && input.AltFire && !pawn.IsSwitching;
 
         // --- minigun spin-up ---
         if (def.SpinUp)
@@ -896,6 +901,49 @@ public sealed class GameWorld
             case FireMode.Melee:
                 MeleeSwing(pawn, origin, aim, fire, damageScale);
                 break;
+
+            // The AVRiL will not fire at a person at all. That refusal is the weapon: infantry get
+            // something that beats armour, and armour keeps its advantage against infantry.
+            case FireMode.LockOn:
+            {
+                Vehicle target = LockOnTarget(pawn, fire.Range);
+                var missile = SpawnProjectile(fire.Projectile, fire, origin, aim, pawn,
+                    damageScale, def.Tint);
+                if (missile >= 0 && target != null) _projectiles[missile].HomingVehicleId = target.Id;
+                break;
+            }
+
+            // Paint a spot; something arrives on it a few seconds later. The delay is the counter­
+            // play — everyone can see the beam and has time to leave.
+            case FireMode.Painter:
+            {
+                var hit = Level.Collision.Raycast(origin, origin + aim * MathF.Max(40f, fire.Range));
+                Vector3 spot = hit.Hit ? hit.Point : origin + aim * fire.Range;
+                if (def.Kind == WeaponKind.MineLayer) { RedirectMines(pawn, spot); break; }
+                _strikes.Add(new AirStrike
+                {
+                    Position = spot, Delay = 2.6f, OwnerId = pawn.Id, Team = pawn.Team,
+                    Radius = fire.SplashRadius, Damage = fire.SplashDamage,
+                    Knockback = fire.Knockback, Scale = damageScale,
+                    Bomber = def.Kind == WeaponKind.TargetPainter,
+                    Direction = MathX.SafeNormalize(aim.FlatXZ(), MathX.Forward),
+                });
+                AddKillFeed(def.Kind == WeaponKind.IonPainter
+                    ? Loc.AnnIonStrike(pawn.Name) : Loc.AnnBomberStrike(pawn.Name), def.Tint);
+                OnSound?.Invoke(SoundId.AnnounceMajor, spot, 0.9f);
+                break;
+            }
+
+            case FireMode.Detonate:
+                DetonateOwnedGrenades(pawn);
+                break;
+
+            case FireMode.Recall:
+                RecallToTranslocator(pawn);
+                break;
+
+            case FireMode.Shield:
+                break;   // handled continuously in HandleWeapons, not as a discrete shot
         }
 
         if (!pawn.CanFire(pawn.Weapon, alt) && pawn.AmmoFor(pawn.Weapon) <= 0)
@@ -1117,7 +1165,8 @@ public sealed class GameWorld
 
     // ---------------------------------------------------------------- projectiles
 
-    private void SpawnProjectile(ProjectileKind kind, in FireDef fire, Vector3 origin, Vector3 dir,
+    /// <summary>Spawns one projectile and returns its slot, or -1 when the pool is full.</summary>
+    private int SpawnProjectile(ProjectileKind kind, in FireDef fire, Vector3 origin, Vector3 dir,
         Pawn owner, float damageScale, Vector3 tint)
     {
         for (int i = 0; i < Projectiles.Length; i++)
@@ -1125,7 +1174,200 @@ public sealed class GameWorld
             if (Projectiles[i].Active) continue;
             Projectiles[i] = ProjectileFactory.Create(kind, fire, origin, dir, owner.Id, owner.Team,
                 tint, damageScale, Rng);
+            return i;
+        }
+        return -1;
+    }
+
+    private Projectile[] _projectiles => Projectiles;
+
+    /// <summary>
+    /// A mine that has landed looks for something to run down. It only ever chases what comes to
+    /// it, which is why a laid minefield is a defensive tool rather than a guided missile battery.
+    /// </summary>
+    private void WakeSpiderMine(ref Projectile p)
+    {
+        const float noticeRange = 16f;
+        if (p.HasHomingPoint)
+        {
+            if (Vector3.Distance(p.Position, p.HomingPoint) > 1.2f) { p.Stuck = false; return; }
+            p.HasHomingPoint = false;
+        }
+
+        foreach (var v in Vehicles)
+        {
+            if (!v.Alive) continue;
+            if (v.Team != Team.None && p.OwnerTeam != Team.None && v.Team == p.OwnerTeam) continue;
+            if (Vector3.Distance(v.Position, p.Position) > noticeRange) continue;
+            p.HomingVehicleId = v.Id;
+            p.Stuck = false;
             return;
+        }
+        foreach (var target in Pawns)
+        {
+            if (!target.Alive || target.Id == p.OwnerId) continue;
+            if (Mode.TeamBased && target.Team == p.OwnerTeam) continue;
+            if (Vector3.Distance(target.Position, p.Position) > noticeRange) continue;
+            p.HomingPawnId = target.Id;
+            p.Stuck = false;
+            return;
+        }
+    }
+
+    /// <summary>Turns a seeker or a woken mine towards whatever it has decided to chase.</summary>
+    private void SteerHomingProjectile(ref Projectile p, float dt)
+    {
+        Vector3 goal;
+        if (p.HomingVehicleId >= 0 && FindVehicle(p.HomingVehicleId) is { Alive: true } v)
+            goal = v.Position;
+        else if (p.HomingPawnId >= 0 && FindPawn(p.HomingPawnId) is { Alive: true } target)
+            goal = target.Center;
+        else if (p.HasHomingPoint) goal = p.HomingPoint;
+        else return;
+
+        float speed = p.Velocity.Length();
+        if (speed < 1e-4f) return;
+        Vector3 want = MathX.SafeNormalize(goal - p.Position, p.Velocity / speed);
+        Vector3 current = p.Velocity / speed;
+        // Cap the turn so a seeker can be dodged by a fast vehicle rather than being a hitscan.
+        float maxTurn = p.TurnRate * dt;
+        float angle = MathF.Acos(MathX.Clamp(Vector3.Dot(current, want), -1f, 1f));
+        Vector3 dir = angle <= maxTurn ? want
+            : MathX.SafeNormalize(Vector3.Lerp(current, want, maxTurn / angle), current);
+        p.Velocity = dir * speed;
+    }
+
+    // ---------------------------------------------------------------- UT2004 weapon behaviours
+
+    /// <summary>
+    /// The vehicle an AVRiL will chase: whatever enemy armour is closest to the crosshair. Only
+    /// vehicles — locking on to a person is the one thing this weapon deliberately cannot do.
+    /// </summary>
+    private Vehicle LockOnTarget(Pawn pawn, float range)
+    {
+        Vector3 eye = pawn.EyePosition, aim = pawn.ViewDirection;
+        Vehicle best = null;
+        float bestScore = 0.86f;   // roughly a 30-degree cone
+        foreach (var v in Vehicles)
+        {
+            if (!v.Alive) continue;
+            if (v.Team != Team.None && pawn.Team != Team.None && v.Team == pawn.Team) continue;
+            Vector3 to = v.Position - eye;
+            float distance = to.Length();
+            if (distance > range || distance < 0.01f) continue;
+            float score = Vector3.Dot(to / distance, aim);
+            if (score > bestScore) { bestScore = score; best = v; }
+        }
+        return best;
+    }
+
+    /// <summary>Sends every spider mine this pawn has laid at a painted spot.</summary>
+    private void RedirectMines(Pawn pawn, Vector3 spot)
+    {
+        for (int i = 0; i < Projectiles.Length; i++)
+        {
+            ref Projectile p = ref Projectiles[i];
+            if (!p.Active || p.Kind != ProjectileKind.SpiderMine || p.OwnerId != pawn.Id) continue;
+            p.HomingPoint = spot;
+            p.HasHomingPoint = true;
+            p.HomingPawnId = -1;
+            p.HomingVehicleId = -1;
+        }
+        Particles.Spawn(BlendMode.Additive, spot, Vector3.Zero,
+            new Vector4(1f, 0.6f, 0.3f, 0.9f), new Vector4(1f, 0.6f, 0.3f, 0f), 1.2f, 0.4f, 0.4f, Spr.Flare);
+    }
+
+    /// <summary>Sets off every grenade this pawn is still holding the clicker for.</summary>
+    private void DetonateOwnedGrenades(Pawn pawn)
+    {
+        for (int i = 0; i < Projectiles.Length; i++)
+        {
+            ref Projectile p = ref Projectiles[i];
+            if (!p.Active || p.Kind != ProjectileKind.StickyGrenade || p.OwnerId != pawn.Id) continue;
+            ExplodeProjectile(ref p);
+        }
+    }
+
+    /// <summary>
+    /// Translocator recall. Landing inside somebody telefrags them — the reason this counts as a
+    /// weapon rather than a movement key.
+    /// </summary>
+    private void RecallToTranslocator(Pawn pawn)
+    {
+        for (int i = 0; i < Projectiles.Length; i++)
+        {
+            ref Projectile p = ref Projectiles[i];
+            if (!p.Active || p.Kind != ProjectileKind.TranslocatorDisc || p.OwnerId != pawn.Id) continue;
+            Vector3 destination = p.Position + new Vector3(0f, 0.1f, 0f);
+            p.Active = false;
+
+            foreach (var other in Pawns)
+            {
+                if (other == pawn || !other.Alive) continue;
+                if (Vector3.Distance(other.Position, destination) > 1.3f) continue;
+                Damage(other, pawn, 10000f, DamageType.Telefrag, MathX.Up);
+            }
+
+            Particles.Spawn(BlendMode.Additive, pawn.Center, Vector3.Zero,
+                new Vector4(0.5f, 0.8f, 1f, 0.9f), new Vector4(0.5f, 0.8f, 1f, 0f), 1.4f, 0.35f, 0.35f, Spr.Flare);
+            pawn.Position = destination;
+            pawn.Velocity *= 0.2f;
+            OnSound?.Invoke(SoundId.Teleport, destination, 0.9f);
+            return;
+        }
+    }
+
+    /// <summary>A called-in strike waiting on its delay.</summary>
+    private struct AirStrike
+    {
+        public Vector3 Position;
+        public Vector3 Direction;
+        public float Delay;
+        public int OwnerId;
+        public Team Team;
+        public float Radius;
+        public float Damage;
+        public float Knockback;
+        public float Scale;
+        /// <summary>True for the Target Painter: a line of bombs instead of one beam.</summary>
+        public bool Bomber;
+    }
+
+    private readonly List<AirStrike> _strikes = new();
+
+    private void UpdateAirStrikes(float dt)
+    {
+        for (int i = _strikes.Count - 1; i >= 0; i--)
+        {
+            AirStrike s = _strikes[i];
+            s.Delay -= dt;
+            _strikes[i] = s;
+            // Warn the ground: a beam growing over the target is what makes this survivable.
+            Particles.Spawn(BlendMode.Additive, s.Position + new Vector3(0f, 1f, 0f), Vector3.Zero,
+                new Vector4(s.Bomber ? 1f : 0.6f, 0.8f, 1f, 0.5f), new Vector4(0.6f, 0.8f, 1f, 0f),
+                0.9f, 0.2f, 0.2f, Spr.Flare);
+            if (s.Delay > 0f) continue;
+            _strikes.RemoveAt(i);
+
+            Pawn owner = FindPawn(s.OwnerId);
+            if (s.Bomber)
+            {
+                // A bomber run: five blasts walked along the painter's line of sight.
+                for (int b = 0; b < 5; b++)
+                {
+                    Vector3 at = s.Position + s.Direction * (b - 2) * 7f;
+                    Explode(at, s.Radius, s.Damage * s.Scale, s.Knockback, owner, DamageType.Explosion);
+                }
+            }
+            else
+            {
+                Explode(s.Position, s.Radius, s.Damage * s.Scale, s.Knockback, owner, DamageType.Explosion);
+                for (int k = 0; k < 8; k++)
+                    Particles.Spawn(BlendMode.Additive, s.Position + new Vector3(0f, k * 4f, 0f),
+                        Vector3.Zero, new Vector4(0.7f, 0.9f, 1f, 0.9f), new Vector4(0.4f, 0.7f, 1f, 0f),
+                        3.4f, 0.5f, 0.5f, Spr.Flare);
+            }
+            OnSound?.Invoke(SoundId.Nuke, s.Position, 1.2f);
         }
     }
 
@@ -1148,8 +1390,12 @@ public sealed class GameWorld
             if (p.Stuck)
             {
                 EmitProjectileTrail(ref p, dt);
-                continue;
+                // A landed spider mine is not finished: it picks a victim and starts crawling.
+                if (p.Kind == ProjectileKind.SpiderMine && p.ArmDelay <= 0f) WakeSpiderMine(ref p);
+                else continue;
             }
+
+            if (p.Homing) SteerHomingProjectile(ref p, dt);
 
             // Ballistic projectiles obey the arena's gravity, so grenades really do float on
             // the low-gravity rooftop maps.
@@ -1160,6 +1406,16 @@ public sealed class GameWorld
             // --- pawn hits ---
             Pawn hit = TracePawnsSphere(p.Position, next, p.Radius, p.OwnerId, out Vector3 hitPoint,
                 out bool headshot);
+            // A translocator disc and a bombing-run ball are not ordnance: they bounce off people.
+            // A laid grenade sticks to whoever it lands on and still waits for the clicker.
+            if (hit != null && (p.Recallable || p.Catchable)) hit = null;
+            if (hit != null && p.RemoteDetonated && p.ArmDelay <= 0f)
+            {
+                p.Position = hitPoint;
+                p.Velocity = Vector3.Zero;
+                p.Stuck = true;
+                continue;
+            }
             if (hit != null && p.ArmDelay <= 0f)
             {
                 var owner = FindPawn(p.OwnerId);
@@ -1464,6 +1720,15 @@ public sealed class GameWorld
         {
             amount *= Mode.FriendlyFire;
             if (amount <= 0.01f) return;
+        }
+        // A raised Shield Gun only covers the direction it is pointed. Facing the wrong way with
+        // it up is exactly as bad as not having it, which is what keeps it from being a free
+        // damage reduction you leave switched on.
+        if (target.ShieldRaised && attacker != null)
+        {
+            Vector3 from = MathX.SafeNormalize((attacker.Position - target.Position).FlatXZ(),
+                target.ForwardFlat);
+            if (Vector3.Dot(from, target.ForwardFlat) > 0.35f) amount *= 0.25f;
         }
 
         float healthBefore = target.Health;
@@ -1924,6 +2189,24 @@ public sealed class GameWorld
                     int amount = AmmoPickupAmount(pu.Ammo);
                     if (!pawn.GiveAmmo(pu.Ammo, amount)) return false;
                     fb?.Pickup(Loc.PickedUp(Loc.PickupAmmo));
+                    return true;
+                }
+            case PickupKind.WeaponLocker:
+                {
+                    if (Mode.Kind == GameModeKind.Instagib) return false;
+                    // Takes if anything on the rack is new or if it can top somebody up. Refusing
+                    // when the whole rack is already owned is what keeps a locker from being a
+                    // tripwire that respawns forever under a player standing next to it.
+                    bool tookAnything = false;
+                    foreach (WeaponKind w in pu.LockerWeapons)
+                    {
+                        if (pawn.GiveWeapon(w, autoSwitch: false)) tookAnything = true;
+                        var def = Weapons.Get(w);
+                        if (def.Ammo != AmmoKind.None && pawn.GiveAmmo(def.Ammo, def.PickupAmmo))
+                            tookAnything = true;
+                    }
+                    if (!tookAnything) return false;
+                    fb?.Pickup(Loc.PickedUp(Loc.WeaponLocker));
                     return true;
                 }
             default:
