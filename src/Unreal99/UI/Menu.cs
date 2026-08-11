@@ -28,6 +28,8 @@ public sealed class MenuItem
 /// </summary>
 public sealed class Menu
 {
+    /// <summary>Optional fallback for platforms that cannot display a native menu cursor.</summary>
+    public bool DrawSoftwarePointer = true;
     public int FaceRegular;
     public int FaceBold;
     public Texture2D LogoTexture;
@@ -1763,7 +1765,7 @@ public sealed class Menu
     /// </summary>
     public void DrawPointer(UiRenderer ui, int width, int height)
     {
-        if (!_pointerActive) return;
+        if (!DrawSoftwarePointer || !_pointerActive) return;
         float s = MathF.Max(height / 900f, 0.5f);
         float k = 15f * s;
         Vector2 p = _pointer;

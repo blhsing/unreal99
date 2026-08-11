@@ -570,6 +570,9 @@ public sealed class App : IDisposable
 
         _menu.FaceRegular = _hud.FaceRegular;
         _menu.FaceBold = _hud.FaceBold;
+        // Normal front-end cursor mode is reliable on this host and avoids a duplicated native +
+        // software pointer. Gameplay switches back to captured relative motion.
+        _menu.DrawSoftwarePointer = false;
         _menu.LogoTexture = _logoTexture;
         _menu.MapThumbnail = MapThumbnail;
         _menu.Render = _renderSettings;

@@ -184,10 +184,11 @@ public sealed class InputSystem : IDisposable
         // capture mode only when that transport changes, so local per-device and remote shared
         // pointer routing switch without requiring a restart.
         if (_pointerMode == PointerMode.Captured) SetPointerMode(PointerMode.Captured);
-        if (_pointerMode != PointerMode.Captured && TryReadWindowsMenuPointer(out Vector2 menuPosition))
+        if (_pointerMode != PointerMode.Captured
+            && TryReadWindowsMenuPointer(out Vector2 menuPosition, out bool ownsPointerInput))
         {
             SamplePointerPosition(menuPosition);
-            PollWindowsMenuButtons();
+            if (ownsPointerInput) PollWindowsMenuButtons();
         }
         else if (_mouse != null)
         {
@@ -218,12 +219,14 @@ public sealed class InputSystem : IDisposable
     /// RDP reconnect. Reading the desktop cursor in this process keeps menu hover/click navigation
     /// alive without changing the per-device Raw Input path used during a match.
     /// </summary>
-    private bool TryReadWindowsMenuPointer(out Vector2 position)
+    private bool TryReadWindowsMenuPointer(out Vector2 position, out bool ownsPointerInput)
     {
         position = default;
+        ownsPointerInput = false;
         if (!OperatingSystem.IsWindows() || _windowHandle == 0
-            || GetForegroundWindow() != _windowHandle || !GetCursorPos(out WinPoint point)
+            || !GetCursorPos(out WinPoint point)
             || !ScreenToClient(_windowHandle, ref point)) return false;
+        ownsPointerInput = GetForegroundWindow() == _windowHandle || GetActiveWindow() == _windowHandle;
         position = new Vector2(point.X, point.Y);
         return true;
     }
@@ -496,7 +499,9 @@ public sealed class InputSystem : IDisposable
     }
 
     public void SetMouseCapture(bool capture)
-        => SetPointerMode(capture ? PointerMode.Captured : PointerMode.Hidden);
+        // Front-end states keep the native cursor visible. Hiding it made a newly opened menu
+        // unusable on RDP/DeskFerry desktops where GLFW could not report the hidden pointer.
+        => SetPointerMode(capture ? PointerMode.Captured : PointerMode.Normal);
 
     [StructLayout(LayoutKind.Sequential)]
     private struct WinPoint { public int X; public int Y; }
@@ -511,6 +516,9 @@ public sealed class InputSystem : IDisposable
 
     [DllImport("user32.dll")]
     private static extern nint GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern nint GetActiveWindow();
 
     // ---------------------------------------------------------------- gamepad
 
