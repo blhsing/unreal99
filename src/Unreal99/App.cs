@@ -597,7 +597,11 @@ public sealed class App : IDisposable
             ? _playerDevices[i].KeyboardName : Loc.DevicesSharedKeyboard;
         _menu.AssignMouse = BeginAssignMouse;
         _menu.AssignKeyboard = BeginAssignKeyboard;
-        _menu.AutoAssignDevices = () => AutoAssignDevices();
+        _menu.AutoAssignDevices = () =>
+        {
+            AutoAssignDevices(resetManual: true);
+            MarkSettingsDirty();
+        };
         _menu.ClearDeviceAssignments = ClearDeviceAssignments;
         _menu.CapturePrompt = () => _capture switch
         {
@@ -716,20 +720,26 @@ public sealed class App : IDisposable
     {
         if (!_input.RawAvailable) return;
 
+        // RDP supplies one aggregated pointer rather than a stable physical Raw mouse. A saved or
+        // automatically selected host-local HID must never replace that stream for player one.
+        if (EnsureRemoteSharedPrimaryMouse()) MarkSettingsDirty();
+
         Resolve(_input.Raw.Mice, mouse: true);
         Resolve(_input.Raw.Keyboards, mouse: false);
 
         void Resolve(IReadOnlyList<RawDevice> devices, bool mouse)
         {
             var claimed = new HashSet<nint>();
-            for (int slot = 0; slot < _playerDevices.Length; slot++)
+            int firstSlot = mouse && _input.Raw.SharedRemotePointerPresent ? 1 : 0;
+            for (int slot = firstSlot; slot < _playerDevices.Length; slot++)
             {
                 PlayerDevice player = _playerDevices[slot];
                 string savedName = mouse ? player.MouseName : player.KeyboardName;
                 if (string.IsNullOrWhiteSpace(savedName)) continue;
 
                 RawDevice match = devices.FirstOrDefault(d => !claimed.Contains(d.Handle)
-                    && string.Equals(d.Name, savedName, StringComparison.Ordinal));
+                    && string.Equals(d.Name, savedName, StringComparison.Ordinal)
+                    && (!mouse || d.SeenInput));
                 if (match == null) continue;
 
                 claimed.Add(match.Handle);
@@ -753,7 +763,8 @@ public sealed class App : IDisposable
         if (topologyChanged) _rawDeviceRevision = raw.DeviceRevision;
 
         nint[] before = _playerDevices.Select(p => p.MouseHandle).ToArray();
-        bool changed = DeviceAssignment.ReconcileMice(_playerDevices, raw.AssignmentOrder(mice: true));
+        bool changed = DeviceAssignment.ReconcileMice(_playerDevices, raw.AssignmentOrder(mice: true),
+            reservePrimaryShared: raw.SharedRemotePointerPresent);
         if (!changed && !topologyChanged) return;
 
         for (int i = 0; i < _playerDevices.Length; i++)
@@ -1206,21 +1217,36 @@ public sealed class App : IDisposable
     /// phantom keyboard would leave them unable to move, and the first three default binding
     /// profiles use separate clusters on one shared keyboard.
     /// </summary>
-    private void AutoAssignDevices(bool onlyUnassigned = false)
+    private void AutoAssignDevices(bool onlyUnassigned = false, bool resetManual = false)
     {
         if (!_input.RawAvailable) return;
+
+        if (EnsureRemoteSharedPrimaryMouse()) MarkSettingsDirty();
+
+        // The menu action means "configure from what is connected now", not "preserve every old
+        // manual choice". Startup/hot-plug calls keep manual choices by leaving this flag false.
+        if (resetManual)
+        {
+            foreach (PlayerDevice player in _playerDevices)
+            {
+                player.MouseHandle = 0;
+                player.MouseName = "";
+                player.MouseAssignedManually = false;
+            }
+        }
 
         var candidates = _input.Raw.AssignmentOrder(mice: true)
             .Where(d => d.SeenInput)
             .ToList();
 
         var claimed = new HashSet<nint>();
-        for (int i = 0; i < _playerDevices.Length; i++)
+        int firstSlot = _input.Raw.SharedRemotePointerPresent ? 1 : 0;
+        for (int i = firstSlot; i < _playerDevices.Length; i++)
             if (_playerDevices[i].MouseAssignedManually && _playerDevices[i].MouseHandle != 0)
                 claimed.Add(_playerDevices[i].MouseHandle);
 
         int index = 0;
-        for (int i = 0; i < _playerDevices.Length; i++)
+        for (int i = firstSlot; i < _playerDevices.Length; i++)
         {
             var device = _playerDevices[i];
             if (device.MouseAssignedManually) continue;
@@ -1240,6 +1266,19 @@ public sealed class App : IDisposable
                 device.MouseName = "";
             }
         }
+    }
+
+    private bool EnsureRemoteSharedPrimaryMouse()
+    {
+        if (_input.Raw?.SharedRemotePointerPresent != true) return false;
+        PlayerDevice primary = _playerDevices[0];
+        bool changed = primary.MouseHandle != 0 || primary.MouseName.Length > 0
+            || primary.MouseAssignedManually || !primary.MouseLook;
+        primary.MouseHandle = 0;
+        primary.MouseName = "";
+        primary.MouseAssignedManually = false;
+        primary.MouseLook = true;
+        return changed;
     }
 
     /// <summary>
@@ -2578,17 +2617,17 @@ public sealed class App : IDisposable
         }
     }
 
-    /// <summary>Injects shared Raw packets before the production controller consumes the frame.</summary>
+    /// <summary>Injects the shared RDP/window stream before the production controller consumes it.</summary>
     private void InjectMatchMouseInputSelfTest()
     {
         if (!_matchMouseInputTest || _state != AppState.Playing
             || _world?.Mode.State != MatchState.InProgress || _matchMouseInputTestFrame < 1) return;
         bool active = _matchMouseInputTestFrame <= 10;
-        _input.Raw.SetSyntheticSharedMouseForTest(active ? 5f : 0f, active ? -2f : 0f,
+        _input.SetSharedMatchInputForTest(new Vector2(active ? 5f : 0f, active ? -2f : 0f),
             _matchMouseInputTestFrame == 5 ? 1 : 0);
     }
 
-    /// <summary>RDP/shared mouse motion, buttons and final camera must survive hidden match mode.</summary>
+    /// <summary>RDP/shared mouse motion, buttons and final camera must survive captured match mode.</summary>
     private void UpdateMatchMouseInputSelfTest()
     {
         if (_state != AppState.Playing || _world?.Mode.State != MatchState.InProgress

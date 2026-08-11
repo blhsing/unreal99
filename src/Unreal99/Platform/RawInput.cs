@@ -181,8 +181,14 @@ public sealed class RawInput : IDisposable
     public long MessagesReceived { get; private set; }
     public bool SubclassInstalled => _originalWndProc != 0;
     public bool RegistrationSucceeded { get; private set; }
-    /// <summary>Remote Desktop cannot provide stable relative cursor capture.</summary>
+    /// <summary>Windows reports a conventional remote-session attachment.</summary>
     public bool RemoteSession => GetSystemMetrics(0x1000) != 0; // SM_REMOTESESSION
+    /// <summary>
+    /// Some RDP clients attach to the console session, where SM_REMOTESESSION remains false even
+    /// though Windows exposes an RDP_MOU device. Either signal means player one needs the shared
+    /// window pointer instead of a host-local physical assignment.
+    /// </summary>
+    public bool SharedRemotePointerPresent => RemoteSession || _remoteMouseHandles.Count > 0;
     /// <summary>Changes after Windows reports a device arrival or removal and the list refreshes.</summary>
     public int DeviceRevision { get; private set; }
 
@@ -272,6 +278,8 @@ public sealed class RawInput : IDisposable
 
         var oldMice = PreviousByIdentity(_knownMouseDevices.Values.Concat(_mouseDevices));
         var oldKeyboards = PreviousByIdentity(_knownKeyboardDevices.Values.Concat(_keyboardDevices));
+        _remoteMouseHandles.Clear();
+        _remoteKeyboardHandles.Clear();
         var nextMice = new List<RawDevice>();
         var nextKeyboards = new List<RawDevice>();
         foreach (var entry in list)

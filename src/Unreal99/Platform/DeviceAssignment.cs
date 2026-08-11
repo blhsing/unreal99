@@ -8,16 +8,25 @@ namespace Unreal99.Platform;
 /// </summary>
 public static class DeviceAssignment
 {
-    public static bool ReconcileMice(PlayerDevice[] players, IReadOnlyList<RawDevice> mice)
+    public static bool ReconcileMice(PlayerDevice[] players, IReadOnlyList<RawDevice> mice,
+        bool reservePrimaryShared = false)
     {
         nint[] before = players.Select(p => p.MouseHandle).ToArray();
         string[] beforeNames = players.Select(p => p.MouseName).ToArray();
         var available = mice.Select(m => m.Handle).Where(h => h != 0).ToHashSet();
         var claimed = new HashSet<nint>();
 
+        if (reservePrimaryShared && players.Length > 0)
+        {
+            players[0].MouseHandle = 0;
+            players[0].MouseName = "";
+            players[0].MouseAssignedManually = false;
+            players[0].MouseLook = true;
+        }
+
         // A removed handle—or a duplicate left behind after Windows reused a handle—must stop
         // driving a player immediately. Keep the name so the same device can reclaim its slot.
-        foreach (PlayerDevice player in players)
+        foreach (PlayerDevice player in players.Skip(reservePrimaryShared ? 1 : 0))
         {
             if (player.MouseHandle == 0) continue;
             if (!available.Contains(player.MouseHandle) || !claimed.Add(player.MouseHandle))
@@ -27,11 +36,11 @@ public static class DeviceAssignment
         // First restore both manual and automatic assignments by identity. This makes unplugging
         // and reconnecting the same mouse preserve the player slot even when Windows changes its
         // raw handle.
-        foreach (PlayerDevice player in players)
+        foreach (PlayerDevice player in players.Skip(reservePrimaryShared ? 1 : 0))
         {
             if (player.MouseHandle != 0 || string.IsNullOrWhiteSpace(player.MouseName)) continue;
             RawDevice match = mice.FirstOrDefault(m => !claimed.Contains(m.Handle)
-                && string.Equals(m.Name, player.MouseName, StringComparison.Ordinal));
+                && m.SeenInput && string.Equals(m.Name, player.MouseName, StringComparison.Ordinal));
             if (match == null) continue;
             player.MouseHandle = match.Handle;
             claimed.Add(match.Handle);
@@ -41,7 +50,7 @@ public static class DeviceAssignment
         // empty slot. A manually selected mouse gets first refusal by identity above, but must not
         // leave a player permanently on the shared cursor path when that old device is gone. That
         // path is especially unsafe in captured mode because cursor coordinates are not raw motion.
-        foreach (PlayerDevice player in players)
+        foreach (PlayerDevice player in players.Skip(reservePrimaryShared ? 1 : 0))
         {
             if (player.MouseHandle != 0) continue;
             RawDevice match = mice.FirstOrDefault(m => m.SeenInput && !claimed.Contains(m.Handle));
@@ -70,7 +79,7 @@ public static class DeviceAssignment
 
         RawDevice[] afterReconnect =
         [
-            new() { Handle = 33, Name = "滑鼠 B", IsMouse = true },
+            new() { Handle = 33, Name = "滑鼠 B", IsMouse = true, SeenInput = true },
             new() { Handle = 44, Name = "滑鼠 C", IsMouse = true, SeenInput = true },
         ];
         bool changed = ReconcileMice(players, afterReconnect);
@@ -95,6 +104,30 @@ public static class DeviceAssignment
         changed = ReconcileMice(players, []);
         pass &= changed && players[0].MouseHandle == 0 && players[0].MouseName == "滑鼠 C"
             && players[1].MouseHandle == 0 && players[1].MouseName == "滑鼠 D";
+
+        players[0].MouseHandle = 77;
+        players[0].MouseName = "遠端不可用滑鼠";
+        players[0].MouseAssignedManually = true;
+        changed = ReconcileMice(players,
+        [
+            new() { Handle = 77, Name = "遠端不可用滑鼠", IsMouse = true, SeenInput = true },
+        ], reservePrimaryShared: true);
+        pass &= changed && players[0].MouseHandle == 0 && players[0].MouseName.Length == 0
+            && !players[0].MouseAssignedManually;
+
+        PlayerDevice dormant = PlayerDevice.Keyboard(0);
+        dormant.MouseName = "仍列舉但未活動的滑鼠";
+        dormant.MouseAssignedManually = true;
+        changed = ReconcileMice([dormant],
+        [
+            new() { Handle = 88, Name = dormant.MouseName, IsMouse = true, SeenInput = false },
+        ]);
+        pass &= !changed && dormant.MouseHandle == 0;
+        changed = ReconcileMice([dormant],
+        [
+            new() { Handle = 88, Name = dormant.MouseName, IsMouse = true, SeenInput = true },
+        ]);
+        pass &= changed && dormant.MouseHandle == 88;
 
         Console.WriteLine($"滑鼠熱插拔與自動重新指派: {(pass ? "通過" : "失敗")}");
         return pass ? 0 : 1;

@@ -25,6 +25,15 @@ if (args.Contains("--bindingtest"))
         | SettingsStore.RunVehicleUseMigrationSelfTest() | RawInput.RunKeyNormalizationSelfTest()
         | SettingsStore.RunHoverboardMigrationSelfTest() | Weapons.RunHudGroupSelfTest();
 
+// Only normal game sessions participate in the mutex; command-line diagnostics and installer
+// helpers above remain usable while the game is open.
+using var singleInstance = new Mutex(initiallyOwned: true, "Local\\Unreal99.Game", out bool firstInstance);
+if (!firstInstance)
+{
+    Console.WriteLine("遊戲已在執行；不會開啟第二個執行個體。");
+    return 0;
+}
+
 using var app = new App();
 try
 {

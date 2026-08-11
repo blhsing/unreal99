@@ -96,6 +96,7 @@ public sealed class InputSystem : IDisposable
     private Vector2 _mouseDelta;
     private float _scroll;
     private bool _firstMouseSample = true;
+    private nint _windowHandle;
 
     private readonly bool[,] _padDown = new bool[4, 32];
     private readonly bool[,] _padPressed = new bool[4, 32];
@@ -168,6 +169,7 @@ public sealed class InputSystem : IDisposable
     /// </summary>
     public bool TryEnableRawInput(nint windowHandle)
     {
+        _windowHandle = windowHandle;
         Raw = new RawInput();
         if (Raw.TryInitialise(windowHandle)) return true;
         Raw.Dispose();
@@ -179,15 +181,17 @@ public sealed class InputSystem : IDisposable
     public void BeginFrame()
     {
         // An RDP session can attach or detach while the game remains open. Re-apply the logical
-        // capture mode only when that transport changes, so local Raw capture and remote hidden
+        // capture mode only when that transport changes, so local per-device and remote shared
         // pointer routing switch without requiring a restart.
         if (_pointerMode == PointerMode.Captured) SetPointerMode(PointerMode.Captured);
-        if (_mouse != null)
+        if (_pointerMode != PointerMode.Captured && TryReadWindowsMenuPointer(out Vector2 menuPosition))
         {
-            Vector2 pos = _mouse.Position;
-            if (_firstMouseSample) { _mousePosition = pos; _firstMouseSample = false; }
-            _mouseDelta = pos - _mousePosition;
-            _mousePosition = pos;
+            SamplePointerPosition(menuPosition);
+            PollWindowsMenuButtons();
+        }
+        else if (_mouse != null)
+        {
+            SamplePointerPosition(_mouse.Position);
         }
 
         for (int p = 0; p < 4 && p < _context.Gamepads.Count; p++)
@@ -199,6 +203,42 @@ public sealed class InputSystem : IDisposable
                 _padPressed[p, b] = down && !_padDown[p, b];
                 _padDown[p, b] = down;
             }
+        }
+    }
+
+    private void SamplePointerPosition(Vector2 position)
+    {
+        if (_firstMouseSample) { _mousePosition = position; _firstMouseSample = false; }
+        _mouseDelta = position - _mousePosition;
+        _mousePosition = position;
+    }
+
+    /// <summary>
+    /// GLFW can retain a disconnected physical mouse as its first device after Auto Config and an
+    /// RDP reconnect. Reading the desktop cursor in this process keeps menu hover/click navigation
+    /// alive without changing the per-device Raw Input path used during a match.
+    /// </summary>
+    private bool TryReadWindowsMenuPointer(out Vector2 position)
+    {
+        position = default;
+        if (!OperatingSystem.IsWindows() || _windowHandle == 0
+            || GetForegroundWindow() != _windowHandle || !GetCursorPos(out WinPoint point)
+            || !ScreenToClient(_windowHandle, ref point)) return false;
+        position = new Vector2(point.X, point.Y);
+        return true;
+    }
+
+    private void PollWindowsMenuButtons()
+    {
+        PollButton(0, 0x01); // VK_LBUTTON
+        PollButton(1, 0x02); // VK_RBUTTON
+        PollButton(2, 0x04); // VK_MBUTTON
+
+        void PollButton(int index, int virtualKey)
+        {
+            bool down = (GetAsyncKeyState(virtualKey) & 0x8000) != 0;
+            if (down && !_mouseDown[index]) _mousePressed[index] = true;
+            _mouseDown[index] = down;
         }
     }
 
@@ -309,21 +349,24 @@ public sealed class InputSystem : IDisposable
         return pass ? 0 : 1;
     }
 
-    /// <summary>Only the non-recentering RDP/shared route may use pointer coordinates.</summary>
+    /// <summary>RDP has no independent physical Raw mouse, so player one uses GLFW's shared stream.</summary>
     public static int RunLookRoutingSelfTest()
     {
-        bool pass = !ShouldUseSharedPointerForLook(rawAvailable: true, mouseHandle: 0)
-            && !ShouldUseSharedPointerForLook(rawAvailable: true, mouseHandle: 44)
-            && ShouldUseSharedPointerForLook(rawAvailable: false, mouseHandle: 0);
-        Console.WriteLine($"本機專屬／遠端共用 Raw 視角路由: {(pass ? "通過" : "失敗")}");
+        bool pass = ShouldUseSharedPointerForLook(rawAvailable: true, remotePointerPresent: true, mouseHandle: 0)
+            && !ShouldUseSharedPointerForLook(rawAvailable: true, remotePointerPresent: true, mouseHandle: 44)
+            && ShouldUseSharedPointerForLook(rawAvailable: true, remotePointerPresent: false, mouseHandle: 0)
+            && ShouldUseSharedPointerForLook(rawAvailable: false, remotePointerPresent: false, mouseHandle: 0);
+        Console.WriteLine($"本機專屬／RDP 共用視角路由: {(pass ? "通過" : "失敗")}");
         return pass ? 0 : 1;
     }
 
-    internal static bool ShouldUseSharedPointerForLook(bool rawAvailable, nint mouseHandle)
-        => mouseHandle == 0 && !rawAvailable;
+    internal static bool ShouldUseSharedPointerForLook(bool rawAvailable, bool remotePointerPresent,
+        nint mouseHandle)
+        => mouseHandle == 0;
 
     private bool UseSilkSharedInput(PlayerDevice device)
-        => ShouldUseSharedPointerForLook(RawAvailable, device.MouseHandle);
+        => ShouldUseSharedPointerForLook(RawAvailable, Raw?.SharedRemotePointerPresent == true,
+            device.MouseHandle);
 
     public float WheelDelta(PlayerDevice device)
     {
@@ -403,6 +446,18 @@ public sealed class InputSystem : IDisposable
         _firstMouseSample = false;
     }
 
+    /// <summary>Deterministic shared-match hook; bypasses the desktop cursor.</summary>
+    public void SetSharedMatchInputForTest(Vector2 delta, int buttonsDown)
+    {
+        _mouseDelta = delta;
+        for (int i = 0; i < 5; i++)
+        {
+            bool down = (buttonsDown & (1 << i)) != 0;
+            if (down && !_mouseDown[i]) _mousePressed[i] = true;
+            _mouseDown[i] = down;
+        }
+    }
+
     /// <summary>
     /// Captured locks and hides the cursor for gameplay look. Hidden leaves normal pointer
     /// motion but draws nothing, which is what the front-end wants so it can render its own
@@ -415,19 +470,18 @@ public sealed class InputSystem : IDisposable
 
     public void SetPointerMode(PointerMode mode)
     {
-        bool remoteShared = mode == PointerMode.Captured && Raw?.RemoteSession == true;
+        bool remoteShared = mode == PointerMode.Captured && Raw?.SharedRemotePointerPresent == true;
         if (_mouse == null || mode == _pointerMode && remoteShared == _remoteCaptured) return;
         _pointerMode = mode;
         _remoteCaptured = remoteShared;
         MouseCaptured = mode == PointerMode.Captured;
         try
         {
-            // GLFW's disabled/raw cursor mode recentres the pointer. Over RDP those absolute
-            // recenter packets feed back as enormous deltas, so keep the remote pointer hidden
-            // but free. BeginFrame can then subtract stable desktop coordinates without warping.
+            // Captured mode must request relative motion. A merely hidden pointer reaches the edge
+            // of the RDP desktop and then stops producing look deltas.
             _mouse.Cursor.CursorMode = mode switch
             {
-                PointerMode.Captured => remoteShared ? CursorMode.Hidden : CursorMode.Raw,
+                PointerMode.Captured => CursorMode.Raw,
                 PointerMode.Hidden => CursorMode.Hidden,
                 _ => CursorMode.Normal,
             };
@@ -443,6 +497,20 @@ public sealed class InputSystem : IDisposable
 
     public void SetMouseCapture(bool capture)
         => SetPointerMode(capture ? PointerMode.Captured : PointerMode.Hidden);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct WinPoint { public int X; public int Y; }
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool GetCursorPos(out WinPoint point);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    private static extern bool ScreenToClient(nint window, ref WinPoint point);
+
+    [DllImport("user32.dll")]
+    private static extern nint GetForegroundWindow();
 
     // ---------------------------------------------------------------- gamepad
 
