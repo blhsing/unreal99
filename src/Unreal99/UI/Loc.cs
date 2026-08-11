@@ -585,6 +585,7 @@ public static class Loc
     public const string DevicesNeedTwoMice = "使用中的專屬滑鼠少於本機玩家數；請接上其餘滑鼠並逐一移動。";
     public const string DevicesWiggleHint = "提示：移動每一個滑鼠，系統會自動辨識並依序指派給各玩家。";
     public const string DevicesConflict = "警告：多位玩家共用同一個滑鼠。";
+    public const string DevicesHotPlugged = "已偵測輸入裝置變更並自動重新指派滑鼠。";
 
     public const string BindingsTitle = "按鍵配置";
     public const string BindingsPlayer = "玩家";

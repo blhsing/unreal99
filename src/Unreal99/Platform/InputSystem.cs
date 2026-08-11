@@ -231,7 +231,8 @@ public sealed class InputSystem : IDisposable
 
         if (RawAvailable && device.KeyboardHandle != 0)
             return Raw.KeyDown(device.KeyboardHandle, VirtualKeys.FromKey(binding.Key));
-        return KeyDown(binding.Key);
+        int virtualKey = VirtualKeys.FromKey(binding.Key);
+        return KeyDown(binding.Key) || RawAvailable && Raw.KeyDown(0, virtualKey);
     }
 
     public bool ActionPressed(PlayerDevice device, GameAction action)
@@ -249,7 +250,8 @@ public sealed class InputSystem : IDisposable
 
         if (RawAvailable && device.KeyboardHandle != 0)
             return Raw.KeyPressed(device.KeyboardHandle, VirtualKeys.FromKey(binding.Key));
-        return KeyPressed(binding.Key);
+        int virtualKey = VirtualKeys.FromKey(binding.Key);
+        return KeyPressed(binding.Key) || RawAvailable && Raw.KeyPressed(0, virtualKey);
     }
 
     /// <summary>Look delta for one player, in raw device counts.</summary>
@@ -262,6 +264,14 @@ public sealed class InputSystem : IDisposable
             return new Vector2(s.DeltaX, s.DeltaY);
         }
         return _mouseDelta;
+    }
+
+    /// <summary>Clears both shared and per-device transient motion after a hot-plug rebind.</summary>
+    public void ClearLookDelta(PlayerDevice device)
+    {
+        _mouseDelta = Vector2.Zero;
+        _firstMouseSample = true;
+        Raw?.ClearMouseTransient(device.MouseHandle);
     }
 
     public float WheelDelta(PlayerDevice device)

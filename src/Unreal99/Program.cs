@@ -17,6 +17,7 @@ if (args.Contains("--moderulestest")) return ObjectiveModeSelfTest.Run();
 if (args.Contains("--vehiclecoverage")) return VehicleCoverageSelfTest.Run();
 if (args.Contains("--weaponcoverage")) return WeaponCoverageSelfTest.Run();
 if (args.Contains("--weaponmechanicstest")) return WeaponMechanicsSelfTest.Run();
+if (args.Contains("--hotplugtest")) return DeviceAssignment.RunSelfTest();
 if (args.Contains("--bindingtest"))
     return BindingProfile.RunSelfTest() | SettingsStore.RunPlayerThreeMigrationSelfTest()
         | SettingsStore.RunVehicleUseMigrationSelfTest() | RawInput.RunKeyNormalizationSelfTest();

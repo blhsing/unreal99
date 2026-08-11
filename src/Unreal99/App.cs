@@ -27,6 +27,7 @@ public sealed class App : IDisposable
     private GL _gl;
     private IInputContext _inputContext;
     private InputSystem _input;
+    private int _rawDeviceRevision;
     private FontSystem _fonts;
     private UiRenderer _ui;
     private Texture2D _logoTexture;
@@ -373,6 +374,17 @@ public sealed class App : IDisposable
                     _inputTest = true;
                     _windowed = true;
                     break;
+                case "--movementinputtest":
+                    _movementInputTest = true;
+                    _windowed = true;
+                    _menu.Map = MapId.Stalwart;
+                    _menu.ModeKind = GameModeKind.Deathmatch;
+                    _menu.LocalPlayers = 1;
+                    _menu.BotCount = 0;
+                    _menu.DemoMode = false;
+                    _cliOverrides.UnionWith(["map", "mode", "players", "bots", "demo"]);
+                    _autoStartMatch = true;
+                    break;
                 case "--loadslot" when i + 1 < args.Length:
                     // Resume a saved match straight from the command line.
                     if (int.TryParse(args[i + 1], out int ls)) _loadSlotAtBoot = ls;
@@ -518,7 +530,9 @@ public sealed class App : IDisposable
         catch (Exception) { hwnd = 0; }
         _nativeWindowHandle = hwnd;
         bool raw = hwnd != 0 && _input.TryEnableRawInput(hwnd);
-        if (raw && _inputTest) _input.Raw.AcceptBackgroundInput = true;
+        _rawDeviceRevision = raw ? _input.Raw.DeviceRevision : 0;
+        if (raw && (_inputTest || _movementInputTest)) _input.Raw.AcceptBackgroundInput = true;
+        if (raw && _movementInputTest) _input.Raw.AcceptSyntheticKeyboardInput = true;
         Console.WriteLine(raw
             ? $"輸入系統: 多裝置輸入已啟用（滑鼠 {_input.RawMouseCount} · 鍵盤 {_input.RawKeyboardCount}）"
             : "輸入系統: 多裝置輸入不可用，所有玩家共用一組滑鼠");
@@ -706,6 +720,49 @@ public sealed class App : IDisposable
                 if (mouse) player.MouseHandle = match.Handle;
                 else player.KeyboardHandle = match.Handle;
             }
+        }
+    }
+
+    /// <summary>
+    /// Reconciles ephemeral Raw Input handles after mouse arrival/removal and also lets a newly
+    /// active replacement mouse claim the first empty automatic slot during live gameplay.
+    /// Clearing the first delta is essential: Windows may queue motion while the HID is being
+    /// added, and applying that burst as view input produces the reported upward spinning.
+    /// </summary>
+    private void RefreshHotPlugAssignments()
+    {
+        if (!_input.RawAvailable) return;
+        RawInput raw = _input.Raw;
+        bool topologyChanged = raw.DeviceRevision != _rawDeviceRevision;
+        if (topologyChanged) _rawDeviceRevision = raw.DeviceRevision;
+
+        nint[] before = _playerDevices.Select(p => p.MouseHandle).ToArray();
+        bool changed = DeviceAssignment.ReconcileMice(_playerDevices, raw.AssignmentOrder(mice: true));
+        if (!changed && !topologyChanged) return;
+
+        for (int i = 0; i < _playerDevices.Length; i++)
+        {
+            PlayerDevice device = _playerDevices[i];
+            if (device.MouseHandle == before[i]) continue;
+            _input.ClearLookDelta(device);
+
+            if (i == 0 || device.MouseHandle != 0)
+            {
+                device.Kind = DeviceKind.KeyboardMouse;
+                device.GamepadIndex = -1;
+                device.MouseLook = true;
+            }
+            else if (device.Kind == DeviceKind.KeyboardMouse)
+            {
+                device.MouseLook = false;
+                device.Bindings.EnsureKeyboardPlayable();
+            }
+        }
+
+        if (changed)
+        {
+            MarkSettingsDirty();
+            SetStatus(Loc.DevicesHotPlugged, 3f);
         }
     }
 
@@ -1276,6 +1333,7 @@ public sealed class App : IDisposable
         _statusTimer = MathF.Max(0f, _statusTimer - dt);
 
         _input.BeginFrame();
+        RefreshHotPlugAssignments();
         HandleGlobalKeys();
 
         switch (_state)
@@ -1289,6 +1347,7 @@ public sealed class App : IDisposable
         }
 
         if (_inputTest) UpdateInputSelfTest();
+        if (_movementInputTest) UpdateMovementInputSelfTest();
         if (_saveTest) UpdateSaveSelfTest();
         if (_vehicleTest) UpdateVehicleSelfTest();
         if (_forceWeapon >= 0 && _players.Count > 0 && _players[0].Pawn is { } p0)
@@ -1617,7 +1676,8 @@ public sealed class App : IDisposable
                 _state = AppState.Playing;
                 // Automated traversal runs must never capture or warp the user's real desktop
                 // cursor. Their local player is bot-driven and has no need for mouse-look.
-                if (_traversalTest || _vehicleTest || _saveTest || _weaponFootageMode >= 0
+                if (_traversalTest || _vehicleTest || _saveTest || _movementInputTest
+                    || _weaponFootageMode >= 0
                     || _weaponTurntableDirectory != null || _vehicleTurntableDirectory != null
                     || _autoShotFrames >= 0)
                     _input.SetPointerMode(InputSystem.PointerMode.Normal);
@@ -2361,6 +2421,13 @@ public sealed class App : IDisposable
 
     private bool _inputTest;
     private int _inputTestFrame;
+    private bool _movementInputTest;
+    private int _movementInputTestFrame;
+    private Vector3 _movementInputTestStart;
+    private float _movementInputTestYaw;
+    private float _movementInputTestPitch;
+    private int _movementInputTestDownFrames;
+    private int _movementInputTestInjected;
     /// <summary>Wheel accumulated per slot across the whole test, so a scroll at any moment counts.</summary>
     private readonly float[] _inputTestWheel = new float[4];
 
@@ -2405,6 +2472,59 @@ public sealed class App : IDisposable
         Console.WriteLine("  測試期間請分別轉動三個滑鼠的滾輪；三列的累計值應各自變動。");
         Console.WriteLine("──────────────────────");
         _window.Close();
+    }
+
+    /// <summary>
+    /// End-to-end regression for the reported failure: inject W at the Raw Input boundary, let
+    /// the normal binding/controller/pawn path consume it, then require forward translation without
+    /// any mouse-less yaw or pitch change.
+    /// </summary>
+    private void UpdateMovementInputSelfTest()
+    {
+        if (_state != AppState.Playing || _world?.Mode.State != MatchState.InProgress
+            || _players.Count == 0 || _players[0].Pawn == null) return;
+        Pawn pawn = _players[0].Pawn;
+        _movementInputTestFrame++;
+        if (_input.ActionDown(_playerDevices[0], GameAction.MoveForward))
+            _movementInputTestDownFrames++;
+        if (_movementInputTestFrame == 1)
+        {
+            _movementInputTestStart = pawn.Position;
+            _movementInputTestYaw = pawn.Yaw;
+            _movementInputTestPitch = pawn.Pitch;
+            // This gate measures whether a movement key itself can mutate view state. Hot-plug
+            // look-delta clearing has its own topology test, so exclude unrelated real mouse
+            // motion from the host while this deterministic window test runs.
+            _playerDevices[0].MouseLook = false;
+            _input.ClearLookDelta(_playerDevices[0]);
+            _input.Raw.SetSyntheticKeyForTest(0x57, down: true); // W
+            _movementInputTestInjected++;
+        }
+        else if (_movementInputTestFrame < 100 && _movementInputTestFrame % 6 == 0)
+        {
+            // Real keyboards repeat key-down while held. Repeating also makes this test robust to
+            // a simultaneous host device-change notification clearing transient key state.
+            _input.Raw.SetSyntheticKeyForTest(0x57, down: true);
+            _movementInputTestInjected++;
+        }
+        else if (_movementInputTestFrame == 100)
+        {
+            _input.Raw.SetSyntheticKeyForTest(0x57, down: false);
+            _movementInputTestInjected++;
+        }
+        else if (_movementInputTestFrame == 130)
+        {
+            float travel = (pawn.Position - _movementInputTestStart).FlatXZ().Length();
+            float yawChange = MathF.Abs(MathX.WrapAngle(pawn.Yaw - _movementInputTestYaw));
+            float pitchChange = MathF.Abs(pawn.Pitch - _movementInputTestPitch);
+            bool passed = travel >= 1.5f && yawChange <= 0.02f && pitchChange <= 0.02f;
+            Console.WriteLine($"MOVEMENT_INPUT {(passed ? "PASS" : "FAIL")} " +
+                              $"travel={travel:0.00} yaw={yawChange:0.000} pitch={pitchChange:0.000} " +
+                              $"downFrames={_movementInputTestDownFrames} injected={_movementInputTestInjected} " +
+                              $"rawMessages={_input.Raw?.MessagesReceived ?? 0}");
+            if (!passed) ExitCode = 1;
+            _window.Close();
+        }
     }
 
     // ---------------------------------------------------------------- vehicle self-test

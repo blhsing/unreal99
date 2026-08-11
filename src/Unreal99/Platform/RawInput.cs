@@ -7,6 +7,8 @@ public sealed class RawDevice
 {
     public nint Handle;
     public string Name = "";
+    /// <summary>Windows device path used to keep a friendly ordinal stable across re-enumeration.</summary>
+    public string Identity = "";
     /// <summary>Stable 1-based index in enumeration order; used for display and defaults.</summary>
     public int Ordinal;
     public bool IsMouse;
@@ -44,6 +46,7 @@ public sealed class RawInput : IDisposable
 
     private const int GwlpWndProc = -4;
     private const uint WmInput = 0x00FF;
+    private const uint WmInputDeviceChange = 0x00FE;
 
     private const uint RidInput = 0x10000003;
     private const uint RidiDeviceName = 0x20000007;
@@ -66,6 +69,7 @@ public sealed class RawInput : IDisposable
     private const ushort RiKeyBreak = 0x01;   // key-up when set
     private const ushort RiKeyE0 = 0x02;      // extended-key prefix
     private const uint RidevInputSink = 0x00000100;
+    private const uint RidevDevNotify = 0x00002000;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct RawInputDevice
@@ -147,12 +151,18 @@ public sealed class RawInput : IDisposable
     private nint _originalWndProc;
     private WndProcDelegate _wndProc;   // held to keep the thunk alive for the window's lifetime
     private float _reregisterTimer;
+    private bool _deviceListDirty;
+    private readonly HashSet<nint> _changedDeviceHandles = new();
 
     private readonly Dictionary<nint, RawMouseState> _mice = new();
     private readonly Dictionary<nint, bool[]> _keyboards = new();
     private readonly Dictionary<nint, bool[]> _keyboardsPressed = new();
     private readonly List<RawDevice> _mouseDevices = new();
     private readonly List<RawDevice> _keyboardDevices = new();
+    private readonly Dictionary<string, RawDevice> _knownMouseDevices =
+        new(StringComparer.OrdinalIgnoreCase);
+    private readonly Dictionary<string, RawDevice> _knownKeyboardDevices =
+        new(StringComparer.OrdinalIgnoreCase);
     private byte[] _buffer = new byte[256];
 
     public bool Available { get; private set; }
@@ -163,12 +173,16 @@ public sealed class RawInput : IDisposable
     public long MessagesReceived { get; private set; }
     public bool SubclassInstalled => _originalWndProc != 0;
     public bool RegistrationSucceeded { get; private set; }
+    /// <summary>Changes after Windows reports a device arrival or removal and the list refreshes.</summary>
+    public int DeviceRevision { get; private set; }
 
     /// <summary>
     /// Normally raw input is ignored unless the game window is foreground, so the game does not
     /// react while alt-tabbed. The self-test sets this to observe injected input regardless.
     /// </summary>
     public bool AcceptBackgroundInput;
+    /// <summary>Self-test only: retain device-less SendInput keyboard events under a sentinel.</summary>
+    public bool AcceptSyntheticKeyboardInput;
 
     /// <summary>True once more than one mouse has actually produced input this session.</summary>
     public bool MultipleMiceActive { get; private set; }
@@ -186,7 +200,8 @@ public sealed class RawInput : IDisposable
         try
         {
             _window = windowHandle;
-            EnumerateDevices();
+            EnumerateDevices(clearTransientState: false);
+            DeviceRevision = 1;
 
             _wndProc = WindowProc;
             nint thunk = Marshal.GetFunctionPointerForDelegate(_wndProc);
@@ -221,14 +236,14 @@ public sealed class RawInput : IDisposable
         {
             UsagePage = UsagePageGeneric,
             Usage = UsageMouse,
-            Flags = RidevInputSink,
+            Flags = RidevInputSink | RidevDevNotify,
             Target = _window,
         };
         devices[1] = new RawInputDevice
         {
             UsagePage = UsagePageGeneric,
             Usage = UsageKeyboard,
-            Flags = RidevInputSink,
+            Flags = RidevInputSink | RidevDevNotify,
             Target = _window,
         };
         RegistrationSucceeded = RegisterRawInputDevices(devices, (uint)devices.Length,
@@ -236,7 +251,7 @@ public sealed class RawInput : IDisposable
         return RegistrationSucceeded;
     }
 
-    private void EnumerateDevices()
+    private void EnumerateDevices(bool clearTransientState)
     {
         uint count = 0;
         uint listSize = (uint)Marshal.SizeOf<RawInputDeviceList>();
@@ -245,8 +260,10 @@ public sealed class RawInput : IDisposable
         var list = new RawInputDeviceList[count];
         if (GetRawInputDeviceList(list, ref count, listSize) == unchecked((uint)-1)) return;
 
-        _mouseDevices.Clear();
-        _keyboardDevices.Clear();
+        var oldMice = PreviousByIdentity(_knownMouseDevices.Values.Concat(_mouseDevices));
+        var oldKeyboards = PreviousByIdentity(_knownKeyboardDevices.Values.Concat(_keyboardDevices));
+        var nextMice = new List<RawDevice>();
+        var nextKeyboards = new List<RawDevice>();
         foreach (var entry in list)
         {
             if (entry.Type != RimTypeMouse && entry.Type != RimTypeKeyboard) continue;
@@ -256,14 +273,54 @@ public sealed class RawInput : IDisposable
                 || name.Contains("RDP_KBD", StringComparison.OrdinalIgnoreCase)) continue;
 
             bool isMouse = entry.Type == RimTypeMouse;
-            var target = isMouse ? _mouseDevices : _keyboardDevices;
-            target.Add(new RawDevice
+            var target = isMouse ? nextMice : nextKeyboards;
+            var old = (isMouse ? oldMice : oldKeyboards).GetValueOrDefault(name);
+            var known = isMouse ? _knownMouseDevices : _knownKeyboardDevices;
+            int ordinal = old?.Ordinal ?? (known.Count == 0 ? 1 : known.Values.Max(d => d.Ordinal) + 1);
+            var discovered = new RawDevice
             {
                 Handle = entry.Device,
-                Name = FriendlyName(name, isMouse, target.Count + 1),
-                Ordinal = target.Count + 1,
+                Identity = name,
+                Name = old?.Name ?? FriendlyName(name, isMouse, ordinal),
+                Ordinal = ordinal,
                 IsMouse = isMouse,
-            });
+                ActivityScore = old?.ActivityScore ?? 0f,
+                SeenInput = old?.SeenInput ?? false,
+            };
+            target.Add(discovered);
+            if (!string.IsNullOrWhiteSpace(name)) known[name] = discovered;
+        }
+        _mouseDevices.Clear();
+        _mouseDevices.AddRange(nextMice);
+        _keyboardDevices.Clear();
+        _keyboardDevices.AddRange(nextKeyboards);
+
+        // Raw handles can be recycled for a different HID. Remove vanished/changed devices while
+        // leaving unrelated held keys and mouse buttons alone; a different virtual HID arriving
+        // must not interrupt a player who is already holding W or firing.
+        if (clearTransientState)
+        {
+            var validMice = _mouseDevices.Select(d => d.Handle).ToHashSet();
+            var validKeyboards = _keyboardDevices.Select(d => d.Handle).ToHashSet();
+            foreach (nint handle in _mice.Keys.ToArray())
+                if (!validMice.Contains(handle) || _changedDeviceHandles.Contains(handle))
+                    _mice.Remove(handle);
+            foreach (nint handle in _keyboards.Keys.ToArray())
+                if (handle != -1 && (!validKeyboards.Contains(handle)
+                    || _changedDeviceHandles.Contains(handle)))
+                {
+                    _keyboards.Remove(handle);
+                    _keyboardsPressed.Remove(handle);
+                }
+            _changedDeviceHandles.Clear();
+        }
+
+        static Dictionary<string, RawDevice> PreviousByIdentity(IEnumerable<RawDevice> devices)
+        {
+            var result = new Dictionary<string, RawDevice>(StringComparer.OrdinalIgnoreCase);
+            foreach (RawDevice device in devices)
+                if (!string.IsNullOrWhiteSpace(device.Identity)) result[device.Identity] = device;
+            return result;
         }
     }
 
@@ -314,6 +371,11 @@ public sealed class RawInput : IDisposable
 
     private nint WindowProc(nint window, uint msg, nint wParam, nint lParam)
     {
+        if (msg == WmInputDeviceChange)
+        {
+            _deviceListDirty = true;
+            if (lParam != 0) _changedDeviceHandles.Add(lParam);
+        }
         if (msg == WmInput)
         {
             try
@@ -389,7 +451,12 @@ public sealed class RawInput : IDisposable
     private void HandleKeyboard(nint device, in RawKeyboard key)
     {
         int virtualKey = NormalizeVirtualKey(key.VKey, key.MakeCode, key.Flags);
-        if (device == 0 || virtualKey <= 0 || virtualKey >= 256) return;
+        if (device == 0)
+        {
+            if (!AcceptSyntheticKeyboardInput) return;
+            device = -1;
+        }
+        if (virtualKey <= 0 || virtualKey >= 256) return;
         if (!_keyboards.TryGetValue(device, out bool[] down))
         {
             down = new bool[256];
@@ -431,6 +498,21 @@ public sealed class RawInput : IDisposable
             && NormalizeVirtualKey(0x12, 0x38, RiKeyE0) == 0xA5;
         Console.WriteLine($"Raw Input 左右修飾鍵辨識: {(passed ? "通過" : "失敗")}");
         return passed ? 0 : 1;
+    }
+
+    /// <summary>Deterministic test hook at the Raw Input boundary; never enabled in normal play.</summary>
+    public void SetSyntheticKeyForTest(int virtualKey, bool down)
+    {
+        if (!AcceptSyntheticKeyboardInput || virtualKey <= 0 || virtualKey >= 256) return;
+        const nint syntheticDevice = -1;
+        if (!_keyboards.TryGetValue(syntheticDevice, out bool[] keys))
+        {
+            keys = new bool[256];
+            _keyboards[syntheticDevice] = keys;
+            _keyboardsPressed[syntheticDevice] = new bool[256];
+        }
+        if (down && !keys[virtualKey]) _keyboardsPressed[syntheticDevice][virtualKey] = true;
+        keys[virtualKey] = down;
     }
 
     private static void TrackActivity(List<RawDevice> devices, nint handle, float amount)
@@ -491,6 +573,13 @@ public sealed class RawInput : IDisposable
         foreach (var d in _mouseDevices) d.ActivityScore = MathF.Max(0f, d.ActivityScore - dt * 60f);
         foreach (var d in _keyboardDevices) d.ActivityScore = MathF.Max(0f, d.ActivityScore - dt * 60f);
 
+        if (_deviceListDirty)
+        {
+            _deviceListDirty = false;
+            EnumerateDevices(clearTransientState: true);
+            DeviceRevision++;
+        }
+
         _reregisterTimer -= dt;
         if (_reregisterTimer <= 0f)
         {
@@ -501,6 +590,18 @@ public sealed class RawInput : IDisposable
 
     public RawMouseState Mouse(nint device)
         => device != 0 && _mice.TryGetValue(device, out RawMouseState s) ? s : default;
+
+    public bool HasMouse(nint handle) => handle != 0 && _mouseDevices.Any(d => d.Handle == handle);
+    public bool HasKeyboard(nint handle) => handle != 0 && _keyboardDevices.Any(d => d.Handle == handle);
+
+    /// <summary>Discards arrival/rebind motion so it cannot rotate a player's camera.</summary>
+    public void ClearMouseTransient(nint handle)
+    {
+        if (handle == 0 || !_mice.TryGetValue(handle, out RawMouseState state)) return;
+        state.DeltaX = state.DeltaY = state.Wheel = 0f;
+        state.ButtonsPressed = 0;
+        _mice[handle] = state;
+    }
 
     public bool KeyDown(nint device, int virtualKey)
     {
