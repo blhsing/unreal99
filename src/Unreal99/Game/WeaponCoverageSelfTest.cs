@@ -94,7 +94,7 @@ public static class WeaponCoverageSelfTest
     {
         WeaponKind.Translocator => "隨身配備（UT2004／UT3 出生即持有）",
         WeaponKind.SuperShockRifle => "瞬殺模式專用",
-        WeaponKind.BallLauncher => "轟炸模式專用；拿到球才會自動裝備",
+        WeaponKind.BallLauncher => "投彈模式專用；拿到球才會自動裝備",
         WeaponKind.ShieldGun or WeaponKind.AssaultRifle => "UT2004 地圖的出生武器",
         WeaponKind.ImpactHammer or WeaponKind.Enforcer => "1999／UT3 地圖的出生武器",
         _ => "",
