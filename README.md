@@ -604,13 +604,46 @@ UT2004 與 UT3 引進的**十七種載具全部實作**，**且只在攻堅、�
 | **閃電槍** | 放大瞄準後的即死狙擊，命中留下電弧 | 切換放大倍率 | ONS-交叉火網、ONS-德里亞冰河、AS-冰河研究站、BR 兩張 |
 | **佈雷器** | 灑出**蜘蛛地雷**，會自行爬向靠近的敵人並引爆 | 用光束把已佈的雷**改指向**別處 | ONS-托蘭、ONS-原始林、ONS-交叉火網 |
 | **榴彈發射器** | 拋射黏著榴彈，黏在落點上 | **遙控引爆**自己佈下的所有榴彈 | ONS-托蘭、ONS-交叉火網、AS-冰河研究站 |
-| **AVRiL** | **鎖定**載具後發射追蹤飛彈；飛行中可持續導引 | 標定目標供隊友共享 | ONS／WAR 全系列 |
+| **反載具飛彈** | **鎖定**載具後發射追蹤飛彈；飛行中可持續導引 | 標定目標供隊友共享 | ONS／WAR 全系列 |
 | **離子指示器** | 標定地面，數秒後**軌道離子砲**轟擊該點 | 取消標定 | ONS-交叉火網、ONS-德里亞冰河 |
 | **目標指示器** | 標定地面，呼叫**空襲**轟炸該線 | 取消標定 | ONS-交叉火網、ONS-德里亞冰河 |
 | **傳送器** | 擲出傳送圓盤 | **瞬移到圓盤位置**；圓盤在敵人身上時可造成瞬殺 | 出生武器 |
 | **超級震盪步槍** | 一擊必殺的即時命中 | 同主要射擊 | 瞬殺模式專用 |
 | **毒刺機槍** | 高速射出水晶碎片，**把屍體釘在牆上** | 較慢但穿透力更強的碎片 | WAR 全六張 |
 | **投球器** | 把球擲向準心方向 | 傳給前方視線無阻的最近隊友 | 投彈模式專用；拿到球才會自動裝備 |
+
+實戰動畫與旋轉展示與上表同一套流程擷取：
+
+<table>
+<tr>
+<td width="50%"><b>護盾槍</b><br>取代衝擊錘的 UT2004 出生近戰。次要射擊舉起能量護盾，正面來的傷害降為四分之一。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/shield-gun-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/shield-gun-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/shield-gun-turntable.webp" width="100%"></td>
+<td width="50%"><b>突擊步槍</b><br>制式連射步槍，次要射擊是槍下掛載的 M355 榴彈發射器。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/assault-rifle-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/assault-rifle-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/assault-rifle-turntable.webp" width="100%"></td>
+</tr>
+<tr>
+<td><b>連結槍</b><br>次要的連結光束打隊友可疊加火力，打節點與突擊目標可加速施工——攻堅與戰爭模式的核心工具。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/link-gun-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/link-gun-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/link-gun-turntable.webp" width="100%"></td>
+<td><b>閃電槍</b><br>UT2004 版的狙擊武器，命中後留下一道電弧。次要射擊切換放大倍率。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/lightning-gun-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/lightning-gun-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/lightning-gun-turntable.webp" width="100%"></td>
+</tr>
+<tr>
+<td><b>佈雷器</b><br>灑出會自行爬向敵人的蜘蛛地雷；次要射擊用光束把已佈的雷改指向別處。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/mine-layer-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/mine-layer-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/mine-layer-turntable.webp" width="100%"></td>
+<td><b>榴彈發射器</b><br>拋射黏著榴彈；次要射擊遙控引爆自己佈下的全部榴彈。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/grenade-launcher-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/grenade-launcher-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/grenade-launcher-turntable.webp" width="100%"></td>
+</tr>
+<tr>
+<td><b>反載具飛彈</b><br>鎖定載具後發射追蹤飛彈，飛行途中仍可持續導引。專為打下利維坦與飛行載具而生。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/avril-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/avril-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/avril-turntable.webp" width="100%"></td>
+<td><b>離子指示器</b><br>標定地面後，數秒內軌道離子砲轟擊該點。全遊戲只在交叉火網與德里亞冰河出現。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/ion-painter-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/ion-painter-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/ion-painter-turntable.webp" width="100%"></td>
+</tr>
+<tr>
+<td><b>目標指示器</b><br>標定地面後呼叫空襲沿線轟炸，適合清掉一整排載具。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/target-painter-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/target-painter-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/target-painter-turntable.webp" width="100%"></td>
+<td><b>傳送器</b><br>擲出圓盤，次要射擊瞬移過去。圓盤停在敵人身上時瞬移可直接造成瞬殺。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/translocator-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/translocator-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/translocator-turntable.webp" width="100%"></td>
+</tr>
+<tr>
+<td><b>超級震盪步槍</b><br>瞬殺模式專用：一擊必殺的即時命中，兩種射擊相同。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/super-shock-rifle-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/super-shock-rifle-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/super-shock-rifle-turntable.webp" width="100%"></td>
+<td><b>毒刺機槍</b><br>UT3 的死靈武器，高速射出的水晶碎片會把屍體釘在後方的牆上。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/stinger-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/stinger-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/stinger-turntable.webp" width="100%"></td>
+</tr>
+<tr>
+<td><b>投球器</b><br>投彈模式專用，也是唯一不會造成任何傷害的武器：拿到球時自動裝備，放下球時自動收起。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/ball-launcher-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/ball-launcher-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/ball-launcher-turntable.webp" width="100%"></td>
+<td><br><b>取得方式</b><br>這十三把都不在數字鍵的預設快捷上，靠 Q／E 或滑鼠滾輪循環切換；護盾槍、突擊步槍與傳送器是出生武器，超級震盪步槍只在瞬殺模式發放，投球器只在持球時出現。</td>
+</tr>
+</table>
 
 圖庫可由 [`docs/capture-weapons.ps1`](docs/capture-weapons.ps1) 重新擷取；腳本會為每把武器產生
 主要／次要射擊的 30 格循環 WebP 與 36 格 360° 模型展示，並在輸出後驗證動畫格數與尺寸。流程使用實際
