@@ -12,7 +12,8 @@ Console.WriteLine($"{Loc.GameTitle} — {Loc.GameSubtitle} · {Loc.GameVersionLa
 // Installer mode: write the icon and the Start Menu entry, then exit without opening a window.
 if (args.Contains("--install-shortcut")) return Installer.InstallStartMenuShortcut(args) ? 0 : 1;
 if (args.Contains("--uninstall-shortcut")) return Installer.UninstallStartMenuShortcut() ? 0 : 1;
-if (args.Contains("--aimtest")) return BotAimPrediction.RunSelfTest();
+if (args.Contains("--aimtest"))
+    return BotAimPrediction.RunSelfTest() | BotController.RunDifficultySelfTest();
 if (args.Contains("--moderulestest")) return ObjectiveModeSelfTest.Run();
 if (args.Contains("--vehiclecoverage")) return VehicleCoverageSelfTest.Run();
 if (args.Contains("--weaponcoverage")) return WeaponCoverageSelfTest.Run();

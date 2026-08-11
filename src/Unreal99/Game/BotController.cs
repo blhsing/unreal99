@@ -309,13 +309,25 @@ public sealed class BotController : Controller
         Skill = MathX.Clamp(skill, 0f, 1f);
     }
 
+    /// <summary>
+    /// Menu tiers are intentionally compressed below Godlike. The final tier remains exactly 1.0;
+    /// tiers 0-4 leave substantially more room for learning and traversal.
+    /// </summary>
+    public static ReadOnlySpan<float> TierSkillCurve => [0f, 0.035f, 0.09f, 0.18f, 0.36f, 1f];
+
+    public static float SkillForTier(int tier)
+    {
+        ReadOnlySpan<float> curve = TierSkillCurve;
+        return curve[MathX.Clamp(tier, 0, curve.Length - 1)];
+    }
+
     // Skill-derived tuning.
     private float ReactionTime
     {
         get
         {
             float original = MathX.Lerp(0.62f, 0.09f, Skill);
-            return Skill >= 0.85f ? original : original + 0.53f * (1f - Skill / 0.85f);
+            return Skill >= 0.85f ? original : original + 1.0f * (1f - Skill / 0.85f);
         }
     }
     private float AimError
@@ -323,18 +335,46 @@ public sealed class BotController : Controller
         get
         {
             float original = MathX.Lerp(0.115f, 0.007f, Skill * Skill);
-            return Skill >= 0.85f ? original : original + 0.045f * (1f - Skill / 0.85f);
+            return Skill >= 0.85f ? original : original + 0.11f * (1f - Skill / 0.85f);
         }
     }
-    private float AimSpeed => MathX.Lerp(5.5f, 22f, Skill);
-    private float SightRange => MathX.Lerp(38f, 110f, Skill);
-    private float LeadAccuracy => MathX.Lerp(0.15f, 1.0f, Skill);
-    private float DodgeChance => MathX.Lerp(0.10f, 0.85f, Skill);
-    private float StrafeAmount => MathX.Lerp(0.35f, 1.0f, Skill);
+    private float AimSpeed => Skill >= 0.85f
+        ? MathX.Lerp(5.5f, 22f, Skill)
+        : MathX.Lerp(2.5f, 8.5f, Skill / 0.85f);
+    private float SightRange => Skill >= 0.85f
+        ? MathX.Lerp(38f, 110f, Skill)
+        : MathX.Lerp(22f, 60f, Skill / 0.85f);
+    private float LeadAccuracy => Skill >= 0.85f
+        ? MathX.Lerp(0.15f, 1.0f, Skill)
+        : MathX.Lerp(0.02f, 0.45f, Skill / 0.85f);
+    private float DodgeChance => Skill >= 0.85f
+        ? MathX.Lerp(0.10f, 0.85f, Skill)
+        : MathX.Lerp(0.01f, 0.32f, Skill / 0.85f);
+    private float StrafeAmount => Skill >= 0.85f
+        ? MathX.Lerp(0.35f, 1.0f, Skill)
+        : MathX.Lerp(0.10f, 0.55f, Skill / 0.85f);
     /// <summary>Lower tiers cannot match the player's full running speed.</summary>
-    public float MovementScale => Skill >= 0.85f ? 1f : MathX.Lerp(0.52f, 0.92f, Skill / 0.85f);
+    public float MovementScale => Skill >= 0.85f ? 1f : MathX.Lerp(0.30f, 0.70f, Skill / 0.85f);
     /// <summary>Outgoing damage handicap. Godlike bots retain the original 100% damage.</summary>
-    public float DamageScale => Skill >= 0.85f ? 1f : MathX.Lerp(0.52f, 0.90f, Skill / 0.85f);
+    public float DamageScale => Skill >= 0.85f ? 1f : MathX.Lerp(0.22f, 0.65f, Skill / 0.85f);
+
+    public static int RunDifficultySelfTest()
+    {
+        ReadOnlySpan<float> curve = TierSkillCurve;
+        var newbie = new BotController(1, "Newbie", curve[0]);
+        var master = new BotController(2, "Master", curve[4]);
+        var godlike = new BotController(3, "Godlike", curve[5]);
+        // 0-4 are substantially compressed; the exact 1.0 tier and its full movement/damage stay.
+        bool pass = curve.Length == 6 && curve[0] == 0f && curve[4] <= 0.36f && curve[5] == 1f
+            && newbie.MovementScale <= 0.30f && newbie.DamageScale <= 0.22f
+            && master.MovementScale < 0.50f && master.DamageScale < 0.45f
+            && godlike.MovementScale == 1f && godlike.DamageScale == 1f;
+        Console.WriteLine($"電腦難度大幅縮放且神級不變: {(pass ? "通過" : "失敗")} " +
+                          $"新手 移動={newbie.MovementScale:0.00} 傷害={newbie.DamageScale:0.00} · " +
+                          $"大師 移動={master.MovementScale:0.00} 傷害={master.DamageScale:0.00} · " +
+                          $"神級 移動={godlike.MovementScale:0.00} 傷害={godlike.DamageScale:0.00}");
+        return pass ? 0 : 1;
+    }
 
     public override void OnSpawned(GameWorld world)
     {
@@ -412,7 +452,10 @@ public sealed class BotController : Controller
         if (attacker != null && attacker != Pawn && attacker.Alive && _targetId != attacker.Id)
         {
             bool noCurrentTarget = world.FindPawn(_targetId) is not { Alive: true };
-            if (noCurrentTarget || _rng.Chance(0.35f + Skill * 0.4f))
+            float awarenessChance = Skill >= 0.85f
+                ? 0.35f + Skill * 0.4f
+                : 0.10f + Skill * 0.18f;
+            if (noCurrentTarget || _rng.Chance(awarenessChance))
             {
                 _targetId = attacker.Id;
                 _lastKnownTargetPos = attacker.Position;
@@ -694,7 +737,8 @@ public sealed class BotController : Controller
         {
             _fireBurstTimer -= dt;
             if (_fireBurstTimer <= 0f && Skill < 0.85f)
-                _firePauseTimer = _rng.Range(0.35f, 1.35f) * (1f - Skill / 0.95f);
+                _firePauseTimer = 0.30f
+                    + _rng.Range(1.20f, 2.80f) * (1f - Skill / 0.95f);
         }
         else _firePauseTimer -= dt;
         _jumpTimer -= dt;
@@ -1014,7 +1058,7 @@ public sealed class BotController : Controller
         {
             if (_firePauseTimer > 0f) return;
             if (_fireBurstTimer <= 0f)
-                _fireBurstTimer = _rng.Range(0.18f, 0.55f) + Skill * 0.55f;
+                _fireBurstTimer = _rng.Range(0.08f, 0.28f) + Skill * 0.25f;
         }
 
         var def = Pawn.WeaponDef;

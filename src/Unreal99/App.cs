@@ -1059,10 +1059,7 @@ public sealed class App : IDisposable
 
     /// <summary>Demo autopilot skill, on the same curve the opponent bots use.</summary>
     private float DemoSkillValue()
-    {
-        ReadOnlySpan<float> curve = [0f, 0.08f, 0.22f, 0.42f, 0.68f, 1f];
-        return curve[MathX.Clamp(_menu.DemoSkill, 0, curve.Length - 1)];
-    }
+        => BotController.SkillForTier(_menu.DemoSkill);
 
     // ---------------------------------------------------------------- input device assignment
 
@@ -1854,7 +1851,7 @@ public sealed class App : IDisposable
         var rng = new Rng((uint)(_time * 1000f) + 7u);
         // Tiers 0-4 deliberately leave more room to learn. Tier 5 keeps the original 1.0
         // baseline and its existing per-bot variation.
-        ReadOnlySpan<float> skillCurve = [0f, 0.08f, 0.22f, 0.42f, 0.68f, 1f];
+        ReadOnlySpan<float> skillCurve = BotController.TierSkillCurve;
         int skillSetting = MathX.Clamp(_menu.BotSkill, 0, skillCurve.Length - 1);
         for (int i = 0; i < botCount; i++)
         {
