@@ -260,9 +260,11 @@ public sealed class BotController : Controller
     private float _dodgeTimer;
     private float _reactionTimer;
     private float _fireHoldTimer;
+    private bool _fireHoldAlt;
     private float _fireBurstTimer;
     private float _firePauseTimer;
     private float _jumpTimer;
+    private float _translocatorCooldown;
     private Vector3 _lastPosition;
     private Vector3 _aimPoint;
     private Vector3 _aimVelocity;
@@ -378,6 +380,9 @@ public sealed class BotController : Controller
         _reactionTimer = Skill < 0.85f ? ReactionTime * _rng.Range(0.85f, 1.15f) : 0f;
         _fireBurstTimer = 0f;
         _firePauseTimer = 0f;
+        _fireHoldTimer = 0f;
+        _fireHoldAlt = false;
+        _translocatorCooldown = 0f;
         _jumpPadFlight = false;
         _jumpPadFlightTimer = 0f;
         _airbornePeakY = Pawn.Position.Y;
@@ -522,12 +527,17 @@ public sealed class BotController : Controller
         // an attacker under long-range harassment never once shoots the thing it came to break.
         bool enemyPressing = targetVisible && target != null
             && Vector3.Distance(pawn.Position, target.Position) < 18f;
-        if (targetVisible && _reactionTimer <= 0f && target != null
+        bool handledBombingRun = HandleBombingRunCarrierTactics(world, target, targetVisible,
+            ref input, dt);
+        if (!handledBombingRun && targetVisible && _reactionTimer <= 0f && target != null
             && !_specialTraversalLock && !_jumpPadFlight
             && (enemyPressing || !HasObjectiveToShoot(world)))
             DecideFire(world, target, ref input);
-        else if (!_specialTraversalLock && !_jumpPadFlight)
+        else if (!handledBombingRun && !_specialTraversalLock && !_jumpPadFlight)
             ShootObjective(world, ref input, dt);
+
+        if (!handledBombingRun && !targetVisible)
+            TryUseTranslocator(world, ref input);
 
         // --- avoid falling into hazards while roaming ---
         AvoidLedges(world, ref input);
@@ -688,6 +698,7 @@ public sealed class BotController : Controller
         }
         else _firePauseTimer -= dt;
         _jumpTimer -= dt;
+        _translocatorCooldown = MathF.Max(0f, _translocatorCooldown - dt);
         _threatTimer = MathF.Max(0f, _threatTimer - dt);
         _blockedItemTimer = MathF.Max(0f, _blockedItemTimer - dt);
         if (_blockedItemTimer <= 0f) _blockedItem = null;
@@ -857,6 +868,7 @@ public sealed class BotController : Controller
             // Prefer wounded enemies, flag carriers and whoever is already the target.
             score += (1f - MathX.Saturate(candidate.Health / 100f)) * 55f;
             if (candidate.HasFlag) score += 140f;
+            if (candidate.HasBall) score += 180f;
             if (candidate.Id == _targetId) score += 35f;
             if (candidate.HasDamageAmp) score += 40f;
             if (score > bestScore) { bestScore = score; best = candidate; }
@@ -941,6 +953,49 @@ public sealed class BotController : Controller
             // Self-splash awareness: don't pick a rocket at point-blank range.
             if (def.Primary.SplashRadius > 0f && range < def.Primary.SplashRadius * 1.25f)
                 score -= 14f * (1f - Skill * 0.5f);
+
+            // Weapon-specific jobs from the original games. These modifiers keep an AVRiL out
+            // of an infantry duel, save painters for exposed long-range targets and stop a
+            // movement tool from masquerading as a usable gun when the bot is under fire.
+            switch (kind)
+            {
+                case WeaponKind.ShieldGun:
+                    if (visible && Pawn.Health < 55f) score += 10f;
+                    if (range > 5f) score -= 8f;
+                    break;
+                case WeaponKind.AssaultRifle:
+                    if (range is >= 7f and <= 30f) score += 2f;
+                    break;
+                case WeaponKind.LinkGun:
+                    if (range <= def.Alt.Range) score += 5f;
+                    break;
+                case WeaponKind.MineLayer:
+                    score += OwnedProjectileCount(world, Pawn.Id, ProjectileKind.SpiderMine) < 4
+                        ? 3f : -2f;
+                    break;
+                case WeaponKind.GrenadeLauncher:
+                    if (OwnedProjectileNear(world, Pawn.Id, ProjectileKind.StickyGrenade,
+                            target?.Position ?? Vector3.Zero, 6.5f)) score += 8f;
+                    break;
+                case WeaponKind.Avril:
+                    score += target is { InVehicle: true } ? 24f : -20f;
+                    break;
+                case WeaponKind.IonPainter:
+                case WeaponKind.TargetPainter:
+                {
+                    bool exposed = target != null && !world.Level.Collision.Raycast(target.Center,
+                        target.Center + MathX.Up * 80f).Hit;
+                    score += visible && range >= 24f && exposed ? 13f : -32f;
+                    break;
+                }
+                case WeaponKind.Translocator:
+                case WeaponKind.BallLauncher:
+                    score -= 100f;
+                    break;
+                case WeaponKind.Stinger:
+                    if (range is >= 8f and <= 38f) score += 3f;
+                    break;
+            }
             score += _rng.Symmetric(1.5f);
             if (kind == Pawn.Weapon) score += 3f;   // hysteresis stops constant switching
 
@@ -965,11 +1020,44 @@ public sealed class BotController : Controller
         var def = Pawn.WeaponDef;
         float range = Vector3.Distance(Pawn.Position, target.Position);
 
+        if (def.Kind == WeaponKind.Translocator || def.Kind == WeaponKind.BallLauncher) return;
+
+        // Shield while closing or when badly hurt. It is directional and finite, so the bot only
+        // spends charge with the attacker in front rather than leaving it raised indefinitely.
+        if (def.Kind == WeaponKind.ShieldGun && range > def.Primary.Range * 0.8f
+            && Pawn.ShieldEnergy > 1f && Pawn.Health < 62f)
+        {
+            input.AltFire = true;
+            return;
+        }
+
+        bool useAlt = def.Kind switch
+        {
+            WeaponKind.AssaultRifle => range is >= 7f and <= 32f
+                && Pawn.OnGround && _rng.Chance(0.48f + Skill * 0.22f),
+            WeaponKind.LinkGun => range <= def.Alt.Range * 0.92f,
+            WeaponKind.MineLayer => OwnedProjectileCount(world, Pawn.Id,
+                ProjectileKind.SpiderMine) >= 2,
+            WeaponKind.GrenadeLauncher => OwnedProjectileNear(world, Pawn.Id,
+                ProjectileKind.StickyGrenade, target.Position, 6.5f),
+            WeaponKind.Stinger => range is >= 8f and <= 38f && _rng.Chance(0.42f + Skill * 0.3f),
+            _ => false,
+        };
+        FireDef chosen = useAlt ? def.Alt : def.Primary;
+
+        // Remote detonation needs neither sight alignment nor another planted grenade. Pull the
+        // clicker as soon as an armed charge is close enough to hurt the target.
+        if (chosen.Mode == FireMode.Detonate)
+        {
+            input.AltFire = true;
+            return;
+        }
+
         // Do not stand at rifle range swinging the impact hammer into empty space.
-        if (def.Primary.Mode == FireMode.Melee && range > def.Primary.Range * 0.92f) return;
+        if (chosen.Mode == FireMode.Melee && range > chosen.Range * 0.92f) return;
 
         // Don't blow yourself up.
-        if (def.Primary.SplashRadius > 0f && range < def.Primary.SplashRadius * 0.85f
+        if (chosen.SplashRadius > 0f && range < chosen.SplashRadius * 0.85f
             && !_rng.Chance(0.12f)) return;
 
         // Only shoot when roughly on target; better bots demand tighter alignment.
@@ -983,19 +1071,27 @@ public sealed class BotController : Controller
             Pawn.EyePosition + Pawn.ViewDirection * MathF.Min(range + 1f, 200f));
         if (hit.Hit && hit.Distance < range - 1.2f) return;
 
-        bool automatic = def.Primary.Automatic;
+        bool automatic = chosen.Automatic;
         if (automatic)
         {
-            input.Fire = true;
+            if (useAlt) input.AltFire = true;
+            else input.Fire = true;
             return;
         }
 
         // Semi-automatic weapons: hold the trigger just long enough to register.
-        if (_fireHoldTimer > 0f) { input.Fire = true; return; }
+        if (_fireHoldTimer > 0f)
+        {
+            if (_fireHoldAlt) input.AltFire = true;
+            else input.Fire = true;
+            return;
+        }
         if (_rng.Chance(0.55f + Skill * 0.4f))
         {
             _fireHoldTimer = 0.09f;
-            input.Fire = true;
+            _fireHoldAlt = useAlt;
+            if (useAlt) input.AltFire = true;
+            else input.Fire = true;
         }
 
         // Shock combo: fire an alt ball, then snap-shoot it. Only skilled bots try.
@@ -1004,6 +1100,143 @@ public sealed class BotController : Controller
             input.Fire = false;
             input.AltFire = true;
         }
+    }
+
+    /// <summary>
+    /// A carrier cannot fight. Under pressure it passes to a clear team-mate ahead; with an open
+    /// medium-range hoop it takes the three-point shot; otherwise it keeps moving for seven.
+    /// </summary>
+    private bool HandleBombingRunCarrierTactics(GameWorld world, Pawn enemy, bool enemyVisible,
+        ref PawnInput input, float dt)
+    {
+        if (world.Mode.Kind != GameModeKind.BombingRun || !Pawn.HasBall) return false;
+
+        Pawn pass = world.BestBallPassTarget(Pawn);
+        bool threatened = enemyVisible && enemy != null
+            && Vector3.Distance(Pawn.Position, enemy.Position) < 22f;
+        if (pass != null && threatened)
+        {
+            Pawn.BallPassTargetId = pass.Id;
+            AimDirectly(pass.Center, ref input, dt);
+            if (Vector3.Dot(Pawn.ViewDirection,
+                    MathX.SafeNormalize(pass.Center - Pawn.EyePosition, Pawn.ViewDirection)) > 0.94f)
+                input.Fire = true;
+            return true;
+        }
+
+        Vector3 hoop = world.BombingRun.TargetGoal(Pawn.Team);
+        Vector3 toHoop = hoop - Pawn.Center;
+        float distance = toHoop.Length();
+        bool clear = distance > 0.5f && !world.Level.Collision
+            .Raycast(Pawn.Center, hoop).Hit;
+        if (clear && distance is >= 8f and <= 25f)
+        {
+            Pawn.BallPassTargetId = -1;
+            const float speed = 34f;
+            float gravity = Physics.Gravity * world.Level.GravityScale;
+            float horizontal = toHoop.FlatXZ().Length();
+            float flight = MathF.Max(0.18f, horizontal / (speed * 0.82f));
+            Vector3 launch = toHoop / flight + MathX.Up * (0.5f * gravity * flight);
+            AimDirectly(Pawn.EyePosition + MathX.SafeNormalize(launch, Pawn.ViewDirection) * 20f,
+                ref input, dt);
+            Vector3 desired = MathX.SafeNormalize(launch, Pawn.ViewDirection);
+            if (Vector3.Dot(Pawn.ViewDirection, desired) > 0.985f) input.Fire = true;
+        }
+        return true;
+    }
+
+    private void AimDirectly(Vector3 point, ref PawnInput input, float dt)
+    {
+        Vector3 direction = MathX.SafeNormalize(point - Pawn.EyePosition, Pawn.ViewDirection);
+        MathX.YawPitchFromDir(direction, out float yaw, out float pitch);
+        input.Yaw = Pawn.Yaw + MathX.WrapAngle(yaw - Pawn.Yaw) * (1f - MathF.Exp(-14f * dt));
+        input.Pitch = MathX.Damp(Pawn.Pitch, pitch, 14f, dt);
+    }
+
+    private static int OwnedProjectileCount(GameWorld world, int ownerId, ProjectileKind kind)
+    {
+        int count = 0;
+        foreach (Projectile projectile in world.Projectiles)
+            if (projectile.Active && projectile.OwnerId == ownerId && projectile.Kind == kind) count++;
+        return count;
+    }
+
+    private static bool OwnedProjectileNear(GameWorld world, int ownerId, ProjectileKind kind,
+        Vector3 point, float radius)
+    {
+        float radiusSq = radius * radius;
+        foreach (Projectile projectile in world.Projectiles)
+            if (projectile.Active && projectile.OwnerId == ownerId && projectile.Kind == kind
+                && Vector3.DistanceSquared(projectile.Position, point) <= radiusSq) return true;
+        return false;
+    }
+
+    /// <summary>
+    /// Uses the Translocator as a traversal tool, never as a zero-damage combat weapon. The disc
+    /// is recalled only after landing near a real navigation node with room for the pawn capsule,
+    /// which avoids teleporting into a wall or over an unplayable ledge.
+    /// </summary>
+    private bool TryUseTranslocator(GameWorld world, ref PawnInput input)
+    {
+        if (_translocatorCooldown > 0f || Pawn.HasFlag || Pawn.HasBall || !Pawn.OnGround
+            || !Pawn.HasWeapon[(int)WeaponKind.Translocator] || !_hasGoalPosition) return false;
+
+        ref readonly Projectile disc = ref FindOwnedTranslocator(world, Pawn.Id, out bool found);
+        if (found)
+        {
+            if (!disc.Stuck && disc.Velocity.LengthSquared() > 1.5f) return false;
+            if (Vector3.Distance(Pawn.Position, disc.Position) < 5f) return false;
+            int node = world.Level.Nav.FindNearest(disc.Position);
+            if (node < 0 || Vector3.Distance(world.Level.Nav.Nodes[node].Position, disc.Position) > 4f)
+                return false;
+            Vector3 half = new(Physics.PawnRadius, Physics.PawnHeight * 0.5f, Physics.PawnRadius);
+            Vector3 center = disc.Position + MathX.Up * half.Y;
+            if (world.Level.Collision.BoxOverlapsSolid(center - half, center + half)) return false;
+
+            if (Pawn.Weapon != WeaponKind.Translocator)
+                input.WeaponSelect = (int)WeaponKind.Translocator;
+            else
+            {
+                input.AltFire = true;
+                _translocatorCooldown = 4.5f;
+            }
+            return true;
+        }
+
+        float distance = Vector3.Distance(Pawn.Position, _goalPosition);
+        if (distance < 22f || distance > 70f || _specialTraversalLock) return false;
+        if (Pawn.Weapon != WeaponKind.Translocator)
+            input.WeaponSelect = (int)WeaponKind.Translocator;
+        else
+        {
+            // Aim the disc along the active route, rather than at the last enemy the general
+            // aiming pass happened to remember. A modest lift clears ordinary kerbs while the
+            // landing/nav/capsule checks above still decide whether recall is safe.
+            Vector3 routeAim = _goalPosition + MathX.Up * MathX.Clamp(distance * 0.10f, 1.5f, 5f);
+            Vector3 routeDirection = MathX.SafeNormalize(routeAim - Pawn.EyePosition,
+                Pawn.ViewDirection);
+            MathX.YawPitchFromDir(routeDirection, out input.Yaw, out input.Pitch);
+            input.Fire = true;
+            _translocatorCooldown = 0.8f;
+        }
+        return true;
+    }
+
+    private static ref readonly Projectile FindOwnedTranslocator(GameWorld world, int ownerId,
+        out bool found)
+    {
+        for (int i = 0; i < world.Projectiles.Length; i++)
+        {
+            if (world.Projectiles[i].Active
+                && world.Projectiles[i].Kind == ProjectileKind.TranslocatorDisc
+                && world.Projectiles[i].OwnerId == ownerId)
+            {
+                found = true;
+                return ref world.Projectiles[i];
+            }
+        }
+        found = false;
+        return ref world.Projectiles[0];
     }
 
     // ---------------------------------------------------------------- aiming
@@ -1034,6 +1267,11 @@ public sealed class BotController : Controller
             if (visible)
             {
                 var def = Pawn.WeaponDef;
+                // Skilled marksmen exploit the Lightning/Sniper/Assault headshot behavior rather
+                // than always aiming at the same chest point used by ordinary weapons.
+                if (def.Primary.HeadshotMultiplier > 1f && Skill >= 0.62f)
+                    aimAt = target.Position + new Vector3(0,
+                        target.CurrentHeight * MathX.Lerp(0.70f, 0.91f, Skill), 0);
                 float projectileSpeed = def.Primary.Mode == FireMode.Projectile
                     ? def.Primary.ProjectileSpeed : 0f;
                 if (projectileSpeed > 0f)
@@ -2219,8 +2457,8 @@ public sealed class BotController : Controller
                 if (index < 0) return;
                 var node = state.Nodes[index];
                 if (node.OrbShield != Team.None && node.OrbShield != Pawn.Team) return;
-                // Once a neutral pad has been activated, the Pulse beam is this game's Link Gun:
-                // it accelerates construction. Enemy structures continue to use ordinary fire.
+                // Once a neutral pad has been activated, a Link/Pulse beam accelerates
+                // construction. Enemy structures continue to use ordinary fire.
                 support = !node.IsCore && node.Team == Team.None
                     && node.BuildingFor == Pawn.Team;
                 aimAt = node.Position + MathX.Up * 2.4f;
@@ -2236,9 +2474,12 @@ public sealed class BotController : Controller
         float distance = delta.Length();
 
         if (distance > reach || distance < 0.2f) return;
-        if (support && Pawn.Weapon != WeaponKind.PulseGun)
+        if (support && Pawn.Weapon is not (WeaponKind.LinkGun or WeaponKind.PulseGun))
         {
-            if (Pawn.HasWeapon[(int)WeaponKind.PulseGun]
+            if (Pawn.HasWeapon[(int)WeaponKind.LinkGun]
+                && Pawn.AmmoFor(WeaponKind.LinkGun) > 0)
+                input.WeaponSelect = (int)WeaponKind.LinkGun;
+            else if (Pawn.HasWeapon[(int)WeaponKind.PulseGun]
                 && Pawn.AmmoFor(WeaponKind.PulseGun) > 0)
                 input.WeaponSelect = (int)WeaponKind.PulseGun;
             return;
@@ -2905,7 +3146,8 @@ public sealed class BotController : Controller
             if (!pawn.HasWeapon[i]) continue;
             WeaponKind kind = (WeaponKind)i;
             WeaponDef def = Weapons.Get(kind);
-            if (def.Primary.Mode != FireMode.Melee && pawn.AmmoFor(kind) > 0) return true;
+            if (!IsCombatWeapon(def) || def.Primary.Mode == FireMode.Melee) continue;
+            if (def.Ammo == AmmoKind.None || pawn.AmmoFor(kind) > 0) return true;
         }
         return false;
     }
@@ -2916,7 +3158,9 @@ public sealed class BotController : Controller
         {
             WeaponKind kind = (WeaponKind)i;
             if (kind is WeaponKind.ImpactHammer or WeaponKind.Enforcer || !pawn.HasWeapon[i]) continue;
-            if (pawn.AmmoFor(kind) > 0) return true;
+            WeaponDef def = Weapons.Get(kind);
+            if (!IsCombatWeapon(def)) continue;
+            if (def.Ammo == AmmoKind.None || pawn.AmmoFor(kind) > 0) return true;
         }
         return false;
     }
@@ -2939,12 +3183,18 @@ public sealed class BotController : Controller
         {
             if (!pawn.HasWeapon[i]) continue;
             WeaponDef def = Weapons.Get((WeaponKind)i);
-            if (def.Primary.Mode == FireMode.Melee || def.Ammo == AmmoKind.None) continue;
+            if (!IsCombatWeapon(def) || def.Primary.Mode == FireMode.Melee
+                || def.Ammo == AmmoKind.None) continue;
             float fraction = pawn.AmmoFor(def.Kind) / (float)Math.Max(1, def.MaxAmmo);
             bestReserve = MathF.Max(bestReserve, fraction);
         }
         return bestReserve < MathX.Lerp(0.06f, 0.24f, Skill);
     }
+
+    private static bool IsCombatWeapon(WeaponDef def)
+        => def.Kind is not (WeaponKind.Translocator or WeaponKind.BallLauncher)
+           && (def.Primary.Damage > 0f || def.Primary.SplashDamage > 0f
+               || def.Alt.Damage > 0f || def.Alt.SplashDamage > 0f);
 
     /// <summary>Whether a combatant should step off its current route for this nearby pickup.</summary>
     private bool IsUsefulOpportunisticPickup(Pawn pawn, PickupEntity item)

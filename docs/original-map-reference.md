@@ -1,6 +1,6 @@
 # 原作地圖對照表
 
-本檔記錄三十二座競技場所依據的原作資料，來源為 The Liandri Archives 與 Unreal Wiki
+本檔記錄三十六座競技場所依據的原作資料，來源為原作手冊、UnrealScript 文件、The Liandri Archives 與 Unreal Wiki
 （<https://unrealarchive.org/wikis/the-liandri-archives/>）。每次調整佈局或道具配置前先看這裡，
 不要憑印象——先前憑印象重建對峙世界，塔樓結構與上下樓方式兩件事都弄錯了。
 
@@ -236,9 +236,10 @@ ONS-原始林的基地因此少了這一項。
 ## 投彈模式（Bombing Run，UT2003／2004）規則
 
 原作規則：場上只有一顆球，中場生成。把球送進**敵方**球門即得分，**帶球衝進得七分、投射進門
-得三分**。持球者的武器全部被收起，只留下不造成傷害的**投球器**（主要射擊擲球、次要射擊傳給
-隊友），所以跑球的人無法自己開路，球必須靠傳遞推進。持球者陣亡即掉球，任一隊皆可撿；無人碰觸
-的球會自動回到中場。
+得三分**，預設先得 15 分者勝。持球者的武器全部被收起，只留下不造成傷害的**投球器**；次要射擊
+鎖定隊友，主要射擊再傳給鎖定者或自由投射，所以跑球的人無法自己開路。持球者每秒恢復 5 點生命，
+陣亡時球帶著其一半速度掉落；任一隊皆可撿，但主動投球者有一秒不能接回自己的球。無人碰觸的球
+25 秒後回到中場。得分後有 11 秒重置期，然後清除投射物、恢復玩家並讓雙方從隊伍出生點重新開球。
 
 原作投彈地圖：BR-Anubis、BR-Bifrost、BR-BridgeOfFate、BR-Canyon、BR-Colossus、BR-Disclosure、
 BR-IceFields、BR-Serenity、BR-Skyline、BR-Slaughterhouse、BR-TwinTombs。
@@ -264,8 +265,11 @@ BR-IceFields、BR-Serenity、BR-Skyline、BR-Slaughterhouse、BR-TwinTombs。
 - 道具：小血瓶 ×20、醫療包 ×16、護盾包 ×4、超級護盾 ×1、**雙倍傷害 ×2（兩座掩體各一）**。
 - 原作已知的不對稱：藍方多一份震盪步槍彈藥、紅方在對稱位置多一份連結槍彈藥。
 
-資料來源：[BR-Anubis](https://unreal.fandom.com/wiki/BR-Anubis_(UT200X_map))、
-[BR-Colossus](https://unreal.fandom.com/wiki/BR-Colossus)
+規則依據：[原作 `xBombingRun` UnrealScript](https://ericdives.com/UT2004-UnCodex/Source_xgame/xbombingrun.html)、
+[原作 `xBombFlag` UnrealScript](https://ericdives.com/UT2004-UnCodex/Source_xgame/xbombflag.html)、
+[原作 `BallLauncher` UnrealScript](https://ericdives.com/UT2004-UnCodex/Source_xweapons/balllauncher.html)。
+地圖資料：[BR-Anubis](https://unreal.fandom.com/wiki/BR-Anubis_(UT200X_map))、
+[BR-Colossus](https://unreal.fandom.com/wiki/BR-Colossus)。
 
 ## 統治模式規則
 

@@ -1237,7 +1237,9 @@ public sealed class Hud
 
         Pawn carrier = br.Carrier >= 0 ? world.FindPawn(br.Carrier) : null;
         bool midfield = br.Carrier < 0 && Vector3.Distance(br.Position, br.Home) < 0.6f;
-        string status = carrier != null ? Loc.BallHeldBy(carrier.Name)
+        string status = br.RoundResetActive
+            ? Loc.HudBombingRunReset((int)MathF.Ceiling(br.ResetRemaining))
+            : carrier != null ? Loc.BallHeldBy(carrier.Name)
             : midfield ? Loc.HudBallAtMidfield : Loc.HudBallLoose;
         Vector3 col = carrier != null ? GameTypes.TeamColor(carrier.Team) : new Vector3(0.9f, 0.82f, 0.45f);
         Vector3 statusColor = carrier != null ? new Vector3(1f, 0.76f, 0.25f)

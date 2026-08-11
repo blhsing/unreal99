@@ -11,7 +11,8 @@ namespace Unreal99.Platform;
 /// </summary>
 public sealed class UserSettings
 {
-    public int Version = 6;
+    public const int CurrentVersion = 7;
+    public int Version = CurrentVersion;
 
     // --- video ---
     public int Quality = (int)QualityLevel.High;
@@ -83,6 +84,9 @@ public sealed class PlayerProfileData
 
 public static class SettingsStore
 {
+    private const int UseVehicleActionIndex = (int)GameAction.UseVehicle;
+    private const int LegacyActionCountBeforeVehicleUse = (int)GameAction.Count - 1;
+
     /// <summary>Reads the settings file, or null when there is none yet or it is unreadable.</summary>
     public static UserSettings Load() => UserData.ReadJsonOrNull<UserSettings>(UserData.SettingsPath);
 
@@ -237,15 +241,34 @@ public static class SettingsStore
             }
             else
             {
-                int n = Math.Min(d.Bindings.Bindings.Length,
-                    Math.Min(p.BindingKeys.Count, p.BindingMouseButtons.Count));
-                for (int a = 0; a < n; a++)
+                bool insertVehicleUse = s.Version < UserSettings.CurrentVersion
+                    && p.BindingKeys.Count == LegacyActionCountBeforeVehicleUse
+                    && p.BindingMouseButtons.Count == LegacyActionCountBeforeVehicleUse;
+                int storedCount = Math.Min(p.BindingKeys.Count, p.BindingMouseButtons.Count);
+                for (int a = 0; a < d.Bindings.Bindings.Length; a++)
                 {
-                    int button = p.BindingMouseButtons[a];
+                    // Version 6 inserted UseVehicle into the live enum without inserting a slot
+                    // into existing on-disk arrays. Every later action consequently slid left:
+                    // F became weapon slot 1 instead of vehicle use, and all numbered slots were
+                    // wrong. Leave the new action at this player's current default and map the
+                    // old tail one place to the right.
+                    if (insertVehicleUse && a == UseVehicleActionIndex) continue;
+                    int storedIndex = insertVehicleUse && a > UseVehicleActionIndex ? a - 1 : a;
+                    if (storedIndex >= storedCount) break;
+
+                    int button = p.BindingMouseButtons[storedIndex];
                     d.Bindings.Bindings[a] = button >= 0
                         ? InputBinding.OnMouse(button)
-                        : InputBinding.OnKey((Key)p.BindingKeys[a]);
+                        : InputBinding.OnKey((Key)p.BindingKeys[storedIndex]);
                 }
+
+                // A persistence self-test in version 6 wrote Keypad7 into player two's real
+                // profile. It was never a shipped default and conflicts with this slot's numpad
+                // aim cluster, so repair that one recognisable test value during the same schema
+                // migration. Genuine custom jump bindings remain untouched.
+                if (insertVehicleUse && i == 1
+                    && d.Bindings[GameAction.Jump] == InputBinding.OnKey(Key.Keypad7))
+                    d.Bindings[GameAction.Jump] = InputBinding.OnKey(Key.ShiftRight);
             }
         }
     }
@@ -281,6 +304,42 @@ public static class SettingsStore
             && devices[2].Bindings[GameAction.Crouch] == InputBinding.OnKey(Key.N)
             && devices[2].Bindings[GameAction.Scoreboard] == InputBinding.OnKey(Key.B);
         Console.WriteLine($"舊版玩家三設定遷移: {(migrated ? "通過" : "失敗")}");
+        return migrated ? 0 : 1;
+    }
+
+    /// <summary>
+    /// Regression for the version-6 action-array migration that restores F vehicle use, keeps
+    /// numbered weapon slots aligned and repairs the test-corrupted player-two jump binding.
+    /// </summary>
+    public static int RunVehicleUseMigrationSelfTest()
+    {
+        var legacy = new UserSettings { Version = 6 };
+        for (int player = 0; player < 2; player++)
+        {
+            BindingProfile current = BindingProfile.CreateDefault(player);
+            var stored = new PlayerProfileData();
+            for (int action = 0; action < current.Bindings.Length; action++)
+            {
+                if (action == UseVehicleActionIndex) continue;
+                InputBinding binding = current.Bindings[action];
+                if (player == 1 && action == (int)GameAction.Jump)
+                    binding = InputBinding.OnKey(Key.Keypad7); // historical self-test residue
+                stored.BindingKeys.Add((int)binding.Key);
+                stored.BindingMouseButtons.Add(binding.MouseButton);
+            }
+            legacy.Players.Add(stored);
+        }
+
+        var devices = Enumerable.Range(0, 2).Select(PlayerDevice.Keyboard).ToArray();
+        Apply(legacy, new RenderSettings(), new ControlSettings(), devices, new string[2],
+            new MatchSetup(), out _, out _, out _);
+
+        bool migrated = devices[0].Bindings[GameAction.UseVehicle] == InputBinding.OnKey(Key.F)
+            && devices[0].Bindings[GameAction.Weapon1] == InputBinding.OnKey(Key.Number1)
+            && devices[1].Bindings[GameAction.Jump] == InputBinding.OnKey(Key.ShiftRight)
+            && devices[1].Bindings[GameAction.UseVehicle] == InputBinding.OnKey(Key.Enter)
+            && devices[1].Bindings[GameAction.Hoverboard] == InputBinding.OnKey(Key.KeypadAdd);
+        Console.WriteLine($"舊版載具／右 Shift 設定遷移: {(migrated ? "通過" : "失敗")}");
         return migrated ? 0 : 1;
     }
 }

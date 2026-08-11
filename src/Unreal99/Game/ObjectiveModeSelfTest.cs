@@ -166,8 +166,15 @@ public static class ObjectiveModeSelfTest
         br.ReturnToMidfield();
         Check(!br.Held && br.LastTouch == Team.None && br.Position == br.Home,
             "a returned ball is unheld, unowned and back at midfield", failures);
-        Check(BombingRunState.ReturnSeconds == 15f,
-            "an abandoned ball returns after fifteen seconds", failures);
+        Check(BombingRunState.ReturnSeconds == 25f,
+            "an abandoned ball returns after the original twenty-five seconds", failures);
+        Check(BombingRunState.ThrowerTouchDelay == 1f
+              && BombingRunState.CarrierHealPerSecond == 5f,
+            "thrower pickup lockout and carrier regeneration match the original", failures);
+        br.BeginRoundReset();
+        Check(br.RoundResetActive && br.ResetRemaining == BombingRunState.RoundResetSeconds
+              && BombingRunState.RoundResetSeconds == 11f && !br.Held,
+            "a goal starts the original eleven-second field reset", failures);
 
         var assault = new AssaultState
         {

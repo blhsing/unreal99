@@ -58,6 +58,7 @@ public static class Loc
     public const string OptTimeLimit = "時間上限";
     public const string OptRespawnDelay = "重生等待時間";
     public const string OptCaptureLimit = "奪旗上限";
+    public const string BrScoreLimit = "投彈得分上限";
     public const string OptDemoMode = "示範模式";
     public const string OptDemoSkill = "代打電腦程度";
     public const string OptStartMatch = "開始戰鬥";
@@ -478,9 +479,11 @@ public static class Loc
     public const string HudBallAtMidfield = "球在中場";
     public const string HudBallTaken = "球被奪走";
     public const string HudBallReturned = "球已回到中場";
+    public static string HudBombingRunReset(int seconds) => $"重新開球：{Math.Max(0, seconds)} 秒";
     public const string AnnBallTakenRed = "紅隊取得球";
     public const string AnnBallTakenBlue = "藍隊取得球";
     public const string AnnBallReturned = "球已回到中場";
+    public const string AnnBombingRunRestart = "新一輪開始";
     public static string BrRunGoal(string who) => $"{who} 帶球攻門，得七分";
     public static string BrThrowGoal(string who) => $"{who} 遠射進門，得三分";
     // ---------------------------------------------------------------- scoreboard

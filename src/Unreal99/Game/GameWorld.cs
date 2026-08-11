@@ -182,6 +182,7 @@ public sealed class GameWorld
     public int WarfareOrbCaptures { get; private set; }
     public int BallPickups { get; private set; }
     public int BallGoals { get; private set; }
+    public int BallPasses { get; private set; }
     public int HoverboardRides { get; private set; }
     public int HoverboardTows { get; private set; }
     public int AssaultObjectiveCompletions { get; private set; }
@@ -603,6 +604,21 @@ public sealed class GameWorld
             Effects.Update(dt);
             return;
         }
+        // A Bombing Run goal starts an eleven-second round reset. No player may move, shoot or
+        // collect the waiting midfield ball during it; presentation and the countdown continue.
+        if (Mode.Kind == GameModeKind.BombingRun && BombingRun.RoundResetActive)
+        {
+            foreach (Pawn pawn in Pawns)
+            {
+                Feedbacks[pawn.Id].Update(dt);
+                pawn.Velocity = Vector3.Zero;
+                pawn.TickPresentation(dt);
+            }
+            UpdateBombingRun(dt);
+            Particles.Update(dt);
+            Effects.Update(dt);
+            return;
+        }
 
         for (int i = 0; i < Pawns.Count; i++)
         {
@@ -657,7 +673,7 @@ public sealed class GameWorld
             HandlePickups(pawn);
             Mode.OnPawnUpdate(this, pawn, dt);
             UpdateCarriedFlag(pawn);
-            UpdateBallCarry(pawn);
+            UpdateBallCarry(pawn, dt);
         }
 
         UpdateProjectiles(dt);
@@ -785,10 +801,30 @@ public sealed class GameWorld
         if (pawn.UpdateWeaponTimers(dt)) OnSound?.Invoke(SoundId.WeaponSwitch, pawn.Position, 0.4f);
 
         var def = pawn.WeaponDef;
+
+        pawn.ShieldRechargeDelay = MathF.Max(0f, pawn.ShieldRechargeDelay - dt);
+        if (!pawn.ShieldRaised && pawn.ShieldRechargeDelay <= 0f)
+            pawn.ShieldEnergy = MathF.Min(100f, pawn.ShieldEnergy + 18f * dt);
+        pawn.LinkBoostTimer = MathF.Max(0f, pawn.LinkBoostTimer - dt);
+
+        // The Ball Launcher follows the original two-step pass control: alternate fire acquires
+        // a team-mate, primary fire throws to that lock (or free-throws along the sightline when
+        // no lock exists). Merely holding alternate fire must never release the ball.
+        if (pawn.Weapon == WeaponKind.BallLauncher && pawn.HasBall)
+        {
+            pawn.ZoomFov = 0f;
+            if (input.AltFire)
+                pawn.BallPassTargetId = BestBallPassTarget(pawn)?.Id ?? -1;
+            if (!pawn.IsSwitching && pawn.FireCooldown <= 0f && input.Fire)
+                Fire(pawn, false, 1f);
+            return;
+        }
+
         bool zoomHeld = input.AltFire && def.Alt.ZoomFov > 0f;
         pawn.ZoomFov = zoomHeld ? def.Alt.ZoomFov : 0f;
         // The shield is a held state rather than a shot, so it lives here and not in Fire().
-        pawn.ShieldRaised = def.Alt.Mode == FireMode.Shield && input.AltFire && !pawn.IsSwitching;
+        pawn.ShieldRaised = def.Alt.Mode == FireMode.Shield && input.AltFire && !pawn.IsSwitching
+            && pawn.ShieldEnergy > 0.01f;
 
         // --- minigun spin-up ---
         if (def.SpinUp)
@@ -865,8 +901,8 @@ public sealed class GameWorld
         if (fire.Mode == FireMode.Beam) return;
 
         // The Ball Launcher does not fire a projectile — it hands the mode's one ball back to the
-        // world with a velocity. Primary throws it hard at whatever is being aimed at; alternate
-        // lobs it to the nearest team-mate ahead, which is how a team advances it under fire.
+        // world with a velocity. Alternate fire has already selected a team-mate in
+        // HandleWeapons; primary either passes to that lock or free-throws along the sightline.
         if (pawn.Weapon == WeaponKind.BallLauncher)
         {
             if (!pawn.HasBall) return;
@@ -874,7 +910,8 @@ public sealed class GameWorld
             pawn.FireBlend = 1f;
             pawn.ShotsFired++;
             Vector3 launch = pawn.ViewDirection * fire.ProjectileSpeed;
-            if (alt && NearestPassTarget(pawn) is { } mate)
+            Pawn mate = FindPawn(pawn.BallPassTargetId);
+            if (mate is { Alive: true } && mate.Team == pawn.Team && mate != pawn)
             {
                 Vector3 to = mate.Center - pawn.Center;
                 float range = to.Length();
@@ -882,8 +919,9 @@ public sealed class GameWorld
                 {
                     // Lead the arc so the pass lands on the team-mate rather than short of them.
                     float flight = range / fire.ProjectileSpeed;
-                    launch = to / flight;
+                    launch = to / flight + mate.Velocity * 0.5f;
                     launch.Y += 0.5f * Physics.Gravity * Level.GravityScale * flight;
+                    BallPasses++;
                 }
             }
             ReleaseBall(pawn, launch, thrown: true);
@@ -900,7 +938,8 @@ public sealed class GameWorld
 
         Vector3 origin = pawn.MuzzleWorld();
         Vector3 aim = pawn.ViewDirection;
-        float damageScale = chargeScale * (pawn.HasDamageAmp ? 2f : 1f);
+        float damageScale = chargeScale * (pawn.HasDamageAmp ? 2f : 1f)
+            * (pawn.LinkBoostTimer > 0f ? 1.5f : 1f);
         if (Mode.Kind == GameModeKind.Instagib) damageScale *= 40f;
 
         // A melee weapon has no muzzle. Firing a flash and a flare into the air in front of the
@@ -924,6 +963,10 @@ public sealed class GameWorld
                 break;
 
             case FireMode.Projectile:
+                if (fire.Projectile == ProjectileKind.SpiderMine)
+                    EnforceOwnedProjectileLimit(pawn.Id, ProjectileKind.SpiderMine, 4);
+                else if (fire.Projectile == ProjectileKind.StickyGrenade)
+                    EnforceOwnedProjectileLimit(pawn.Id, ProjectileKind.StickyGrenade, 8);
                 for (int i = 0; i < Math.Max(1, fire.Shots); i++)
                 {
                     Vector3 dir = fire.Spread > 0f ? Rng.ConeDirection(aim, fire.Spread) : aim;
@@ -937,8 +980,8 @@ public sealed class GameWorld
                 MeleeSwing(pawn, origin, aim, fire, damageScale);
                 break;
 
-            // The AVRiL will not fire at a person at all. That refusal is the weapon: infantry get
-            // something that beats armour, and armour keeps its advantage against infantry.
+            // Primary may be dumb-fired at anything; a vehicle under the reticle turns it into
+            // the original guided anti-armour missile. Alternate fire supplies zoom/lock view.
             case FireMode.LockOn:
             {
                 Vehicle target = LockOnTarget(pawn, fire.Range);
@@ -952,8 +995,13 @@ public sealed class GameWorld
             // play — everyone can see the beam and has time to leave.
             case FireMode.Painter:
             {
-                var hit = Level.Collision.Raycast(origin, origin + aim * MathF.Max(40f, fire.Range));
-                Vector3 spot = hit.Hit ? hit.Point : origin + aim * fire.Range;
+                float paintRange = MathF.Max(40f, fire.Range);
+                var hit = Level.Collision.Raycast(origin, origin + aim * paintRange);
+                float worldDistance = hit.Hit ? hit.Distance : paintRange;
+                Pawn painted = TracePawns(origin, aim, worldDistance, pawn, out float pawnDistance,
+                    out _, out _);
+                Vector3 spot = painted != null && pawnDistance <= worldDistance
+                    ? painted.Position : hit.Hit ? hit.Point : origin + aim * fire.Range;
                 if (def.Kind == WeaponKind.MineLayer) { RedirectMines(pawn, spot); break; }
                 _strikes.Add(new AirStrike
                 {
@@ -1146,9 +1194,20 @@ public sealed class GameWorld
             if (target != null)
             {
                 pawn.ShotsHit++;
-                float amp = pawn.HasDamageAmp ? 2f : 1f;
-                Damage(target, pawn, fire.Damage * 0.1f * amp, DamageType.Energy, dir);
-                Particles.BloodSpray(point, -dir, 0.3f);
+                if (target.Team != Team.None && target.Team == pawn.Team)
+                {
+                    // A Link beam on a team-mate is harmless and boosts the teammate's Link Gun
+                    // output, matching the behavior that gives the weapon its name.
+                    if (target.Weapon == WeaponKind.LinkGun) target.LinkBoostTimer = 0.22f;
+                    Particles.EnergyBurst(point, pawn.WeaponDef.Tint, 0.28f);
+                }
+                else
+                {
+                    float amp = (pawn.HasDamageAmp ? 2f : 1f)
+                        * (pawn.LinkBoostTimer > 0f ? 1.5f : 1f);
+                    Damage(target, pawn, fire.Damage * 0.1f * amp, DamageType.Energy, dir);
+                    Particles.BloodSpray(point, -dir, 0.3f);
+                }
             }
             else if (!HitStructures(pawn, origin, dir, maxDist, fire.Damage * 0.1f,
                          pawn.WeaponDef.Tint, supportFriendlyNodes: true)
@@ -1158,6 +1217,22 @@ public sealed class GameWorld
             }
         }
         _ = pawnDist;
+    }
+
+    /// <summary>UT2004 caps one owner's live mines/grenades; recycle the oldest before spawning.</summary>
+    private void EnforceOwnedProjectileLimit(int ownerId, ProjectileKind kind, int maximum)
+    {
+        int count = 0;
+        int oldest = -1;
+        float leastLife = float.MaxValue;
+        for (int i = 0; i < Projectiles.Length; i++)
+        {
+            ref Projectile projectile = ref Projectiles[i];
+            if (!projectile.Active || projectile.OwnerId != ownerId || projectile.Kind != kind) continue;
+            count++;
+            if (projectile.Life < leastLife) { leastLife = projectile.Life; oldest = i; }
+        }
+        if (count >= maximum && oldest >= 0) Projectiles[oldest].Active = false;
     }
 
     private void MeleeSwing(Pawn pawn, Vector3 origin, Vector3 dir, in FireDef fire, float damageScale)
@@ -1763,7 +1838,14 @@ public sealed class GameWorld
         {
             Vector3 from = MathX.SafeNormalize((attacker.Position - target.Position).FlatXZ(),
                 target.ForwardFlat);
-            if (Vector3.Dot(from, target.ForwardFlat) > 0.35f) amount *= 0.25f;
+            if (Vector3.Dot(from, target.ForwardFlat) > 0.35f)
+            {
+                float absorbed = MathF.Min(target.ShieldEnergy, amount * 0.75f);
+                target.ShieldEnergy -= absorbed;
+                target.ShieldRechargeDelay = 1.1f;
+                amount -= absorbed;
+                if (target.ShieldEnergy <= 0.01f) target.ShieldRaised = false;
+            }
         }
 
         float healthBefore = target.Health;
@@ -1846,7 +1928,7 @@ public sealed class GameWorld
         DropFlag(victim, type);
         DropCarriedOrb(victim);
         // A killed carrier drops the ball where they fell, still live for either side to take.
-        if (victim.HasBall) ReleaseBall(victim, Vector3.Zero, thrown: false);
+        if (victim.HasBall) ReleaseBall(victim, victim.Velocity * 0.5f, thrown: false);
         victim.OnHoverboard = false;
         victim.GrappleVehicleId = -1;
 
@@ -2321,11 +2403,12 @@ public sealed class GameWorld
     /// Launcher: that restriction is the mode, because it means a runner cannot clear their own
     /// path and the ball has to be moved by a team rather than an individual.
     /// </summary>
-    private void UpdateBallCarry(Pawn pawn)
+    private void UpdateBallCarry(Pawn pawn, float dt)
     {
         if (Mode.Kind != GameModeKind.BombingRun
             || Mode.State is MatchState.Warmup or MatchState.Finished) return;
         var br = BombingRun;
+        if (br.RoundResetActive) return;
 
         if (br.Carrier == pawn.Id)
         {
@@ -2336,9 +2419,12 @@ public sealed class GameWorld
             // carrying would otherwise auto-switch the carrier back onto a gun, which is exactly
             // the thing the mode forbids.
             if (pawn.Weapon != WeaponKind.BallLauncher) ForceBallLauncher(pawn);
+            pawn.Health = MathF.Min(pawn.MaxHealth,
+                pawn.Health + BombingRunState.CarrierHealPerSecond * dt);
             return;
         }
         if (br.Carrier >= 0 || !pawn.Alive) return;
+        if (br.LastThrowerPawn == pawn.Id && br.ThrowerPickupDelay > 0f) return;
         if (Vector3.Distance(pawn.Center, br.Position) > BombingRunState.PickupRadius) return;
 
         br.Carrier = pawn.Id;
@@ -2347,6 +2433,7 @@ public sealed class GameWorld
         br.LooseTimer = 0f;
         br.InFlight = false;
         pawn.HasBall = true;
+        pawn.BallPassTargetId = -1;
         BallPickups++;
         ForceBallLauncher(pawn);
         Broadcast(pawn.Team == Team.Red ? Loc.AnnBallTakenRed : Loc.AnnBallTakenBlue,
@@ -2369,7 +2456,7 @@ public sealed class GameWorld
     /// The team-mate an alternate-fire pass should go to: the closest one ahead of the carrier
     /// with a clear line, so a pass cannot be thrown into the wall the carrier is hiding behind.
     /// </summary>
-    private Pawn NearestPassTarget(Pawn pawn)
+    public Pawn BestBallPassTarget(Pawn pawn)
     {
         Pawn best = null;
         float bestDist = float.MaxValue;
@@ -2401,7 +2488,10 @@ public sealed class GameWorld
         br.LooseTimer = 0f;
         br.LastTouch = pawn.Team;
         br.LastTouchPawn = pawn.Id;
+        br.LastThrowerPawn = thrown ? pawn.Id : -1;
+        br.ThrowerPickupDelay = thrown ? BombingRunState.ThrowerTouchDelay : 0f;
         pawn.HasBall = false;
+        pawn.BallPassTargetId = -1;
         pawn.HasWeapon[(int)WeaponKind.BallLauncher] = false;
         if (pawn.Weapon == WeaponKind.BallLauncher) pawn.SwitchToBestAvailable();
     }
@@ -2416,6 +2506,16 @@ public sealed class GameWorld
         if (Mode.Kind != GameModeKind.BombingRun
             || Mode.State is MatchState.Warmup or MatchState.Finished) return;
         var br = BombingRun;
+
+        br.ThrowerPickupDelay = MathF.Max(0f, br.ThrowerPickupDelay - dt);
+        if (br.ThrowerPickupDelay <= 0f) br.LastThrowerPawn = -1;
+
+        if (br.RoundResetActive)
+        {
+            br.ResetRemaining = MathF.Max(0f, br.ResetRemaining - dt);
+            if (br.ResetRemaining <= 0f) ResetBombingRunRound();
+            return;
+        }
 
         if (!br.Held)
         {
@@ -2450,7 +2550,7 @@ public sealed class GameWorld
         var by = FindPawn(scorerPawn);
         int points = br.ScoreFor(evt);
         BallGoals++;
-        if (scorer != Team.None) Mode.TeamScores[(int)scorer] += points;
+        Mode.OnBombingRunScore(this, scorer, points);
         if (by != null)
         {
             by.Captures++;
@@ -2470,7 +2570,22 @@ public sealed class GameWorld
             by.HasWeapon[(int)WeaponKind.BallLauncher] = false;
             if (by.Weapon == WeaponKind.BallLauncher) by.SwitchToBestAvailable();
         }
-        br.ReturnToMidfield();
+        if (Mode.State != MatchState.Finished) br.BeginRoundReset();
+    }
+
+    private void ResetBombingRunRound()
+    {
+        // The original removes every live projectile and returns every player to team starts with
+        // a restored default loadout. This prevents a pre-goal rocket or mine deciding the next
+        // possession before anyone can move.
+        Array.Clear(Projectiles);
+        foreach (Pawn pawn in Pawns)
+        {
+            if (pawn.InVehicle) ExitVehicle(pawn);
+            RespawnPawn(pawn);
+        }
+        BombingRun.ReturnToMidfield();
+        Broadcast(Loc.AnnBombingRunRestart, new Vector3(1f, 0.85f, 0.3f), 1.5f);
     }
 
     /// <summary>
@@ -4192,6 +4307,7 @@ public sealed class GameWorld
     {
         if (Mode.Kind != GameModeKind.BombingRun) return;
         var br = BombingRun;
+        if (br.RoundResetActive) return;
         Vector3 col = br.Carrier >= 0 && FindPawn(br.Carrier) is { } holder
             ? GameTypes.TeamColor(holder.Team)
             : new Vector3(0.95f, 0.85f, 0.42f);

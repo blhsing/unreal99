@@ -122,10 +122,10 @@ artifacts\installer\Unreal99Installer.exe --help
 | `--bots N` | 電腦對手數量，0～15 |
 | `--skill N` | 電腦難度，0（新手）～5（神級） |
 | `--demoskill N` | 示範模式代打難度，0（新手）～5（神級），與對手難度分開 |
-| `--map N` | 競技場編號 0～31，見下方〈競技場〉 |
+| `--map N` | 競技場編號 0～35，見下方〈競技場〉 |
 | `--mode N` | 0 死亡競賽、1 團隊死亡競賽、2 奪旗大戰、3 最後生還者、4 瞬殺模式、5 支配佔領、6 攻堅模式、7 突擊模式、8 戰爭模式、9 投彈模式 |
 | `--frags N` / `--time N` | 擊殺上限／時間上限（分鐘） |
-| `--captures N` / `--domination N` | 奪旗上限／支配佔領得分上限；`0` 表示無限制 |
+| `--captures N` / `--domination N` | 奪旗上限（投彈模式中每級為 3 分）／支配佔領得分上限；`0` 表示無限制 |
 | `--respawn N` | 重生等待時間，0～9 秒；預設 3 秒，`0` 表示立即重生 |
 | `--quality N` | 0 低、1 中、2 高、3 史詩 |
 | `--debug` | 顯示效能資訊 |
@@ -133,7 +133,7 @@ artifacts\installer\Unreal99Installer.exe --help
 | `--autoshot N 路徑` | 執行 N 個畫格後輸出 PNG 截圖並結束 |
 | `--traversaltest N 路徑` | 執行固定步長的電腦走圖測試，輸出遙測與 PNG；不擷取或移動桌面游標 |
 | `--inputtest` | 多裝置輸入自我測試 |
-| `--bindingtest` | 玩家三預設按鍵與舊設定遷移的無視窗自我測試 |
+| `--bindingtest` | 玩家一 F 上下載具、玩家二右 Shift 跳躍、左右修飾鍵 Raw Input 與舊設定遷移的無視窗自我測試 |
 | `--menutest X Y` / `--menuclick` | 將系統游標移到指定座標並可注入點擊，用於自動驗證選單滑鼠操作 |
 | `--flyby` | 讓玩家一的鏡頭在場中環繞巡航，用於檢視競技場全貌 |
 | `--nohud` | 隱藏介面與第一人稱槍枝，用於擷取文件用畫面 |
@@ -144,6 +144,8 @@ artifacts\installer\Unreal99Installer.exe --help
 | `--vehicletest` | 讓神級正式電腦依序駕駛十七種載具，驗證登乘、前進、轉向與導航復原 |
 | `--moderulestest` | 無視窗驗證攻堅節點、核心、突擊兩回合勝負、戰爭模式的能量球／倒數節點與投彈模式的計分規則 |
 | `--vehiclecoverage` | 無視窗清點每種載具實際出現在哪幾張圖，並要求每種至少兩張 |
+| `--weaponcoverage` | 無視窗清點二十四把武器的模型密度與地圖／模式取得方式 |
+| `--weaponmechanicstest` | 無視窗驗證追加十三把武器的主要／次要模式與原作職責契約 |
 | `--loadslot N` | 直接從第 N 個存檔位接續對戰 |
 | `--weapon N` | 強制玩家一持有指定武器，用於檢視第一人稱模型 |
 | `--savetest` | 存檔與設定的往返自我測試（寫入、讀回、還原到實際世界並比對） |
@@ -446,11 +448,14 @@ UT2003／2004 的投彈模式（Bombing Run）是全系列唯一一個**射門**
   遠比讓他們投進要虧。
 * **持球時只剩發球器。** 拿到球的瞬間，身上所有槍都收起來，只留下一把不會造成任何傷害的
   發球器。這一條就是整個模式：跑球的人**沒辦法自己開路**，球必須靠一整隊傳上去。
-  * 主要射擊：朝準心方向把球擲出去，可以直接射門。
-  * 次要射擊：傳給**前方**視線無阻的最近隊友，會自動算好拋物線提前量。
-* **球掉了就是所有人的。** 持球者陣亡會把球留在原地，任何一隊碰到都能撿走。
-* **沒人碰的球 15 秒後自動回到中場**，所以把球踢進深坑並不能拖時間。
+  * 次要射擊：鎖定**前方**視線無阻的最近隊友。
+  * 主要射擊：沒有鎖定時朝準心方向射門；已鎖定時會依隊友速度算好拋物線提前量再傳球。
+* **球掉了就是所有人的。** 持球者陣亡時，球會帶著其一半速度落地，任何一隊皆可撿走；主動傳球者
+  在一秒內不能立刻把自己的球撿回來。
+* 持球者每秒恢復 5 點生命；**沒人碰的球 25 秒後自動回到中場**，所以把球踢進深坑不能拖時間。
 * 進門的功勞算給**最後碰到球的那一隊**，所以守門員把球從自家門前掃開，永遠不會變成烏龍球。
+* 預設得分目標是 15 分。進門後球會暫時消失，11 秒後清除場上投射物、恢復所有玩家並讓雙方從
+  各自出生點重新開球；重置期間不能移動或射擊。
 
 兩張競技場都是原作的對稱球場：
 
@@ -463,7 +468,7 @@ UT2003／2004 的投彈模式（Bombing Run）是全系列唯一一個**射門**
 
 四種情況，四種完全不同的答案：
 
-* **自己持球**：只往敵方球門跑。持球時沒有槍，停下來打架永遠不會是更好的選擇。
+* **自己持球**：路線暢通時衝門拿七分；被逼近時傳給前方隊友；中距離看見空門則投射拿三分。
 * **隊友持球**：切到持球者與球門之間護送，既擋在前面，也隨時準備接傳球。
 * **敵方持球**：**專門追殺那一個人**——殺別人不會讓球停下來。
 * **球在場上**：離球最近的兩個人去搶，其餘的回防自家球門，避免八個人擠在同一個點。
@@ -556,7 +561,8 @@ UT2004 與 UT3 引進的**十七種載具全部實作**，**且只在攻堅、�
 
 ## 武器指南
 
-以下動畫不是概念圖或重繪插畫，而是遊戲以 `--weaponfootage` 從 OpenGL 畫面緩衝逐格擷取的
+下表把初代十一把與 UT2003／2004／UT3 追加的十三把放在**同一張二十四武器表**。以下動畫不是
+概念圖或重繪插畫，而是遊戲以 `--weaponfootage` 從 OpenGL 畫面緩衝逐格擷取的
 **哥德庭園實戰**。擷取流程會在開闊、可直視的場地放入一名會移動、瞄準及還擊的真實電腦敵人，
 避免立柱或轉角遮住交戰；文件攝影玩家則保持無敵，防止擷取途中死亡或被爆炸推離鏡位。每把武器
 都分別展示主要與次要用法，包括真實的後座、槍口火光、充能、光束、投射物與爆炸；每把武器
@@ -588,62 +594,49 @@ UT2004 與 UT3 引進的**十七種載具全部實作**，**且只在攻堅、�
 <td><b>0 · 救世主核彈</b><br>主要：發射大範圍核彈頭。<br>次要：速度較慢，但爆炸半徑與傷害更高。<br>極稀有；發射前先確認自己有安全距離。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/redeemer-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/redeemer-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/redeemer-turntable.webp" width="100%"></td>
 <td><br><b>切換提示</b><br>數字鍵 1～9 選擇衝擊錘至火箭發射器，0 選擇救世主；Q／E 或滑鼠滾輪循環切換。狙擊步槍可用循環切換或自行綁定快捷鍵。</td>
 </tr>
-</table>
-
-### UT2004／UT3 追加的十三把武器
-
-以下十三把來自 UT2003／2004 與 UT3，補齊了整個系列的武器庫。它們與初代武器共用同一套模型密度
-標準（每把至少 1200 個三角形，由 `--weaponcoverage` 自我測試強制），也共用同一條切換順序——
-同格位的新舊武器會排在一起（連結槍接在脈衝步槍後、毒刺機槍接在速射機槍後、閃電槍接在狙擊步槍後）。
-
-| 武器 | 主要射擊 | 次要射擊 | 出現的競技場 |
-| --- | --- | --- | --- |
-| **護盾槍** | 近身重擊，取代衝擊錘作為 UT2004 的出生近戰 | **舉盾格擋**：正面來的傷害降為四分之一 | 出生武器 |
-| **突擊步槍** | 連射的制式步槍 | **榴彈發射器**：拋射受重力影響的 M355 榴彈 | 出生武器 |
-| **連結槍** | 電漿彈連射 | **連結光束**：打隊友可疊加火力，打節點／目標可加速施工 | ONS 四張、WAR 六張、AS-車隊、AS-冰河研究站、BR 兩張（共 14 張） |
-| **閃電槍** | 放大瞄準後的即死狙擊，命中留下電弧 | 切換放大倍率 | ONS-托蘭、ONS-交叉火網、ONS-德里亞冰河、BR 兩張 |
-| **佈雷器** | 灑出**蜘蛛地雷**，會自行爬向靠近的敵人並引爆 | 用光束把已佈的雷**改指向**別處 | ONS 四張 |
-| **榴彈發射器** | 拋射黏著榴彈，黏在落點上 | **遙控引爆**自己佈下的所有榴彈 | ONS-托蘭、AS-冰河研究站 |
-| **反載具飛彈** | **鎖定**載具後發射追蹤飛彈；飛行中可持續導引 | 標定目標供隊友共享 | ONS／WAR 全系列 |
-| **離子指示器** | 標定地面，數秒後**軌道離子砲**轟擊該點 | 取消標定 | ONS-交叉火網、ONS-德里亞冰河 |
-| **目標指示器** | 標定地面，呼叫**空襲**轟炸該線 | 取消標定 | ONS-交叉火網、ONS-德里亞冰河 |
-| **傳送器** | 擲出傳送圓盤 | **瞬移到圓盤位置**；圓盤在敵人身上時可造成瞬殺 | 出生武器 |
-| **超級震盪步槍** | 一擊必殺的即時命中 | 同主要射擊 | 瞬殺模式專用 |
-| **毒刺機槍** | 高速射出水晶碎片，**把屍體釘在牆上** | 較慢但穿透力更強的碎片 | WAR 全六張 |
-| **投球器** | 把球擲向準心方向 | 傳給前方視線無阻的最近隊友 | 投彈模式專用；拿到球才會自動裝備 |
-
-實戰動畫與旋轉展示與上表同一套流程擷取：
-
-<table>
+<tr><td colspan="2"><b>UT2003／2004／UT3 追加武器</b><br>以下十三把與上面的初代武器共用模型密度標準（每把至少 1200 個三角形，由 <code>--weaponcoverage</code> 強制），也共用同一條切換順序；同格位的新舊武器會排在一起。</td></tr>
 <tr>
-<td width="50%"><b>護盾槍</b><br>取代衝擊錘的 UT2004 出生近戰。次要射擊舉起能量護盾，正面來的傷害降為四分之一。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/shield-gun-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/shield-gun-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/shield-gun-turntable.webp" width="100%"></td>
+<td width="50%"><b>護盾槍</b><br>取代衝擊錘的 UT2004 出生近戰。次要射擊消耗可回充的護盾能量，吸收正面傷害的四分之三；能量耗盡便會放下。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/shield-gun-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/shield-gun-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/shield-gun-turntable.webp" width="100%"></td>
 <td width="50%"><b>突擊步槍</b><br>制式連射步槍，次要射擊是槍下掛載的 M355 榴彈發射器。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/assault-rifle-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/assault-rifle-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/assault-rifle-turntable.webp" width="100%"></td>
 </tr>
 <tr>
-<td><b>連結槍</b><br>次要的連結光束打隊友可疊加火力，打節點與突擊目標可加速施工——攻堅與戰爭模式的核心工具。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/link-gun-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/link-gun-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/link-gun-turntable.webp" width="100%"></td>
+<td><b>連結槍</b><br>主要射擊連發電漿彈；次要光束傷敵、修復友軍載具、施工節點，連上也使用連結槍的隊友時會提升其火力。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/link-gun-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/link-gun-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/link-gun-turntable.webp" width="100%"></td>
 <td><b>閃電槍</b><br>UT2004 版的狙擊武器，命中後留下一道電弧。次要射擊切換放大倍率。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/lightning-gun-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/lightning-gun-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/lightning-gun-turntable.webp" width="100%"></td>
 </tr>
 <tr>
-<td><b>佈雷器</b><br>灑出會自行爬向敵人的蜘蛛地雷；次要射擊用光束把已佈的雷改指向別處。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/mine-layer-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/mine-layer-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/mine-layer-turntable.webp" width="100%"></td>
-<td><b>榴彈發射器</b><br>拋射黏著榴彈；次要射擊遙控引爆自己佈下的全部榴彈。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/grenade-launcher-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/grenade-launcher-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/grenade-launcher-turntable.webp" width="100%"></td>
+<td><b>佈雷器</b><br>灑出最多四枚會自行爬向敵人的蜘蛛地雷；次要射擊用光束把現有雷群改指向別處。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/mine-layer-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/mine-layer-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/mine-layer-turntable.webp" width="100%"></td>
+<td><b>榴彈發射器</b><br>拋射最多八枚黏著榴彈；次要射擊遙控引爆自己仍在場上的全部榴彈。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/grenade-launcher-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/grenade-launcher-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/grenade-launcher-turntable.webp" width="100%"></td>
 </tr>
 <tr>
-<td><b>反載具飛彈</b><br>鎖定載具後發射追蹤飛彈，飛行途中仍可持續導引。專為打下利維坦與飛行載具而生。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/avril-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/avril-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/avril-turntable.webp" width="100%"></td>
-<td><b>離子指示器</b><br>標定地面後，數秒內軌道離子砲轟擊該點。全遊戲只在交叉火網與德里亞冰河出現。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/ion-painter-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/ion-painter-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/ion-painter-turntable.webp" width="100%"></td>
+<td><b>反載具飛彈</b><br>主要射擊可直射無導引飛彈；瞄住載具時會鎖定並追蹤。次要射擊是光學放大／鎖定視野。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/avril-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/avril-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/avril-turntable.webp" width="100%"></td>
+<td><b>離子指示器</b><br>主要射擊標定地面，數秒內由軌道離子砲轟擊該點；次要射擊提供放大瞄準。只在交叉火網與德里亞冰河出現。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/ion-painter-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/ion-painter-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/ion-painter-turntable.webp" width="100%"></td>
 </tr>
 <tr>
-<td><b>目標指示器</b><br>標定地面後呼叫空襲沿線轟炸，適合清掉一整排載具。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/target-painter-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/target-painter-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/target-painter-turntable.webp" width="100%"></td>
+<td><b>目標指示器</b><br>主要射擊標定地面後呼叫空襲沿線轟炸；次要射擊提供放大瞄準，適合清掉一整排載具。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/target-painter-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/target-painter-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/target-painter-turntable.webp" width="100%"></td>
 <td><b>傳送器</b><br>擲出圓盤，次要射擊瞬移過去。圓盤停在敵人身上時瞬移可直接造成瞬殺。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/translocator-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/translocator-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/translocator-turntable.webp" width="100%"></td>
 </tr>
 <tr>
 <td><b>超級震盪步槍</b><br>瞬殺模式專用：一擊必殺的即時命中，兩種射擊相同。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/super-shock-rifle-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/super-shock-rifle-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/super-shock-rifle-turntable.webp" width="100%"></td>
-<td><b>毒刺機槍</b><br>UT3 的死靈武器，高速射出的水晶碎片會把屍體釘在後方的牆上。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/stinger-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/stinger-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/stinger-turntable.webp" width="100%"></td>
+<td><b>毒刺機槍</b><br>UT3 水晶武器：主要模式高速灑出碎片；次要模式發射較慢、傷害及擊退力都更高的大塊水晶。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/stinger-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/stinger-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/stinger-turntable.webp" width="100%"></td>
 </tr>
 <tr>
-<td><b>投球器</b><br>投彈模式專用，也是唯一不會造成任何傷害的武器：拿到球時自動裝備，放下球時自動收起。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/ball-launcher-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/ball-launcher-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/ball-launcher-turntable.webp" width="100%"></td>
+<td><b>投球器</b><br>投彈模式專用且不造成傷害：次要射擊鎖定隊友，再以主要射擊傳球；沒有鎖定時主要射擊就是自由投射。<br><br><b>主要射擊實戰</b><br><img src="docs/weapons/ball-launcher-primary.webp" width="100%"><br><b>次要射擊實戰</b><br><img src="docs/weapons/ball-launcher-secondary.webp" width="100%"><br><b>360° 模型展示</b><br><img src="docs/weapons/ball-launcher-turntable.webp" width="100%"></td>
 <td><br><b>取得方式</b><br>這十三把都不在數字鍵的預設快捷上，靠 Q／E 或滑鼠滾輪循環切換；護盾槍、突擊步槍與傳送器是出生武器，超級震盪步槍只在瞬殺模式發放，投球器只在持球時出現。</td>
 </tr>
 </table>
+
+武器行為核對來源包括原作 UnrealScript 的
+[`ShieldGun`](https://ericdives.com/UT2004-UnCodex/xweapons/shieldgun.html)、
+[`AssaultRifle`](https://ericdives.com/UT2004-UnCodex/xweapons/assaultrifle.html)、
+[`LinkGun`](https://ericdives.com/UT2004-UnCodex/xweapons/linkgun.html)、
+[`ONSMineLayer`](https://ericdives.com/UT2004-UnCodex/onslaught/onsminelayer.html)、
+[`ONSGrenadeLauncher`](https://ericdives.com/UT2004-UnCodex/onslaught/onsgrenadelauncher.html)、
+[`ONSAVRiL`](https://ericdives.com/UT2004-UnCodex/onslaught/onsavril.html)、
+[`Painter`](https://ericdives.com/UT2004-UnCodex/xweapons/painter.html)、
+[`TransLauncher`](https://ericdives.com/UT2004-UnCodex/xweapons/translauncher.html) 與
+[UT3 官方手冊](https://cdn.akamai.steamstatic.com/steam/apps/13210/manuals/manual_english.pdf)。電腦會依武器職責
+使用主要／次要模式：載具優先反載具飛彈、近距離使用連結束、受壓時舉盾、佈滿後指揮雷群、榴彈靠近
+敵人時遙控引爆、露天遠距目標才用指示器，安全長程路線則可用傳送器縮短。
 
 圖庫可由 [`docs/capture-weapons.ps1`](docs/capture-weapons.ps1) 重新擷取；腳本會為每把武器產生
 主要／次要射擊的 30 格循環 WebP 與 36 格 360° 模型展示，並在輸出後驗證動畫格數與尺寸。流程使用實際
@@ -825,7 +818,7 @@ src/Unreal99/
   Core/         數學（GL 慣例矩陣）、亂數
   Platform/     輸入系統、Raw Input、按鍵配置、PNG／ICO 輸出、開始選單捷徑
   Rendering/    OpenGL 封裝、著色器、算圖器、粒子、字型、2D 介面
-  World/        碰撞筆刷、導航圖、關卡建構器、三十二座競技場
+  World/        碰撞筆刷、導航圖、關卡建構器、三十六座競技場
   Game/         角色移動、武器、投射物、道具、電腦 AI、遊戲模式、模擬
   Audio/        程序化合成 + OpenAL 3D 播放
   UI/           繁體中文字串表、HUD、選單
@@ -878,13 +871,13 @@ src/Unreal99.Installer/
   繞 Y 軸旋轉）。搭配 `Sections` 的圓角矩形、超橢圓、翼型與倒角函式，就能一次做出會收窄的
   艦體、有膛口制退器的砲管、由厚變薄的機翼。兩者都會依**折角判定**（夾角超過約 35° 視為硬邊）
   分裂法線，因此機械加工的肩線是銳利的，圓弧的地方才平滑——少了這一步，砲管會像骨頭。
-* **武器** — 十一把全部以程式建模，統一以 -Z 為前方的區域座標系，因此同一份網格可同時用於
+* **武器** — 二十四把全部以程式建模，統一以 -Z 為前方的區域座標系，因此同一份網格可同時用於
   第一人稱視角、第三人稱持槍與道具展示台。武器整場比賽都掛在畫面一角，是玩家看得最久的模型，
   因此細節預算最高：握把、機匣、彈匣、瞄準鏡與膛口都是掃掠或車削出來的實體，不是方塊堆疊。
 * **載具** — 十七種全部以程式建模，以 **+Z 為前方**（與物理的行進方向一致）。裝甲車輛使用
   帶折角的斜甲截面、砲塔環與含抽煙器和膛口制退器的砲管，履帶是含負重輪、主動輪與惰輪的
   完整行走裝置；飛行載具使用翼型掃掠的機翼與座艙罩；Necris 載具則是反曲膝關節的步行腿。
-* **競技場** — 三十二座場地全部透過 `LevelBuilder` 撰寫，同時產生算圖幾何與碰撞筆刷。圓形結構
+* **競技場** — 三十六座場地全部透過 `LevelBuilder` 撰寫，同時產生算圖幾何與碰撞筆刷。圓形結構
   會柵格化成軸對齊區塊，確保碰撞與可見表面完全一致。路徑點圖在關卡建好後自動生成，
   因此新增競技場不需要另外標註導航資料。
 * **水面卸力** — 落入水中不會造成落下傷害。少了這條，從護衛艦的舷邊跳進港灣就是自殺，
@@ -899,13 +892,14 @@ src/Unreal99.Installer/
 移動手感重現 1999 年的原作：極高的地面加速度、充裕的空中操控、連點閃避，
 以及相對於奔跑速度偏低的重力。
 
-十一把武器全部實作了主要與次要射擊，包含**震盪連鎖**（用主要光束引爆自己發射的震盪球）、
-會彈跳的破片、會反彈並斬首的撕裂者飛刃、可蓄力並黏附表面的生化黏球，以及救世主核彈。
+二十四把武器全部實作了主要與次要射擊，包含**震盪連鎖**（用主要光束引爆自己發射的震盪球）、
+會彈跳的破片、會反彈並斬首的撕裂者飛刃、可蓄力並黏附表面的生化黏球、遠端地雷／榴彈控制、
+反載具鎖定、連結支援、傳送器、指示器，以及救世主核彈。
 
 電腦對手會在由碰撞世界自動產生的路徑點圖上規劃路線，再進行本地轉向。難度會影響反應時間、
 瞄準抖動、投射物提前量、移動速度、射擊節奏、傷害、閃避頻率與感知範圍。0～4 級採用較平緩的
 學習曲線，最簡單級別有明顯的反應、移動與傷害限制；第 5 級保留原有強度。牠們會依交戰距離選擇武器、避免被自己的爆炸波及、
-追擊失去視野的目標最後出現的位置、受傷時退往掩體，並在奪旗、支配佔領、攻堅、突擊與戰爭模式中
+追擊失去視野的目標最後出現的位置、受傷時退往掩體，並在奪旗、支配佔領、攻堅、突擊、戰爭與投彈模式中
 執行各自的目標；三種載具模式中還會判斷該不該去開載具，以及開到哪個距離停下來。投射物瞄準會解出
 最早可達的攔截點，納入敵人的目前速度、方向、空中重力，以及武器本身的彈速、重力與向上發射速度；
 神級使用完整解，較低難度則依級別保留刻意誤差。
@@ -918,8 +912,8 @@ dotnet src\Unreal99\bin\Release\net10.0\Unreal99.dll --aimtest
 
 測試包含靜止、橫向奔跑、空中墜落、受重力彈道與不可達目標；全部通過時輸出 `AIM_TEST PASS`。
 
-可用下列固定步長測試讓神級主角分別走遍全部三十二張地圖，並以新手對手維持低干擾環境。每張地圖
-都以自己被設計的模式測試，因此攻堅、突擊與戰爭那十一張同時也覆蓋載具、目標、能量球與滑板的
+可用下列固定步長測試讓神級主角分別走遍全部三十六張地圖，並以新手對手維持低干擾環境。每張地圖
+都以自己被設計的模式測試，因此攻堅、突擊、戰爭與投彈那十五張同時也覆蓋載具、目標、能量球、球與滑板的
 程式碼路徑：
 
 ```powershell
@@ -942,7 +936,7 @@ dotnet src\Unreal99\bin\Release\net10.0\Unreal99.dll --aimtest
 所有角色、武器模型、材質與音效皆為原創。本專案是同類型遊戲的獨立實作，並非移植，
 不含原作的任何素材。
 
-三十二座競技場的佈局向原作的經典地圖致敬（前二十一座出自 1999 年初代、五座出自 UT2004、
+三十六座競技場的佈局向原作的經典地圖致敬（前二十一座出自 1999 年初代、九座出自 UT2003／2004、
 另外六座取材自 UT3），但幾何、材質與道具配置都是重新設計並以程式
 產生的——沒有反編譯、轉檔或複製任何原作關卡資料。地圖名稱為對應的中文命名，並在上表中標註
 致敬對象。

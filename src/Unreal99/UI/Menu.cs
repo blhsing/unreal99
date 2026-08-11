@@ -643,6 +643,11 @@ public sealed class Menu
         if (ModeKind == GameModeKind.CaptureTheFlag)
             AddChoice(Loc.OptCaptureLimit, () => CaptureLimit > 0 ? CaptureLimit.ToString() : Loc.OptNoLimit,
                 d => CaptureLimit = MathX.Clamp(CaptureLimit + d, 0, 20), "率先達成的隊伍獲勝。");
+        else if (ModeKind == GameModeKind.BombingRun)
+            AddChoice(Loc.BrScoreLimit,
+                () => CaptureLimit > 0 ? (CaptureLimit * 3).ToString() : Loc.OptNoLimit,
+                d => CaptureLimit = MathX.Clamp(CaptureLimit + d, 0, 20),
+                "以三分為一級調整；原作預設率先取得 15 分者獲勝。");
         else if (ModeKind == GameModeKind.Domination)
             AddChoice(Loc.DomScoreLimit,
                 () => DominationLimit > 0 ? DominationLimit.ToString() : Loc.OptNoLimit,
@@ -1354,6 +1359,8 @@ public sealed class Menu
             {
                 (int)GameModeKind.CaptureTheFlag => d.CaptureLimit > 0
                     ? $"{Loc.OptCaptureLimit} {d.CaptureLimit}" : Loc.OptNoLimit,
+                (int)GameModeKind.BombingRun => d.CaptureLimit > 0
+                    ? $"{Loc.BrScoreLimit} {d.CaptureLimit * 3}" : Loc.OptNoLimit,
                 (int)GameModeKind.Domination => d.DominationLimit > 0
                     ? $"{Loc.DomScoreLimit} {d.DominationLimit}" : Loc.OptNoLimit,
                 _ => d.FragLimit > 0 ? $"{Loc.OptFragLimit} {d.FragLimit}" : Loc.OptNoLimit,

@@ -343,6 +343,14 @@ public sealed class GameMode
         CheckWinCondition(world);
     }
 
+    /// <summary>Adds a three- or seven-point Bombing Run goal and immediately applies its limit.</summary>
+    public void OnBombingRunScore(GameWorld world, Team scorer, int points)
+    {
+        if (State is MatchState.Warmup or MatchState.Finished || scorer == Team.None) return;
+        TeamScores[(int)scorer] += Math.Max(0, points);
+        CheckWinCondition(world);
+    }
+
     public void OnPawnUpdate(GameWorld world, Pawn pawn, float dt) { }
 
     public bool AllowsRespawn(GameWorld world, Pawn pawn)

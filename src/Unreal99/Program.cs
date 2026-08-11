@@ -16,8 +16,10 @@ if (args.Contains("--aimtest")) return BotAimPrediction.RunSelfTest();
 if (args.Contains("--moderulestest")) return ObjectiveModeSelfTest.Run();
 if (args.Contains("--vehiclecoverage")) return VehicleCoverageSelfTest.Run();
 if (args.Contains("--weaponcoverage")) return WeaponCoverageSelfTest.Run();
+if (args.Contains("--weaponmechanicstest")) return WeaponMechanicsSelfTest.Run();
 if (args.Contains("--bindingtest"))
-    return BindingProfile.RunSelfTest() | SettingsStore.RunPlayerThreeMigrationSelfTest();
+    return BindingProfile.RunSelfTest() | SettingsStore.RunPlayerThreeMigrationSelfTest()
+        | SettingsStore.RunVehicleUseMigrationSelfTest() | RawInput.RunKeyNormalizationSelfTest();
 
 using var app = new App();
 try

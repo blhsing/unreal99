@@ -671,6 +671,9 @@ public sealed class App : IDisposable
         _showDebug = showFps;
         ResolvePersistedDeviceAssignments();
         _renderer?.OnQualityChanged();
+        // Persist versioned binding migrations after the live menu/device state has been rebuilt,
+        // so this repair happens once and the next launch reads the current schema directly.
+        if (saved.Version < UserSettings.CurrentVersion) MarkSettingsDirty();
     }
 
     /// <summary>
@@ -2772,6 +2775,10 @@ public sealed class App : IDisposable
             bool workingObjective = _world.Mode.Kind == GameModeKind.Assault
                 && _world.Assault.CurrentObjective is { Kind: not ObjectiveKind.Destroy } held
                 && Vector3.Distance(pawn.Position, held.Position) <= held.Radius + 1.5f;
+            // Bombing Run deliberately freezes the whole field for the original eleven-second
+            // post-goal reset. That is a rules countdown, not a navigation stall.
+            workingObjective |= _world.Mode.Kind == GameModeKind.BombingRun
+                && _world.BombingRun.RoundResetActive;
             float stall = !fired && !workingObjective && delta.Length() / MathF.Max(dt, 1e-4f) < 0.20f
                 ? _autoShotStallTimes.GetValueOrDefault(pawnId) + dt
                 : 0f;
@@ -3359,6 +3366,7 @@ public sealed class App : IDisposable
                 WarfareOrbCaptures = _world.WarfareOrbCaptures,
                 BallPickups = _world.BallPickups,
                 BallGoals = _world.BallGoals,
+                BallPasses = _world.BallPasses,
                 HoverboardRides = _world.HoverboardRides,
                 HoverboardTows = _world.HoverboardTows,
                 AssaultObjectiveCompletions = _world.AssaultObjectiveCompletions,

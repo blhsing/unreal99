@@ -144,9 +144,11 @@ public sealed class BindingProfile
         return p;
     }
 
-    /// <summary>Headless regression for the three-player shared-keyboard defaults.</summary>
+    /// <summary>Headless regression for required shared-keyboard defaults.</summary>
     public static int RunSelfTest()
     {
+        BindingProfile p1 = CreateDefault(0);
+        BindingProfile p2 = CreateDefault(1);
         BindingProfile p3 = CreateDefault(2);
         (GameAction Action, Key Key)[] expected =
         [
@@ -157,8 +159,14 @@ public sealed class BindingProfile
             (GameAction.Scoreboard, Key.B),
             (GameAction.UseVehicle, Key.K),
         ];
-        bool passed = p3[GameAction.Fire] == InputBinding.OnMouse(0)
+        bool passed = p1[GameAction.UseVehicle] == InputBinding.OnKey(Key.F)
+            && p2[GameAction.Jump] == InputBinding.OnKey(Key.ShiftRight)
+            && p3[GameAction.Fire] == InputBinding.OnMouse(0)
             && p3[GameAction.AltFire] == InputBinding.OnMouse(1);
+        Console.WriteLine($"玩家一 F 上下載具: " +
+                          $"{(p1[GameAction.UseVehicle] == InputBinding.OnKey(Key.F) ? "通過" : "失敗")}");
+        Console.WriteLine($"玩家二右 Shift 跳躍: " +
+                          $"{(p2[GameAction.Jump] == InputBinding.OnKey(Key.ShiftRight) ? "通過" : "失敗")}");
         foreach (var item in expected)
         {
             bool itemPassed = p3[item.Action] == InputBinding.OnKey(item.Key);

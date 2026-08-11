@@ -64,6 +64,7 @@ public sealed class RawInput : IDisposable
 
     private const ushort MouseMoveAbsolute = 0x01;
     private const ushort RiKeyBreak = 0x01;   // key-up when set
+    private const ushort RiKeyE0 = 0x02;      // extended-key prefix
     private const uint RidevInputSink = 0x00000100;
 
     [StructLayout(LayoutKind.Sequential)]
@@ -387,7 +388,8 @@ public sealed class RawInput : IDisposable
 
     private void HandleKeyboard(nint device, in RawKeyboard key)
     {
-        if (device == 0 || key.VKey >= 256) return;
+        int virtualKey = NormalizeVirtualKey(key.VKey, key.MakeCode, key.Flags);
+        if (device == 0 || virtualKey <= 0 || virtualKey >= 256) return;
         if (!_keyboards.TryGetValue(device, out bool[] down))
         {
             down = new bool[256];
@@ -396,13 +398,39 @@ public sealed class RawInput : IDisposable
         }
 
         bool isUp = (key.Flags & RiKeyBreak) != 0;
-        if (isUp) down[key.VKey] = false;
+        if (isUp) down[virtualKey] = false;
         else
         {
-            if (!down[key.VKey]) _keyboardsPressed[device][key.VKey] = true;
-            down[key.VKey] = true;
+            if (!down[virtualKey]) _keyboardsPressed[device][virtualKey] = true;
+            down[virtualKey] = true;
             TrackActivity(_keyboardDevices, device, 40f);
         }
+    }
+
+    /// <summary>
+    /// Raw Input commonly reports generic VK_SHIFT/VK_CONTROL/VK_MENU values. Their make code
+    /// and E0 flag identify the physical side, which bindings such as player two's Right Shift
+    /// depend on. Store the side-specific virtual key in the per-device state.
+    /// </summary>
+    internal static int NormalizeVirtualKey(ushort virtualKey, ushort makeCode, ushort flags)
+        => virtualKey switch
+        {
+            0x10 => makeCode == 0x36 ? 0xA1 : 0xA0,                  // Shift
+            0x11 => (flags & RiKeyE0) != 0 ? 0xA3 : 0xA2,          // Control
+            0x12 => (flags & RiKeyE0) != 0 ? 0xA5 : 0xA4,          // Alt/Menu
+            _ => virtualKey,
+        };
+
+    public static int RunKeyNormalizationSelfTest()
+    {
+        bool passed = NormalizeVirtualKey(0x10, 0x2A, 0) == 0xA0
+            && NormalizeVirtualKey(0x10, 0x36, 0) == 0xA1
+            && NormalizeVirtualKey(0x11, 0x1D, 0) == 0xA2
+            && NormalizeVirtualKey(0x11, 0x1D, RiKeyE0) == 0xA3
+            && NormalizeVirtualKey(0x12, 0x38, 0) == 0xA4
+            && NormalizeVirtualKey(0x12, 0x38, RiKeyE0) == 0xA5;
+        Console.WriteLine($"Raw Input 左右修飾鍵辨識: {(passed ? "通過" : "失敗")}");
+        return passed ? 0 : 1;
     }
 
     private static void TrackActivity(List<RawDevice> devices, nint handle, float amount)

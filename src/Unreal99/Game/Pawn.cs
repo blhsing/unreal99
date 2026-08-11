@@ -68,6 +68,10 @@ public sealed class Pawn
 
     /// <summary>Shield Gun alt held down: incoming fire from the front is heavily reduced.</summary>
     public bool ShieldRaised;
+    public float ShieldEnergy = 100f;
+    public float ShieldRechargeDelay;
+    /// <summary>Link Gun team boost: a linked gunner temporarily amplifies this pawn's output.</summary>
+    public float LinkBoostTimer;
 
     // --- hoverboard ---
     /// <summary>
@@ -141,6 +145,8 @@ public sealed class Pawn
     public Team CarriedFlag = Team.None;
     /// <summary>Bombing Run: holding the ball, and therefore holding nothing else.</summary>
     public bool HasBall;
+    /// <summary>Team-mate selected with Ball Launcher alternate fire; primary passes to them.</summary>
+    public int BallPassTargetId = -1;
 
     public int LastAttackerId = -1;
     public float LastDamageTime;
@@ -292,7 +298,11 @@ public sealed class Pawn
         HasFlag = false;
         CarriedFlag = Team.None;
         HasBall = false;
+        BallPassTargetId = -1;
         ShieldRaised = false;
+        ShieldEnergy = 100f;
+        ShieldRechargeDelay = 0f;
+        LinkBoostTimer = 0f;
         OnHoverboard = false;
         GrappleVehicleId = -1;
         HoverboardStun = 0f;
