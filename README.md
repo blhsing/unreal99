@@ -134,6 +134,7 @@ artifacts\installer\Unreal99Installer.exe --help
 | `--traversaltest N 路徑` | 執行固定步長的電腦走圖測試，輸出遙測與 PNG；不擷取或移動桌面游標 |
 | `--inputtest` | 多裝置輸入自我測試 |
 | `--movementinputtest` | 以實際視窗按鍵路徑驗證前進不會改變視角或原地旋轉 |
+| `--menumouseinputtest` | 不移動桌面游標，驗證初次進入主選單時的滑鼠指標路由 |
 | `--hotplugtest` | 驗證滑鼠拔插、失效代號清除與自動重新指派 |
 | `--bindingtest` | 玩家一 F 上下載具、玩家二右 Shift 跳躍、左右修飾鍵 Raw Input 與舊設定遷移的無視窗自我測試 |
 | `--menutest X Y` / `--menuclick` | 將系統游標移到指定座標並可注入點擊，用於自動驗證選單滑鼠操作 |

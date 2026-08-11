@@ -316,6 +316,10 @@ public sealed class Menu
         }
     }
 
+    /// <summary>Exposed only so the no-desktop-mutation menu pointer gate can verify routing.</summary>
+    public bool PointerActiveForTest => _pointerActive;
+    public Vector2 PointerForTest => _pointer;
+
     private int HitTest(Vector2 position, out ItemRect rect)
     {
         rect = default;

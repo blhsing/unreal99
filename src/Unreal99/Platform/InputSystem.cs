@@ -266,12 +266,28 @@ public sealed class InputSystem : IDisposable
         return _mouseDelta;
     }
 
-    /// <summary>Clears both shared and per-device transient motion after a hot-plug rebind.</summary>
+    /// <summary>Clears the changed device's transient motion after a hot-plug rebind.</summary>
     public void ClearLookDelta(PlayerDevice device)
     {
+        Raw?.ClearMouseTransient(device.MouseHandle);
+        // A dedicated Raw mouse and the shared Silk pointer are independent streams. Resetting
+        // Silk here for a Raw rebind suppresses menu motion on hosts whose virtual HID list
+        // changes frequently, because BeginFrame is forced back to its first-sample path forever.
+        if (!ShouldResetSharedPointer(device)) return;
         _mouseDelta = Vector2.Zero;
         _firstMouseSample = true;
-        Raw?.ClearMouseTransient(device.MouseHandle);
+    }
+
+    internal static bool ShouldResetSharedPointer(PlayerDevice device) => device.MouseHandle == 0;
+
+    public static int RunPointerResetSelfTest()
+    {
+        PlayerDevice dedicated = PlayerDevice.Keyboard(0);
+        dedicated.MouseHandle = 44;
+        PlayerDevice shared = PlayerDevice.Keyboard(0);
+        bool pass = !ShouldResetSharedPointer(dedicated) && ShouldResetSharedPointer(shared);
+        Console.WriteLine($"主選單指標不受 Raw 滑鼠重綁重設: {(pass ? "通過" : "失敗")}");
+        return pass ? 0 : 1;
     }
 
     public float WheelDelta(PlayerDevice device)
@@ -341,6 +357,14 @@ public sealed class InputSystem : IDisposable
     public Vector2 MouseDelta => _mouseDelta;
     public Vector2 MousePosition => _mousePosition;
     public float ScrollDelta => _scroll;
+
+    /// <summary>Deterministic menu-test hook; does not move or capture the desktop cursor.</summary>
+    public void SetSharedPointerForTest(Vector2 position)
+    {
+        _mousePosition = position;
+        _mouseDelta = new Vector2(12f, 8f);
+        _firstMouseSample = false;
+    }
 
     /// <summary>
     /// Captured locks and hides the cursor for gameplay look. Hidden leaves normal pointer

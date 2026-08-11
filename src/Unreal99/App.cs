@@ -385,6 +385,10 @@ public sealed class App : IDisposable
                     _cliOverrides.UnionWith(["map", "mode", "players", "bots", "demo"]);
                     _autoStartMatch = true;
                     break;
+                case "--menumouseinputtest":
+                    _menuMouseInputTest = true;
+                    _windowed = true;
+                    break;
                 case "--loadslot" when i + 1 < args.Length:
                     // Resume a saved match straight from the command line.
                     if (int.TryParse(args[i + 1], out int ls)) _loadSlotAtBoot = ls;
@@ -1334,6 +1338,8 @@ public sealed class App : IDisposable
 
         _input.BeginFrame();
         RefreshHotPlugAssignments();
+        if (_menuMouseInputTest && _state == AppState.Menu)
+            _input.SetSharedPointerForTest(new Vector2(Width * 0.5f, Height * 0.5f));
         HandleGlobalKeys();
 
         switch (_state)
@@ -1348,6 +1354,7 @@ public sealed class App : IDisposable
 
         if (_inputTest) UpdateInputSelfTest();
         if (_movementInputTest) UpdateMovementInputSelfTest();
+        if (_menuMouseInputTest) UpdateMenuMouseInputSelfTest();
         if (_saveTest) UpdateSaveSelfTest();
         if (_vehicleTest) UpdateVehicleSelfTest();
         if (_forceWeapon >= 0 && _players.Count > 0 && _players[0].Pawn is { } p0)
@@ -2428,6 +2435,8 @@ public sealed class App : IDisposable
     private float _movementInputTestPitch;
     private int _movementInputTestDownFrames;
     private int _movementInputTestInjected;
+    private bool _menuMouseInputTest;
+    private int _menuMouseInputTestFrame;
     /// <summary>Wheel accumulated per slot across the whole test, so a scroll at any moment counts.</summary>
     private readonly float[] _inputTestWheel = new float[4];
 
@@ -2525,6 +2534,21 @@ public sealed class App : IDisposable
             if (!passed) ExitCode = 1;
             _window.Close();
         }
+    }
+
+    /// <summary>Verifies initial-menu pointer routing without touching the user's desktop cursor.</summary>
+    private void UpdateMenuMouseInputSelfTest()
+    {
+        if (_state != AppState.Menu) return;
+        _menuMouseInputTestFrame++;
+        if (_menuMouseInputTestFrame < 2) return;
+        Vector2 expected = new(Width * 0.5f, Height * 0.5f);
+        bool passed = _menu.PointerActiveForTest
+            && Vector2.Distance(_menu.PointerForTest, expected) <= 0.1f;
+        Console.WriteLine($"MENU_MOUSE_INPUT {(passed ? "PASS" : "FAIL")} " +
+                          $"position={_menu.PointerForTest.X:0.0},{_menu.PointerForTest.Y:0.0}");
+        if (!passed) ExitCode = 1;
+        _window.Close();
     }
 
     // ---------------------------------------------------------------- vehicle self-test
