@@ -42,6 +42,19 @@ public sealed class WeaponModels : IDisposable
     /// <summary>Silhouette support points, in model space. See <see cref="MeshBuilder.SupportCloud"/>.</summary>
     public Vector3[] HullFor(WeaponKind k) => _hulls[(int)k];
 
+    /// <summary>
+    /// Builds one weapon without a GPU and reports its triangle count. Used by the headless
+    /// density check: a weapon added later must not quietly be a coarser model than the ones
+    /// beside it in the same weapon guide.
+    /// </summary>
+    public static int TriangleCountFor(WeaponKind kind)
+    {
+        var mb = new MeshBuilder { WorldUv = false, Material = (int)MatId.WeaponMetal };
+        Build(kind, mb);
+        var (_, indices, _) = mb.Build();
+        return indices.Length / 3;
+    }
+
     public WeaponModels(GL gl)
     {
         for (int i = 0; i < (int)WeaponKind.Count; i++)
@@ -135,6 +148,57 @@ public sealed class WeaponModels : IDisposable
         mb.AddLoft(Sections.RoundedRect(1f, 1f, 0.5f, 3), hood, capStart: false, capEnd: false);
         mb.AddBox(new Vector3(-0.009f * scale, y + 0.008f * scale, rearZ), new Vector3(0.004f * scale, 0.008f * scale, 0.006f * scale));
         mb.AddBox(new Vector3(0.009f * scale, y + 0.008f * scale, rearZ), new Vector3(0.004f * scale, 0.008f * scale, 0.006f * scale));
+        mb.Material = restore;
+    }
+
+    /// <summary>
+    /// A row of fasteners along a body panel. Cheap in authoring terms and the single most
+    /// effective way to stop a swept hull reading as a smooth plastic shell — the 1999 weapons all
+    /// carry them, so anything added later that does not looks like a placeholder beside them.
+    /// </summary>
+    private static void Bolts(MeshBuilder mb, float y, float z0, float z1, int count,
+        float halfWidth, float size = 0.005f)
+    {
+        int restore = mb.Material;
+        mb.Material = (int)MatId.Trim;
+        for (int i = 0; i < count; i++)
+        {
+            float t = count == 1 ? 0.5f : i / (float)(count - 1);
+            float z = MathX.Lerp(z0, z1, t);
+            foreach (float sx in new[] { -halfWidth, halfWidth })
+                mb.AddSphere(new Vector3(sx, y, z), size, 4, 6);
+        }
+        mb.Material = restore;
+    }
+
+    /// <summary>A raised accessory rail: the notched strip optics and grips clamp onto.</summary>
+    private static void Rail(MeshBuilder mb, float y, float z0, float z1, int teeth, float halfWidth = 0.011f)
+    {
+        int restore = mb.Material;
+        mb.Material = (int)MatId.TechPanelDark;
+        mb.AddBox(new Vector3(0f, y, (z0 + z1) * 0.5f),
+            new Vector3(halfWidth, 0.004f, MathF.Abs(z1 - z0) * 0.5f));
+        mb.Material = (int)MatId.Trim;
+        for (int i = 0; i < teeth; i++)
+        {
+            float t = (i + 0.5f) / teeth;
+            mb.AddBox(new Vector3(0f, y + 0.005f, MathX.Lerp(z0, z1, t)),
+                new Vector3(halfWidth * 0.92f, 0.004f, MathF.Abs(z1 - z0) / teeth * 0.32f));
+        }
+        mb.Material = restore;
+    }
+
+    /// <summary>Cooling fins stacked along a barrel or a housing.</summary>
+    private static void Fins(MeshBuilder mb, Vector3 from, Vector3 to, int count, float radius,
+        float thickness = 0.005f)
+    {
+        int restore = mb.Material;
+        mb.Material = (int)MatId.Trim;
+        for (int i = 0; i < count; i++)
+        {
+            Vector3 at = Vector3.Lerp(from, to, count == 1 ? 0.5f : i / (float)(count - 1));
+            Shapes.Collar(mb, at, radius, thickness, 16);
+        }
         mb.Material = restore;
     }
 
@@ -273,10 +337,23 @@ public sealed class WeaponModels : IDisposable
         // Barrel protruding from the slide, and the recoil-spring rod below it.
         mb.Material = (int)MatId.WeaponMetal;
         Shapes.BarrelBack(mb, new Vector3(0f, 0.070f, -0.230f),
-            [new Vector2(0f, 0.019f), new Vector2(0.048f, 0.018f), new Vector2(0.052f, 0.014f)], 14);
+        [
+            new(0f, 0.019f), new(0.010f, 0.022f), new(0.020f, 0.019f),
+            new(0.048f, 0.018f), new(0.052f, 0.014f),
+        ], 20);
         mb.Material = (int)MatId.TechPanelDark;
         Shapes.BarrelBack(mb, new Vector3(0f, 0.048f, -0.200f),
-            [new Vector2(0f, 0.010f), new Vector2(0.052f, 0.010f)], 10);
+            [new Vector2(0f, 0.010f), new Vector2(0.010f, 0.013f), new Vector2(0.052f, 0.010f)], 14);
+
+        // Slide rails, ejection port and frame pins — the small hardware that separates a service
+        // pistol from a block with a barrel, and what the rest of the arsenal already carries.
+        mb.Material = (int)MatId.Trim;
+        foreach (float sx in new[] { -0.031f, 0.031f })
+            mb.AddBox(new Vector3(sx, 0.056f, -0.070f), new Vector3(0.004f, 0.005f, 0.100f));
+        mb.Material = (int)MatId.TechPanelDark;
+        mb.AddBox(new Vector3(0.028f, 0.082f, -0.090f), new Vector3(0.005f, 0.014f, 0.034f));
+        Bolts(mb, 0.030f, -0.140f, 0.040f, 4, 0.028f, 0.004f);
+        Fins(mb, new Vector3(0f, 0.070f, -0.240f), new Vector3(0f, 0.070f, -0.272f), 3, 0.023f, 0.004f);
 
         Sights(mb, 0.086f, -0.215f, -0.010f);
     }
@@ -473,6 +550,22 @@ public sealed class WeaponModels : IDisposable
         mb.Material = (int)MatId.Trim;
         foreach (float sx in new[] { -0.076f, 0.076f })
             mb.AddBox(new Vector3(sx, 0.046f, -0.420f), new Vector3(0.006f, 0.022f, 0.115f));
+
+        // Blades stacked in the drum, visible through the housing, plus the hardware that holds
+        // the whole thing together. Without them the drum is a smooth cylinder and the weapon
+        // reads a generation older than everything beside it.
+        mb.Material = (int)MatId.WeaponMetal;
+        for (int i = 0; i < 4; i++)
+        {
+            mb.PushTransform(Matrix4x4.CreateRotationX(MathX.HalfPi)
+                * Matrix4x4.CreateTranslation(new Vector3(0f, 0.116f, -0.170f + i * 0.020f)));
+            mb.AddLathe([new Vector2(0.014f, -0.003f), new Vector2(0.050f, -0.002f),
+                         new Vector2(0.050f, 0.002f), new Vector2(0.014f, 0.003f)], Vector3.Zero, 18);
+            mb.PopTransform();
+        }
+        Fins(mb, new Vector3(0f, 0.046f, -0.250f), new Vector3(0f, 0.046f, -0.370f), 4, 0.062f, 0.005f);
+        Bolts(mb, 0.082f, -0.300f, 0.060f, 6, 0.056f);
+        Rail(mb, 0.150f, -0.260f, -0.060f, 6);
     }
 
     /// <summary>
@@ -795,14 +888,29 @@ public sealed class WeaponModels : IDisposable
         ], 20);
         mb.Material = (int)MatId.EnergyPanel;
         Shapes.BarrelBack(mb, new Vector3(0f, 0.050f, -0.300f),
-            [new Vector2(0f, 0.086f), new Vector2(0.010f, 0.086f)], 20);
+            [new Vector2(0f, 0.086f), new Vector2(0.006f, 0.090f), new Vector2(0.014f, 0.084f)], 26);
+        // Emitter ribs radiating out across the dish face.
+        mb.Material = (int)MatId.Trim;
+        for (int i = 0; i < 8; i++)
+        {
+            float a = i / 8f * MathX.TwoPi;
+            Shapes.Strut(mb, new Vector3(MathF.Cos(a) * 0.026f, 0.050f + MathF.Sin(a) * 0.026f, -0.290f),
+                new Vector3(MathF.Cos(a) * 0.084f, 0.050f + MathF.Sin(a) * 0.084f, -0.302f),
+                0.005f, 0.004f, 6);
+        }
+        Bolts(mb, 0.086f, -0.180f, 0.050f, 4, 0.030f);
+        Rail(mb, 0.100f, -0.170f, 0.020f, 5);
 
         // Capacitor bottles under the barrel.
         mb.Material = (int)MatId.TechPanelDark;
         foreach (float sx in new[] { -0.030f, 0.030f })
+        {
             Shapes.Barrel(mb, new Vector3(sx, 0.008f, -0.120f),
-                [new Vector2(0f, 0.018f), new Vector2(0.014f, 0.024f),
-                 new Vector2(0.108f, 0.024f), new Vector2(0.122f, 0.016f)], 12);
+                [new Vector2(0f, 0.018f), new Vector2(0.010f, 0.026f), new Vector2(0.020f, 0.024f),
+                 new Vector2(0.100f, 0.024f), new Vector2(0.112f, 0.026f),
+                 new Vector2(0.122f, 0.016f)], 18);
+            Fins(mb, new Vector3(sx, 0.030f, -0.120f), new Vector3(sx, 0.100f, -0.120f), 4, 0.028f);
+        }
         Sights(mb, 0.108f, -0.190f, 0.010f, 0.9f);
     }
 
@@ -838,7 +946,10 @@ public sealed class WeaponModels : IDisposable
             new(0f, 0.034f), new(0.014f, 0.030f), new(0.150f, 0.028f),
             new(0.164f, 0.034f), new(0.176f, 0.030f),
         ], 14);
-        Vents(mb, new Vector3(0f, 0.046f, -0.300f), 0.030f, 0.070f, 5);
+        Vents(mb, new Vector3(0f, 0.046f, -0.300f), 0.030f, 0.070f, 8);
+        Fins(mb, new Vector3(0f, 0.046f, -0.250f), new Vector3(0f, 0.046f, -0.370f), 5, 0.033f);
+        Bolts(mb, 0.070f, -0.180f, 0.120f, 5, 0.032f);
+        Rail(mb, 0.086f, -0.170f, 0.090f, 7);
         mb.Material = (int)MatId.TechPanelDark;
         Shapes.BarrelBack(mb, new Vector3(0f, 0.006f, -0.190f),
         [
@@ -888,7 +999,18 @@ public sealed class WeaponModels : IDisposable
                 new Vector3(sx * 0.62f, 0.050f + sy * 0.62f, -0.492f), 0.010f, 0.007f, 8);
         }
         mb.Material = (int)MatId.EnergyPanel;
-        Shapes.Collar(mb, new Vector3(0f, 0.050f, -0.470f), 0.030f, 0.008f, 16);
+        Shapes.Collar(mb, new Vector3(0f, 0.050f, -0.470f), 0.030f, 0.008f, 20);
+        Fins(mb, new Vector3(0f, 0.050f, -0.330f), new Vector3(0f, 0.050f, -0.440f), 4, 0.038f);
+        // Coolant lines running from the conduit down to each prong root.
+        mb.Material = (int)MatId.TechPanelDark;
+        for (int i = 0; i < 3; i++)
+        {
+            float a = i / 3f * MathX.TwoPi + MathX.HalfPi;
+            Shapes.Strut(mb, new Vector3(0f, 0.104f, -0.200f),
+                new Vector3(MathF.Cos(a) * 0.044f, 0.050f + MathF.Sin(a) * 0.044f, -0.318f),
+                0.006f, 0.005f, 8);
+        }
+        Bolts(mb, 0.084f, -0.260f, 0.070f, 5, 0.042f);
         Sights(mb, 0.118f, -0.250f, 0.010f, 0.9f);
     }
 
@@ -983,7 +1105,11 @@ public sealed class WeaponModels : IDisposable
         // Guidance laser under the barrel.
         mb.Material = (int)MatId.EnergyPanel;
         Shapes.BarrelBack(mb, new Vector3(0f, 0.006f, -0.230f),
-            [new Vector2(0f, 0.014f), new Vector2(0.096f, 0.012f)], 10);
+            [new Vector2(0f, 0.014f), new Vector2(0.012f, 0.018f), new Vector2(0.084f, 0.016f),
+             new Vector2(0.096f, 0.012f)], 16);
+        Fins(mb, new Vector3(0f, 0.112f, -0.020f), new Vector3(0f, 0.112f, -0.140f), 5, 0.062f);
+        Bolts(mb, 0.086f, -0.200f, 0.080f, 5, 0.040f);
+        Rail(mb, 0.100f, -0.190f, 0.040f, 6);
     }
 
     /// <summary>
@@ -1029,7 +1155,10 @@ public sealed class WeaponModels : IDisposable
             new(0f, 0.050f), new(0.020f, 0.044f), new(0.170f, 0.042f),
             new(0.186f, 0.052f), new(0.202f, 0.044f),
         ], 16);
-        Sights(mb, 0.104f, -0.300f, 0.040f, 0.9f);
+        Fins(mb, new Vector3(0f, 0.048f, -0.230f), new Vector3(0f, 0.048f, -0.380f), 5, 0.050f);
+        Bolts(mb, 0.084f, -0.170f, 0.090f, 5, 0.038f);
+        Rail(mb, 0.098f, -0.160f, 0.060f, 6);
+        Sights(mb, 0.116f, -0.300f, 0.040f, 0.9f);
     }
 
     /// <summary>
@@ -1118,8 +1247,15 @@ public sealed class WeaponModels : IDisposable
         {
             mb.Material = (int)MatId.Trim;
             Shapes.Strut(mb, new Vector3(0f, 0.086f, -0.150f), new Vector3(0f, 0.220f, -0.120f),
-                0.006f, 0.004f, 6);
+                0.007f, 0.005f, 8);
+            // Dish antenna at the mast head: this one talks to a bomber rather than to orbit.
+            Shapes.BarrelBack(mb, new Vector3(0f, 0.226f, -0.118f),
+                [new Vector2(0f, 0.010f), new Vector2(0.014f, 0.034f), new Vector2(0.022f, 0.030f)], 18);
         }
+        Fins(mb, new Vector3(0f, 0.122f, -0.060f), new Vector3(0f, 0.122f, -0.200f), 5, 0.040f);
+        Fins(mb, new Vector3(0f, 0.046f, -0.260f), new Vector3(0f, 0.046f, -0.390f), 4, 0.030f);
+        Bolts(mb, 0.080f, -0.190f, 0.080f, 5, 0.038f);
+        Rail(mb, 0.094f, -0.180f, 0.050f, 6);
     }
 
     /// <summary>
@@ -1152,6 +1288,16 @@ public sealed class WeaponModels : IDisposable
         mb.PopTransform();
         mb.Material = (int)MatId.TechPanelDark;
         Magazine(mb, new Vector3(0f, 0.012f, -0.020f), 0.014f, 0.026f, 0.070f);
+        // Beacon lamps around the disc rim, so it reads as a recall marker rather than a coin.
+        mb.Material = (int)MatId.EnergyPanel;
+        for (int i = 0; i < 8; i++)
+        {
+            float a = i / 8f * MathX.TwoPi;
+            mb.AddSphere(new Vector3(MathF.Cos(a) * 0.038f, 0.044f + MathF.Sin(a) * 0.038f, -0.226f),
+                0.006f, 5, 7);
+        }
+        Fins(mb, new Vector3(0f, 0.044f, -0.060f), new Vector3(0f, 0.044f, -0.140f), 4, 0.030f);
+        Bolts(mb, 0.072f, -0.130f, 0.060f, 4, 0.028f);
     }
 
     /// <summary>
@@ -1217,7 +1363,15 @@ public sealed class WeaponModels : IDisposable
                 [new Vector2(0f, 0.014f), new Vector2(0.120f, 0.012f)], 10);
         }
         mb.Material = (int)MatId.Trim;
-        Shapes.Collar(mb, new Vector3(0f, 0.054f, -0.400f), 0.050f, 0.012f, 16);
+        Shapes.Collar(mb, new Vector3(0f, 0.054f, -0.400f), 0.050f, 0.012f, 20);
+        Fins(mb, new Vector3(0f, 0.054f, -0.290f), new Vector3(0f, 0.054f, -0.390f), 4, 0.056f);
+        Bolts(mb, 0.092f, -0.230f, 0.120f, 6, 0.046f);
+        Rail(mb, 0.108f, -0.220f, 0.080f, 7);
+        // Feed pipes carrying crystal from the hopper down into the breech.
+        mb.Material = (int)MatId.RustMetal;
+        foreach (float sx in new[] { -0.040f, 0.040f })
+            Shapes.Strut(mb, new Vector3(sx, 0.140f, -0.020f), new Vector3(sx * 0.6f, 0.060f, -0.180f),
+                0.008f, 0.007f, 8);
     }
 
     /// <summary>
@@ -1251,7 +1405,10 @@ public sealed class WeaponModels : IDisposable
             mb.AddLoft(Sections.Circle(1f, 7), arm, capStart: false, capEnd: false);
         }
         mb.Material = (int)MatId.EnergyPanel;
-        mb.AddSphere(new Vector3(0f, 0.046f, -0.256f), 0.046f, 10, 14);
+        mb.AddSphere(new Vector3(0f, 0.046f, -0.256f), 0.046f, 14, 20);
+        Fins(mb, new Vector3(0f, 0.046f, -0.120f), new Vector3(0f, 0.046f, -0.180f), 3, 0.032f);
+        Bolts(mb, 0.070f, -0.140f, 0.060f, 4, 0.030f);
+        Rail(mb, 0.082f, -0.130f, 0.040f, 5);
     }
 
     public void Dispose()
