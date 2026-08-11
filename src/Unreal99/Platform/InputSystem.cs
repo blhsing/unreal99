@@ -315,12 +315,11 @@ public sealed class InputSystem : IDisposable
     public Vector2 LookDelta(PlayerDevice device)
     {
         if (!device.MouseLook) return Vector2.Zero;
-        if (UseSilkSharedInput(device)) return _mouseDelta;
+        if (UseSilkSharedInput(device)) return FilterCapturedSharedLookDelta(_mouseDelta, MouseCaptured);
         if (RawAvailable)
         {
-            // A local player normally has a dedicated handle. Handle zero deliberately reads only
-            // the Raw shared/RDP stream—not GLFW's recentered cursor—until a physical mouse sends
-            // its first packet and the hot-plug reconciler assigns that handle.
+            // Once a local player has a dedicated handle, keep that physical mouse isolated from
+            // every other split-screen slot.
             RawMouseState state = device.MouseHandle != 0
                 ? Raw.Mouse(device.MouseHandle) : Raw.SharedMouse;
             return new Vector2(state.DeltaX, state.DeltaY);
@@ -353,23 +352,38 @@ public sealed class InputSystem : IDisposable
     }
 
     /// <summary>
-    /// When Raw Input is available, even an as-yet unassigned player must not fall back to GLFW's
-    /// captured cursor coordinates. GLFW can emit a recenter jump when a keyboard key is pressed;
-    /// treating that jump as mouse motion is what made W/S/A/D snap the view upward and spin.
-    /// The zero-handle Raw stream is used for RDP, while a local mouse is assigned as soon as its
-    /// first real packet identifies it.
+    /// A zero-handle player needs GLFW's aggregated stream on virtual/RDP hosts that do not expose
+    /// usable per-device Raw packets. GLFW can also emit an enormous recenter jump when a keyboard
+    /// key is pressed in captured mode; reject only those discontinuities while retaining ordinary
+    /// mouse motion.
     /// </summary>
     public static int RunLookRoutingSelfTest()
     {
-        bool pass = !ShouldUseSilkPointerForLook(rawAvailable: true, mouseHandle: 0)
+        Vector2 ordinary = FilterCapturedSharedLookDelta(new Vector2(38f, -21f), captured: true);
+        Vector2 recenter = FilterCapturedSharedLookDelta(new Vector2(960f, -540f), captured: true);
+        bool pass = ShouldUseSilkPointerForLook(rawAvailable: true, mouseHandle: 0)
             && !ShouldUseSilkPointerForLook(rawAvailable: true, mouseHandle: 44)
-            && ShouldUseSilkPointerForLook(rawAvailable: false, mouseHandle: 0);
-        Console.WriteLine($"移動鍵不會讀取 GLFW 重定位視角: {(pass ? "通過" : "失敗")}");
+            && ShouldUseSilkPointerForLook(rawAvailable: false, mouseHandle: 0)
+            && ordinary == new Vector2(38f, -21f) && recenter == Vector2.Zero;
+        Console.WriteLine($"共用滑鼠保留移動並拒絕重定位跳躍: {(pass ? "通過" : "失敗")}");
         return pass ? 0 : 1;
     }
 
     internal static bool ShouldUseSilkPointerForLook(bool rawAvailable, nint mouseHandle)
-        => mouseHandle == 0 && !rawAvailable;
+        => mouseHandle == 0;
+
+    internal static Vector2 FilterCapturedSharedLookDelta(Vector2 delta, bool captured)
+    {
+        if (!float.IsFinite(delta.X) || !float.IsFinite(delta.Y)) return Vector2.Zero;
+        // A single real mouse frame can be fast, but a 256-count jump on both commodity and high-
+        // DPI mice already represents a very large flick. Captured recenter events are typically
+        // half a 1080p viewport (roughly 960x540) and must be discarded, not clamped into a turn.
+        const float MaxPlausibleFrameDelta = 256f;
+        return captured && (MathF.Abs(delta.X) > MaxPlausibleFrameDelta
+                || MathF.Abs(delta.Y) > MaxPlausibleFrameDelta)
+            ? Vector2.Zero
+            : delta;
+    }
 
     private bool UseSilkSharedInput(PlayerDevice device)
         => ShouldUseSilkPointerForLook(RawAvailable, device.MouseHandle);
@@ -454,6 +468,18 @@ public sealed class InputSystem : IDisposable
         _mousePosition = position;
         _mouseDelta = Vector2.Zero;
         _firstMouseSample = false;
+    }
+
+    /// <summary>Deterministic shared-match hook; bypasses the desktop cursor.</summary>
+    public void SetSharedMatchInputForTest(Vector2 delta, int buttonsDown)
+    {
+        _mouseDelta = delta;
+        for (int i = 0; i < 5; i++)
+        {
+            bool down = (buttonsDown & (1 << i)) != 0;
+            if (down && !_mouseDown[i]) _mousePressed[i] = true;
+            _mouseDown[i] = down;
+        }
     }
 
     /// <summary>

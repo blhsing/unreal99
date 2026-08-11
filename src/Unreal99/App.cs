@@ -1386,6 +1386,7 @@ public sealed class App : IDisposable
 
         _input.BeginFrame();
         RefreshHotPlugAssignments();
+        InjectMovementRecenterSelfTest();
         InjectMatchMouseInputSelfTest();
         if (_menuMouseInputTest && _state == AppState.Menu)
         {
@@ -2580,12 +2581,11 @@ public sealed class App : IDisposable
             _movementInputTestPitch = pawn.Pitch;
             _movementInputTestCameraYaw = _cameras[0].Yaw;
             _movementInputTestCameraPitch = _cameras[0].Pitch;
-            // Leave mouse look enabled and exercise the exact zero-handle Raw routing that used
-            // to consume captured Silk cursor coordinates. Normal pointer mode keeps this
-            // automated gate from taking control of the user's desktop cursor.
+            // Leave mouse look enabled and exercise the exact zero-handle captured routing that
+            // previously turned a W press into a GLFW cursor-recenter camera jump.
             _playerDevices[0].MouseLook = true;
             _playerDevices[0].MouseHandle = 0;
-            _input.SetPointerMode(InputSystem.PointerMode.Normal);
+            _input.SetPointerMode(InputSystem.PointerMode.Captured);
             _input.ClearLookDelta(_playerDevices[0]);
             _input.Raw.SetSyntheticKeyForTest(0x57, down: true); // W
             _movementInputTestInjected++;
@@ -2626,13 +2626,24 @@ public sealed class App : IDisposable
         }
     }
 
-    /// <summary>Injects the shared Raw/RDP stream before the production controller consumes it.</summary>
+    /// <summary>
+    /// Reproduces the captured GLFW discontinuity while W is held. It must be rejected by the
+    /// shared-look filter before the production controller can turn the pawn or camera.
+    /// </summary>
+    private void InjectMovementRecenterSelfTest()
+    {
+        if (!_movementInputTest || _state != AppState.Playing
+            || _world?.Mode.State != MatchState.InProgress || _movementInputTestFrame != 30) return;
+        _input.SetSharedMatchInputForTest(new Vector2(960f, -540f), buttonsDown: 0);
+    }
+
+    /// <summary>Injects the shared window stream before the production controller consumes it.</summary>
     private void InjectMatchMouseInputSelfTest()
     {
         if (!_matchMouseInputTest || _state != AppState.Playing
             || _world?.Mode.State != MatchState.InProgress || _matchMouseInputTestFrame < 1) return;
         bool active = _matchMouseInputTestFrame <= 10;
-        _input.Raw.SetSyntheticSharedMouseForTest(active ? 5f : 0f, active ? -2f : 0f,
+        _input.SetSharedMatchInputForTest(new Vector2(active ? 5f : 0f, active ? -2f : 0f),
             _matchMouseInputTestFrame == 5 ? 1 : 0);
     }
 
