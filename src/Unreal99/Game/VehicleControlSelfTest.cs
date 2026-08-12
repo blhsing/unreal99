@@ -160,6 +160,41 @@ public static class VehicleControlSelfTest
             }
         }
 
+        // ---------------------------------------------------------------- water that exists
+        // A water volume authored inside a solid is invisible and does nothing: you cannot see it,
+        // swim in it, or be slowed by it, and anything the map parks "in the river" spawns inside
+        // rock. WAR-Torlan laid its arena floor as one slab up to ground level and then authored
+        // the riverbed, the water and both banks within it, so the delta the map is named for was
+        // flat ground. Sampling the top face catches the whole class.
+        for (var id = MapId.Morbias; id < MapId.Count; id++)
+        {
+            using Level level = Maps.Build(null, id);
+            var scratch = new List<int>(8);
+            int index = 0;
+            foreach (var brush in level.Collision.Brushes)
+            {
+                index++;
+                if (brush.Kind != BrushKind.Water) continue;
+                // Just above the surface, across the middle of the volume: if that is inside rock
+                // then the water has no exposed face there at all.
+                int buried = 0, samples = 0;
+                for (int sx = 1; sx <= 3; sx++)
+                    for (int sz = 1; sz <= 3; sz++)
+                    {
+                        Vector3 p = new(
+                            MathX.Lerp(brush.Min.X, brush.Max.X, sx / 4f),
+                            brush.Max.Y + 0.12f,
+                            MathX.Lerp(brush.Min.Z, brush.Max.Z, sz / 4f));
+                        samples++;
+                        var probe = new Vector3(0.08f, 0.08f, 0.08f);
+                        if (level.Collision.BoxOverlapsSolid(p - probe, p + probe, scratch)) buried++;
+                    }
+                if (buried == samples)
+                    failures.Add($"{Maps.Name(id)} 的水體完全埋在實心地形裡"
+                        + $"（y={brush.Max.Y:F1}，{samples} 個取樣點全被擋住）");
+            }
+        }
+
         // ---------------------------------------------------------------- interior density
         // The interior is the model a driver looks at for the whole match, so it has to be built
         // to the same standard as the hull seen from outside rather than a few blocked-out

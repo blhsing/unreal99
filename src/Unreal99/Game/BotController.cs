@@ -255,6 +255,13 @@ public sealed class BotController : Controller
     private float _weaponTimer;
     private float _goalTimer;
     private float _stuckTimer;
+    // Grinding along an obstacle is not the same as being stopped by one; see the waypoint-stall
+    // block in ComputeMovement for why raw displacement cannot detect it.
+    private float _waypointStallTimer;
+    private int _stallWaypointNode = -1;
+    private float _stallBestDistance = float.MaxValue;
+    private float _skirtTimer;
+    private float _skirtSign = 1f;
     private float _strafeTimer;
     private float _strafeSign = 1f;
     private float _dodgeTimer;
@@ -275,6 +282,15 @@ public sealed class BotController : Controller
     private PickupEntity _itemGoal;
     private PickupEntity _blockedItem;
     private float _blockedItemTimer;
+    /// <summary>
+    /// A destination the route watcher caught this bot looping in front of, and how long it stays
+    /// off the menu. Blacklisting only the pickup was not enough: an objective goal — a power
+    /// node across a river, say — has no <see cref="PickupEntity"/> to reject, so the recovery
+    /// re-routed and then immediately re-selected the same unreachable node and looped again.
+    /// </summary>
+    private Vector3 _blockedGoalPosition;
+    private float _blockedGoalTimer;
+    private const float BlockedGoalRadius = 6f;
     private float _routeProgressSampleTimer;
     private float _routeRecoveryTimer;
     private int _routeRecoveryGoalNode = -1;
@@ -412,6 +428,11 @@ public sealed class BotController : Controller
         _itemGoal = null;
         _blockedItem = null;
         _blockedItemTimer = 0f;
+        _blockedGoalTimer = 0f;
+        _waypointStallTimer = 0f;
+        _stallWaypointNode = -1;
+        _stallBestDistance = float.MaxValue;
+        _skirtTimer = 0f;
         _routeProgressSamples.Clear();
         _routeProgressSampleTimer = 0f;
         _routeRecoveryTimer = 0f;
@@ -746,6 +767,7 @@ public sealed class BotController : Controller
         _threatTimer = MathF.Max(0f, _threatTimer - dt);
         _blockedItemTimer = MathF.Max(0f, _blockedItemTimer - dt);
         if (_blockedItemTimer <= 0f) _blockedItem = null;
+        _blockedGoalTimer = MathF.Max(0f, _blockedGoalTimer - dt);
         _routeRecoveryTimer = MathF.Max(0f, _routeRecoveryTimer - dt);
         if (_routeRecoveryTimer <= 0f) _routeRecoveryGoalNode = -1;
         _edgeRecoveryTimer = MathF.Max(0f, _edgeRecoveryTimer - dt);
@@ -851,6 +873,14 @@ public sealed class BotController : Controller
         {
             _blockedItem = rejectedItem;
             _blockedItemTimer = MathF.Max(_blockedItemTimer, 10f);
+        }
+        else if (_hasGoalPosition)
+        {
+            // No pickup to blame, so the destination itself is what the bot cannot get to from
+            // here. Park it briefly; the selectors below fall through to their next choice, which
+            // is what breaks the loop rather than just interrupting it for a few seconds.
+            _blockedGoalPosition = _goalPosition;
+            _blockedGoalTimer = MathF.Max(_blockedGoalTimer, 9f);
         }
 
         int start = world.Level.Nav.FindNearest(Pawn.Position);
@@ -1687,10 +1717,11 @@ public sealed class BotController : Controller
 
         // --- combat strafing ---
         Vector3 strafe = Vector3.Zero;
-        if (visible && target != null && _state == BotState.Attack && !_objectiveGoal
+        bool combatSteering = visible && target != null && _state == BotState.Attack && !_objectiveGoal
             && !pathTraversesSlope
             && !_specialTraversalLock
-            && _routeRecoveryTimer <= 0f)
+            && _routeRecoveryTimer <= 0f;
+        if (combatSteering)
         {
             if (_strafeTimer <= 0f)
             {
@@ -1731,6 +1762,97 @@ public sealed class BotController : Controller
             input.Dodge = new Vector2(_rng.Chance(0.5f) ? 1f : -1f, 0f);
             _dodgeTimer = _rng.Range(0.7f, 1.6f);
         }
+
+        // --- grinding along an obstacle ---
+        // Raw displacement, which the stuck recovery below keys on, only catches a bot that has
+        // been brought to a dead stop. Walk into a wall at an angle and the collision resolver
+        // slides the pawn along it at close to full speed, so it covers ground continuously while
+        // getting nowhere: a bot pressed into a Torlan bridge pier travelled 21 m in one five
+        // second window for 0.25 m of net progress, and nothing in here noticed. Progress toward
+        // the waypoint is the thing that has actually stalled, so measure that instead.
+        //
+        // The response is to skirt: pick a side and add lateral steering, which walks the pawn
+        // along the obstacle until its corner clears and the direct line opens up. Re-planning
+        // cannot fix this on its own — the route is fine, and the planner hands back the same one.
+        Vector3 stallWaypoint = _path.Count > 0 && _pathCursor < _path.Count
+            ? nav.Nodes[_path[_pathCursor]].Position
+            : Pawn.Position;
+        // Only for a waypoint that is near enough that an obstacle, rather than the length of the
+        // walk, explains the lack of progress. The graph is a two-metre grid, so an ordinary step
+        // is a couple of metres; anything far away is a special edge and handled above.
+        bool trackingWaypoint = steer != Vector3.Zero && !combatSteering && !_specialTraversalLock
+            && _path.Count > 0 && _pathCursor < _path.Count
+            && (nav.Nodes[_path[_pathCursor]].Position - Pawn.Position).FlatXZ().LengthSquared() < 12f * 12f;
+        if (trackingWaypoint)
+        {
+            int waypointNode = _path[_pathCursor];
+            if (waypointNode != _stallWaypointNode)
+            {
+                _stallWaypointNode = waypointNode;
+                _stallBestDistance = float.MaxValue;
+                _waypointStallTimer = 0f;
+            }
+            float toWaypoint = (stallWaypoint - Pawn.Position).FlatXZ().Length();
+            if (toWaypoint < _stallBestDistance - 0.2f)
+            {
+                _stallBestDistance = toWaypoint;
+                _waypointStallTimer = 0f;
+            }
+            else _waypointStallTimer += dt;
+        }
+        else
+        {
+            _stallWaypointNode = -1;
+            _stallBestDistance = float.MaxValue;
+            _waypointStallTimer = 0f;
+        }
+
+        if (_waypointStallTimer > 1.1f && trackingWaypoint)
+        {
+            if (_skirtTimer <= 0f)
+            {
+                // Commit to one side for long enough to actually clear a corner. Alternating every
+                // frame is what the failure already looks like from the outside.
+                _skirtTimer = 1.4f;
+                Vector3 toWaypointFlat = MathX.SafeNormalize(
+                    (stallWaypoint - Pawn.Position).FlatXZ(), Pawn.ForwardFlat);
+                Vector3 open = new(-toWaypointFlat.Z, 0f, toWaypointFlat.X);
+                // Prefer whichever side has more room, so the bot rounds an obstacle rather than
+                // burrowing further into the inside of a corner.
+                Vector3 eye = Pawn.Position + new Vector3(0f, Pawn.CurrentHeight * 0.5f, 0f);
+                bool leftClear = !world.Level.Collision.Raycast(eye, eye + open * 3.5f).Hit;
+                bool rightClear = !world.Level.Collision.Raycast(eye, eye - open * 3.5f).Hit;
+                _skirtSign = leftClear == rightClear
+                    ? (_rng.Chance(0.5f) ? 1f : -1f)
+                    : (leftClear ? 1f : -1f);
+                if (!leftClear && !rightClear) _skirtTimer = 0.6f;
+            }
+            Vector3 forwardToWaypoint = MathX.SafeNormalize(
+                (stallWaypoint - Pawn.Position).FlatXZ(), Pawn.ForwardFlat);
+            Vector3 lateral = new(-forwardToWaypoint.Z, 0f, forwardToWaypoint.X);
+            steer = MathX.SafeNormalize(
+                forwardToWaypoint * 0.35f + lateral * (_skirtSign * 1.0f), steer);
+            if (Pawn.OnGround && _jumpTimer <= 0f && _waypointStallTimer > 2.2f)
+            {
+                // A kerb or a step is the other thing that eats waypoint progress silently.
+                input.Jump = true;
+                _jumpTimer = 0.55f;
+            }
+            // Still nowhere after skirting both ways: the route itself is the problem.
+            if (_waypointStallTimer > 4f)
+            {
+                if (Environment.GetEnvironmentVariable("UNREAL99_NAV_DEBUG") == "1"
+                    && Pawn.PlayerIndex >= 0 && _movementDebugReports++ < 48)
+                    Console.WriteLine($"貼牆重劃: 玩家 {Pawn.PlayerIndex + 1} · 位置 {Pawn.Position} · "
+                        + $"航點 {_stallWaypointNode}@{stallWaypoint} · 路徑游標 {_pathCursor}/{_path.Count}");
+                BeginRouteRecovery(world, _itemGoal);
+                _waypointStallTimer = 0f;
+                _stallWaypointNode = -1;
+                _stallBestDistance = float.MaxValue;
+                _skirtTimer = 0f;
+            }
+        }
+        _skirtTimer = MathF.Max(0f, _skirtTimer - dt);
 
         // --- stuck recovery ---
         float moved = Vector3.Distance(Pawn.Position, _lastPosition);
@@ -2073,6 +2195,15 @@ public sealed class BotController : Controller
     private bool SetPreciseGoal(NavGraph nav, Vector3 position, bool objective, float radius,
         float refresh)
     {
+        // Every mode's objective selector funnels through here, so refusing a destination the
+        // route watcher just caught this bot looping in front of makes each of them fall through
+        // to its next choice on its own. Returning false rather than silently substituting keeps
+        // that decision with the selector that understands the mode.
+        if (_blockedGoalTimer > 0f
+            && Vector3.DistanceSquared(position, _blockedGoalPosition)
+                < BlockedGoalRadius * BlockedGoalRadius)
+            return false;
+
         int node = nav.FindNearest(position);
         if (node < 0) return false;
         _goalNode = node;

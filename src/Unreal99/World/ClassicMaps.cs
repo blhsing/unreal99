@@ -880,14 +880,13 @@ public static partial class Maps
                 rng.Chance(0.5f) ? MatId.RustMetal : MatId.TechPanelDark, true, 1.3f);
         }
 
-        // --- flooded service channel under the floor ---
-        b.Solid(new Vector3(-HX + 4f, -6f, -4f), new Vector3(HX - 4f, -1.4f, 4f), MatId.Concrete, true, 0.8f);
-        b.Water(new Vector3(-HX + 4f, -6f, -4f), new Vector3(HX - 4f, -4.2f, 4f));
-        b.Solid(new Vector3(-HX + 4f, -6f, -4f), new Vector3(-HX + 5f, 0f, 4f), MatId.Concrete);
-        b.Solid(new Vector3(HX - 5f, -6f, -4f), new Vector3(HX - 4f, 0f, 4f), MatId.Concrete);
-        b.Ramp(new Vector3(-HX + 5f, -4.6f, -3f), new Vector3(-HX + 13f, 0f, 3f), 0, MatId.Concrete);
-        b.Ramp(new Vector3(HX - 13f, -4.6f, -3f), new Vector3(HX - 5f, 0f, 3f), 1, MatId.Concrete);
-        b.AddLight(new Vector3(0f, -2.5f, 0f), new Vector3(0.3f, 0.6f, 0.8f), 16f, 3f);
+        // The "flooded service channel under the floor" that used to sit here was stillborn: the
+        // hall floor above is one unbroken slab over y=[-1.4,0] across the whole arena, so the
+        // channel had no opening. Its ramps climbed to a ceiling, its end walls faced sealed void,
+        // its light lit the inside of a rock, and its water volume was entirely inside the fill
+        // block that shared the channel's footprint - drowning geometry nobody could ever see or
+        // swim in. Opening it would mean cutting a 56x8 m trench straight through the middle of
+        // the hall, which is a redesign, not a fix, so the dead brushes come out instead.
 
         // --- the hidden alcove behind a false panel, in the spirit of the original's secret ---
         // An alcove is an enclosed *space*, not one solid six-metre block. The old block buried

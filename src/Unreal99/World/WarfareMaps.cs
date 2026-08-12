@@ -102,16 +102,32 @@ public static partial class Maps
 
         const float HX = 132f, HZ = 104f, Ground = 0f;
 
-        b.Solid(new Vector3(-HX, -6f, -HZ), new Vector3(HX, Ground, HZ), MatId.Rock, true, 0.35f);
+        // The delta itself: a shallow river straight through the middle, crossed by the bridge the
+        // centre node sits under. Driveable in and out, because it is a route rather than a moat.
+        //
+        // The channel has to be left out of the base slab. Previously the arena floor was laid as
+        // one block filling everything up to Ground, and the riverbed, its water volume and both
+        // banks were then authored *inside* it — so the whole river was buried and that stretch of
+        // the map was simply flat rock. The water never showed, and the two Scorpions the centre
+        // section parks "in the riverbed under the bridge" spawned inside solid ground.
+        const float Bank = 20f;      // where the banks meet the flat ground
+        const float Shore = 13f;     // where they meet the water
+        const float RiverBed = Ground - 1.6f;
+
+        foreach (int s in new[] { -1, 1 })
+            b.Solid(new Vector3(-HX, -6f, s > 0 ? Bank : -HZ), new Vector3(HX, Ground, s > 0 ? HZ : -Bank),
+                MatId.Rock, true, 0.35f);
         b.Room(new Vector3(-HX - 4f, -6f, -HZ - 4f), new Vector3(HX + 4f, 64f, HZ + 4f), 4f,
             MatId.Rock, MatId.Rock, MatId.Rock, withCeiling: false, withFloor: false);
 
-        // The delta itself: a shallow river straight through the middle, crossed by the bridge the
-        // centre node sits under. Driveable in and out, because it is a route rather than a moat.
-        b.Solid(new Vector3(-HX, -3.4f, -13f), new Vector3(HX, Ground - 0.01f, 13f), MatId.Concrete, true, 0.5f);
-        b.Water(new Vector3(-HX, -3.4f, -13f), new Vector3(HX, -2.2f, 13f));
+        // Bed, then the banks up to the flat ground. 1.6 m of drop over a 7 m bank is about 1:4,
+        // well inside the roughly 1:3 the navigation graph will route over — a steeper cut would
+        // strand on foot anyone who went down for the Redeemer under the bridge.
+        b.Solid(new Vector3(-HX, -6f, -Shore), new Vector3(HX, RiverBed, Shore), MatId.Concrete, true, 0.5f);
+        b.Water(new Vector3(-HX, RiverBed, -Shore), new Vector3(HX, Ground - 0.45f, Shore));
         for (int s = -1; s <= 1; s += 2)
-            b.Ramp(new Vector3(-HX, -3.4f, s * 13f), new Vector3(HX, Ground, s * 20f), s < 0 ? 3 : 2,
+            b.Ramp(new Vector3(-HX, RiverBed, s > 0 ? Shore : -Bank),
+                new Vector3(HX, Ground, s > 0 ? Bank : -Shore), s < 0 ? 3 : 2,
                 MatId.Rock, true, 0.4f);
 
         var rng = new Rng(0x7031);
@@ -335,15 +351,21 @@ public static partial class Maps
         env.FogDensity = 0.0045f;
 
         const float HX = 120f, HZ = 86f, Ground = 0f;
-        b.Solid(new Vector3(-HX, -6f, -HZ), new Vector3(HX, Ground, HZ), MatId.Rock, true, 0.4f);
+        // This river runs along X, so the valley floor is laid as the two banks either side of it
+        // rather than one slab the river would then be buried inside.
+        const float Bank = 24f, Shore = 16f, RiverBed = Ground - 1.5f;
+        foreach (int s in new[] { -1, 1 })
+            b.Solid(new Vector3(s > 0 ? Bank : -HX, -6f, -HZ), new Vector3(s > 0 ? HX : -Bank, Ground, HZ),
+                MatId.Rock, true, 0.4f);
         b.Room(new Vector3(-HX - 4f, -6f, -HZ - 4f), new Vector3(HX + 4f, 58f, HZ + 4f), 4f,
             MatId.Rock, MatId.Rock, MatId.Rock, withCeiling: false, withFloor: false);
 
         // The river the valley is named for, running north to south past the prime nodes.
-        b.Solid(new Vector3(-16f, -2.6f, -HZ), new Vector3(16f, Ground - 0.01f, HZ), MatId.Concrete, true, 0.5f);
-        b.Water(new Vector3(-16f, -2.6f, -HZ), new Vector3(16f, -1.5f, HZ));
+        b.Solid(new Vector3(-Shore, -6f, -HZ), new Vector3(Shore, RiverBed, HZ), MatId.Concrete, true, 0.5f);
+        b.Water(new Vector3(-Shore, RiverBed, -HZ), new Vector3(Shore, Ground - 0.35f, HZ));
         for (int s = -1; s <= 1; s += 2)
-            b.Ramp(new Vector3(s * 16f, -2.6f, -HZ), new Vector3(s * 24f, Ground, HZ), 0, MatId.Rock, true, 0.4f);
+            b.Ramp(new Vector3(s > 0 ? Shore : -Bank, RiverBed, -HZ),
+                new Vector3(s > 0 ? Bank : -Shore, Ground, HZ), 0, MatId.Rock, true, 0.4f);
 
         var rng = new Rng(0x5E12);
         int redCore = -1, blueCore = -1;
@@ -673,13 +695,23 @@ public static partial class Maps
         env.FogDensity = 0.0045f;
 
         const float HX = 118f, HZ = 82f, Ground = 0f;
-        b.Solid(new Vector3(-HX, -6f, -HZ), new Vector3(HX, Ground, HZ), MatId.Concrete, true, 0.4f);
+        // Coast either side of the channel, so the sea is a real gap rather than a texture buried
+        // under the shore. The bridge stays the fast way over; the water is the slow way.
+        const float Bank = 30f, Shore = 22f, SeaBed = Ground - 2.2f;
+        foreach (int s in new[] { -1, 1 })
+            b.Solid(new Vector3(s > 0 ? Bank : -HX, -6f, -HZ), new Vector3(s > 0 ? HX : -Bank, Ground, HZ),
+                MatId.Concrete, true, 0.4f);
         b.Room(new Vector3(-HX - 4f, -6f, -HZ - 4f), new Vector3(HX + 4f, 60f, HZ + 4f), 4f,
             MatId.Concrete, MatId.Rock, MatId.Rock, withCeiling: false, withFloor: false);
 
         // The sea channel that splits the coast, spanned by the bridge the support node raises.
-        b.Solid(new Vector3(-22f, -8f, -HZ), new Vector3(22f, Ground - 0.01f, HZ), MatId.Rock, true, 0.5f);
-        b.Water(new Vector3(-22f, -8f, -HZ), new Vector3(22f, -1.2f, HZ));
+        // Shelving banks rather than a sheer drop: anything that goes in can get back out, which
+        // is what keeps the channel a route instead of a hole that swallows a team's vehicles.
+        b.Solid(new Vector3(-Shore, -6f, -HZ), new Vector3(Shore, SeaBed, HZ), MatId.Rock, true, 0.5f);
+        b.Water(new Vector3(-Shore, SeaBed, -HZ), new Vector3(Shore, Ground - 0.5f, HZ));
+        for (int s = -1; s <= 1; s += 2)
+            b.Ramp(new Vector3(s > 0 ? Shore : -Bank, SeaBed, -HZ),
+                new Vector3(s > 0 ? Bank : -Shore, Ground, HZ), 0, MatId.Rock, true, 0.45f);
 
         int redCore = -1, blueCore = -1;
 

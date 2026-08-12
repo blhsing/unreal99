@@ -287,11 +287,21 @@ public static partial class Maps
             MatId.Rock, MatId.Rock, MatId.Rock, withCeiling: false, withFloor: false);
 
         // The frozen river down the middle, with a bridge at each end of it.
-        b.Solid(new Vector3(-HX, -2.4f, -20f), new Vector3(HX, Ground - 0.01f, 20f), MatId.Concrete, true, 0.5f);
-        b.Water(new Vector3(-HX, -2.4f, -20f), new Vector3(HX, -1.4f, 20f));
-        for (int s = -1; s <= 1; s += 2)
-            b.Ramp(new Vector3(-HX, -2.4f, s * 20f), new Vector3(HX, Ground, s * 28f), s < 0 ? 3 : 2,
-                MatId.Rock, true, 0.4f);
+        //
+        // This one is laid *on* the plain rather than in a cut channel, which is the opposite of
+        // what the other river maps needed. The water used to be authored underneath the arena
+        // floor and was therefore invisible, so the obvious fix was to dig a bed for it — but the
+        // two middle power nodes stand at z=0, dead centre of a forty-metre-wide river, on 28 m
+        // emplacements. Every channel depth tried, down to 0.9 m, cost Dria every one of its node
+        // captures: the sunken middle disconnects the base platforms from the plain, and Onslaught
+        // needs a pawn within 4.5 m of a node to build it. Glacier ice standing slightly proud of
+        // the plain it froze on costs nothing — water is not solid, so this changes no route, no
+        // step height and no nav link, and the river is finally something you can see.
+        // Laid in three runs so the ice parts around the two crossings rather than covering them:
+        // their grates are flush with the plain, and 25 cm of ice on top would submerge both.
+        const float Shore = 20f;
+        foreach (var (x0, x1) in new[] { (-HX, -68f), (-48f, 48f), (68f, HX) })
+            b.Water(new Vector3(x0, Ground, -Shore), new Vector3(x1, Ground + 0.25f, Shore));
         foreach (float bx in new[] { -58f, 58f })
             b.Solid(new Vector3(bx - 9f, Ground - 0.4f, -22f), new Vector3(bx + 9f, Ground, 22f),
                 MatId.MetalGrate, true, 0.8f);
