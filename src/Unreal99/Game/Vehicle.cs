@@ -25,6 +25,12 @@ public sealed class Vehicle
     public Vector3 Position;
     public Vector3 Velocity;
     public float Yaw;
+    /// <summary>
+    /// How far the hull turned on the last movement tick. The crew's view is carried round by
+    /// this, so steering points everyone aboard where the vehicle is now heading instead of
+    /// leaving them staring at the direction they happened to board facing.
+    /// </summary>
+    public float YawDelta;
     /// <summary>Hull pitch. Wheeled and walker vehicles take it from the ground they stand on.</summary>
     public float Pitch;
     public float Roll;
@@ -94,6 +100,21 @@ public sealed class Vehicle
         return -1;
     }
 
+    /// <summary>
+    /// The next vacant seat after <paramref name="from"/>, wrapping round. Returns −1 when the
+    /// occupant is the only one who could sit anywhere, so a single-seat vehicle and a full one
+    /// both simply refuse rather than pretending to move somebody.
+    /// </summary>
+    public int NextFreeSeatAfter(int from)
+    {
+        for (int step = 1; step < Occupants.Length; step++)
+        {
+            int seat = (from + step) % Occupants.Length;
+            if (Occupants[seat] < 0) return seat;
+        }
+        return -1;
+    }
+
     public Vector3 SeatWorld(int seat)
     {
         var def = Def;
@@ -128,10 +149,12 @@ public sealed class Vehicle
     public void Move(Level level, Vector2 input, bool wantUp, bool wantDown, float dt)
     {
         var def = Def;
-        if (Immobile) { Velocity = Vector3.Zero; return; }
+        if (Immobile) { Velocity = Vector3.Zero; YawDelta = 0f; return; }
 
         float gravity = Physics.Gravity * level.GravityScale;
-        Yaw = MathX.WrapAngle(Yaw - input.X * def.TurnRate * dt);
+        float steer = -input.X * def.TurnRate * dt;
+        YawDelta = steer;
+        Yaw = MathX.WrapAngle(Yaw + steer);
         Vector3 forward = new(MathF.Sin(Yaw), 0f, MathF.Cos(Yaw));
 
         switch (def.Motion)

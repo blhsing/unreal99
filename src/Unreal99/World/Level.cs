@@ -1088,6 +1088,58 @@ public sealed class LevelBuilder
 
     // ---------------------------------------------------------------- finalise
 
+    /// <summary>
+    /// Drops any vehicle parked out of a player's reach onto the surface underneath it.
+    ///
+    /// Aircraft in particular were authored at the height they look right hovering at — Torlan's
+    /// Raptors and Cicadas sat ten to twelve metres up, and one Raptor thirty-four metres above
+    /// the tower deck — which reads well from a distance and is completely unboardable, because
+    /// boarding needs a pawn within a few metres of the hull. Run after the final collision
+    /// rebuild so every pad, roof and deck the map authored is already there to land on.
+    /// </summary>
+    /// <summary>
+    /// The surface a vehicle parked at <paramref name="position"/> should be resting on, or null
+    /// when there is nothing below it at all.
+    ///
+    /// A single downward ray is not enough. One that starts inside a brush reports no hit, and
+    /// vehicles authored at water level in a filled riverbed start exactly there — so the probe
+    /// climbs its start point until it is in open space, then takes the first surface below.
+    /// </summary>
+    public static float? SurfaceUnderVehicle(CollisionWorld world, Vector3 position, float halfHeight)
+    {
+        var scratch = new List<int>(8);
+        Vector3 probeHalf = new(0.05f, 0.05f, 0.05f);
+        for (float lift = halfHeight + 0.05f; lift <= halfHeight + 40f; lift += 1.5f)
+        {
+            Vector3 from = position + new Vector3(0f, lift, 0f);
+            // The start has to be in open space, or the ray reports nothing and a buried vehicle
+            // looks like one floating over a bottomless hole.
+            if (world.BoxOverlapsSolid(from - probeHalf, from + probeHalf, scratch)) continue;
+            var hit = world.Raycast(from, from - new Vector3(0f, 500f, 0f));
+            if (hit.Hit) return hit.Point.Y;
+            return null;                                  // open space above, nothing below
+        }
+        return null;
+    }
+
+    private void SettleVehicleSpawns()
+    {
+        // Matches GameWorld.VehicleToBoard's reach, less a margin so a spawn is comfortably
+        // inside it rather than exactly on the limit.
+        const float reach = 2.6f;
+        for (int i = 0; i < _level.VehicleSpawns.Count; i++)
+        {
+            VehicleSpawn spawn = _level.VehicleSpawns[i];
+            float halfHeight = Game.VehicleDef.Get(spawn.Kind).HalfExtents.Y;
+            float? surface = SurfaceUnderVehicle(_level.Collision, spawn.Position, halfHeight);
+            if (surface is not { } ground) continue;      // nothing below: a map bug the test names
+            float gap = spawn.Position.Y - ground - halfHeight;
+            if (gap > 0f && gap <= reach) continue;
+            spawn.Position.Y = ground + halfHeight + 0.35f;
+            _level.VehicleSpawns[i] = spawn;
+        }
+    }
+
     public Level Build(GL gl, bool bakeAo = true)
     {
         _level.Collision.Rebuild();
@@ -1102,6 +1154,7 @@ public sealed class LevelBuilder
             new Vector3(_level.Max.X + pad.X, _level.KillPlaneY, _level.Max.Z + pad.Z),
             BrushKind.Void));
         _level.Collision.Rebuild();
+        SettleVehicleSpawns();
 
         // Headless callers pass a null GL. They want the gameplay placements — vehicle pads, node
         // graph, objectives — not the geometry, so the upload and the nav bake are both skipped.

@@ -22,6 +22,8 @@ public struct PawnInput
     public bool UseVehicle;
     /// <summary>Edge-triggered: deploy or stow the hoverboard every player carries.</summary>
     public bool Hoverboard;
+    /// <summary>Edge-triggered: move to the next vacant seat of the vehicle already being ridden.</summary>
+    public bool SwitchSeat;
 }
 
 /// <summary>

@@ -150,6 +150,7 @@ public sealed class GameWorld
     private readonly ProjectileModels _projectileModels;
     private readonly PickupModels _pickupModels;
     private readonly VehicleModels _vehicleModels;
+    private readonly CockpitModels _cockpitModels;
 
     private readonly Dictionary<int, Matrix4x4[]> _boneWorld = new();
     private readonly Dictionary<int, Matrix4x4[]> _boneSkin = new();
@@ -260,6 +261,40 @@ public sealed class GameWorld
         return true;
     }
 
+    /// <summary>
+    /// Moves a rider to the next vacant seat of the vehicle they are already in. Multi-seat
+    /// vehicles are otherwise a lottery: whichever seat happened to be free when you pressed use
+    /// is the one you are stuck with, so a player who wanted the Hellbender's rear turret and
+    /// landed in the driver's chair had to get out on foot and hope for better next time.
+    /// </summary>
+    public bool SwitchVehicleSeat(Pawn pawn)
+    {
+        if (pawn == null || pawn.VehicleId < 0) return false;
+        var v = FindVehicle(pawn.VehicleId);
+        if (v == null || !v.Alive) return false;
+        int from = pawn.VehicleSeat;
+        if (from < 0 || from >= v.Occupants.Length) return false;
+        int to = v.NextFreeSeatAfter(from);
+        if (to < 0)
+        {
+            FeedbackFor(pawn).Big(Loc.HudNoFreeSeat, new Vector3(1f, 0.62f, 0.30f), 1.2f);
+            return false;
+        }
+
+        v.Occupants[from] = -1;
+        v.Occupants[to] = pawn.Id;
+        pawn.VehicleSeat = to;
+        // A turret keeps its own aim; carry the rider's current view into the new seat so the
+        // switch does not spin the camera to wherever the last occupant left the mount.
+        v.SeatYaw[to] = v.Def.Seats[to].Turret ? pawn.Yaw : v.Yaw;
+        v.SeatPitch[to] = MathX.Clamp(pawn.Pitch, -0.9f, 0.9f);
+        v.SeatCooldown[to] = MathF.Max(v.SeatCooldown[to], 0.25f);
+        if (to == 0) VehicleKindsDriven.Add(v.Kind);
+        FeedbackFor(pawn).Big(Loc.SeatMoved(v.Def.Seats[to].Role), GameTypes.TeamColor(pawn.Team), 1.2f);
+        OnSound?.Invoke(SoundId.Respawn, v.Position, 0.5f);
+        return true;
+    }
+
     public void ExitVehicle(Pawn pawn)
     {
         if (pawn == null || pawn.VehicleId < 0) return;
@@ -317,7 +352,8 @@ public sealed class GameWorld
     public Action<SoundId, Vector3, float> OnSound;
 
     public GameWorld(Renderer renderer, CharacterModel character, WeaponModels weaponModels,
-        ProjectileModels projectileModels, PickupModels pickupModels, VehicleModels vehicleModels)
+        ProjectileModels projectileModels, PickupModels pickupModels, VehicleModels vehicleModels,
+        CockpitModels cockpitModels = null)
     {
         _renderer = renderer;
         _character = character;
@@ -325,6 +361,7 @@ public sealed class GameWorld
         _projectileModels = projectileModels;
         _pickupModels = pickupModels;
         _vehicleModels = vehicleModels;
+        _cockpitModels = cockpitModels;
     }
 
     // ---------------------------------------------------------------- setup
@@ -645,6 +682,13 @@ public sealed class GameWorld
                 // Use dismounts. Held down it would leave and re-board every frame, so it only
                 // fires on the press edge.
                 if (input.UseVehicle) { ExitVehicle(pawn); continue; }
+                if (input.SwitchSeat) { SwitchVehicleSeat(pawn); continue; }
+                // Pawn.Move is what normally copies the look angles across, and riders skip it —
+                // which left the camera frozen at whatever direction the player happened to be
+                // facing when they boarded. Nothing about steering or mouse look reached the
+                // view at all until this was applied here as well.
+                pawn.Yaw = input.Yaw;
+                pawn.Pitch = MathX.Clamp(input.Pitch, -1.50f, 1.50f);
                 pawn.VehicleDrive = input.Move;
                 pawn.VehicleUp = input.Jump;
                 pawn.VehicleDown = input.Crouch;
@@ -3977,6 +4021,57 @@ public sealed class GameWorld
     }
 
     /// <summary>
+    /// One cockpit interior on the same studio plate the weapons and vehicles use. Photographing
+    /// these from the driver's seat means fighting the first-person projection for every shot;
+    /// what the vehicle guide actually needs is a clear look at each variant, which is a product
+    /// shot. Same mesh the game draws in the seat, viewed from outside it.
+    /// </summary>
+    public void SubmitCockpitTurntable(RenderScene scene, CockpitKind kind, Vector3 groundPosition,
+        float yaw, Vector3 tintColor)
+    {
+        if (_cockpitModels == null) return;
+        Mesh mesh = _cockpitModels.MeshFor(kind);
+        if (mesh == null) return;
+
+        scene.SunDirection = Vector3.Normalize(new Vector3(-0.45f, -0.72f, -0.38f));
+        scene.SunColor = new Vector3(4.6f, 4.4f, 4.1f);
+        scene.AmbientSky = new Vector3(0.74f, 0.76f, 0.80f);
+        scene.AmbientGround = new Vector3(0.38f, 0.38f, 0.40f);
+        scene.SkyTop = new Vector3(0.015f, 0.028f, 0.065f);
+        scene.SkyHorizon = new Vector3(0.10f, 0.16f, 0.26f);
+        scene.SkyGround = new Vector3(0.025f, 0.03f, 0.045f);
+        scene.StarStrength = 0f;
+        scene.CloudStrength = 0f;
+        scene.EnvIntensity = 0.85f;
+        scene.FogDensity = 0f;
+
+        // The interior is modelled around the eye point, which sits above and behind everything
+        // in it, so it is recentred on its own bulk before spinning.
+        const float scale = 1.9f;
+        Vector3 centre = groundPosition + new Vector3(0f, 0.75f, 0f);
+        Matrix4x4 transform = Matrix4x4.CreateTranslation(new Vector3(0f, 0.10f, 0.55f))
+            * Matrix4x4.CreateScale(scale)
+            * Matrix4x4.CreateRotationY(yaw)
+            * Matrix4x4.CreateTranslation(centre);
+
+        foreach (MeshSection section in _cockpitModels.SectionsFor(kind))
+        {
+            Material material = Materials.Get(section.Material);
+            bool structural = section.Material == (int)MatId.ArmorPlate
+                || section.Material == (int)MatId.RustMetal;
+            var draw = MakePickupDraw(mesh, section, material, transform, centre, 2.6f);
+            draw.Tint = structural ? new Vector4(tintColor * 0.55f, 1f) : material.BaseColor;
+            draw.CastShadow = true;
+            scene.Opaque.Add(draw);
+        }
+
+        scene.AddLight(centre + new Vector3(1.8f, 2.2f, 1.3f), 7f,
+            tintColor * 0.55f + new Vector3(0.45f), 3.8f, 2f);
+        scene.AddLight(centre + new Vector3(-1.8f, 0.8f, -1.4f), 5.5f,
+            new Vector3(1f, 0.38f, 0.16f), 2.1f, 1.6f);
+    }
+
+    /// <summary>
     /// Draws each control point in its owner's colour. The dais and pillar are baked into the
     /// level, but ownership is the one thing about a control point that changes, so the coloured
     /// part has to be submitted per frame: a slowly turning marker above the pillar plus a light
@@ -4398,6 +4493,9 @@ public sealed class GameWorld
     public void SubmitViewModel(RenderScene scene, int viewIndex, Pawn pawn, in Camera camera)
     {
         if (!pawn.Alive) return;
+        // Aboard a vehicle the hands and gun are simply wrong: the pawn is strapped into
+        // something, and which seat it is strapped into is information the player needs.
+        if (pawn.InVehicle) { SubmitCockpit(scene, viewIndex, pawn, camera); return; }
         var def = pawn.WeaponDef;
         var mesh = _weaponModels.MeshFor(pawn.Weapon);
         if (mesh == null) return;
@@ -4451,6 +4549,89 @@ public sealed class GameWorld
         if (pawn.FireBlend > 0.05f)
             scene.AddLight(pawn.MuzzleWorld(), def.MuzzleLightRadius,
                 def.Tint, def.MuzzleLightIntensity * pawn.FireBlend, 4f);
+    }
+
+    /// <summary>
+    /// The interior of the seat the player is riding in. The archetype tells them their job — a
+    /// yoke means they are steering, a gun mount means they are on a weapon, a rail means they
+    /// are a passenger — and the hull's own tint tells them what they are riding in.
+    /// </summary>
+    private void SubmitCockpit(RenderScene scene, int viewIndex, Pawn pawn, in Camera camera)
+    {
+        var v = FindVehicle(pawn.VehicleId);
+        if (v == null || !v.Alive) return;
+        // The interior is bolted to the hull, so it takes the ride rather than the head: it leans
+        // with roll, pitches with the chassis, and shrugs off the bob a walking pawn would have.
+        // The steering lean is deliberately larger than the hull's — a driver reads their turn
+        // from the yoke swinging, and a rigidly-welded interior gives no such feedback.
+        SubmitCockpitPlate(scene, viewIndex, CockpitModels.For(v.Def, pawn.VehicleSeat), v.Def.Tint,
+            camera, MathX.Clamp(v.YawDelta * 26f, -0.34f, 0.34f),
+            MathX.Clamp(v.Roll, -0.5f, 0.5f), MathX.Clamp(v.Pitch, -0.4f, 0.4f));
+    }
+
+    /// <summary>
+    /// Draws one interior against an explicit kind and tint. Separated from the riding path so
+    /// the documentation capture can photograph every variant without needing a live vehicle and
+    /// a seat to sit in — the whole point being that the picture shows the same mesh the game
+    /// draws, not a stand-in built for the screenshot.
+    /// </summary>
+    public void SubmitCockpitPlate(RenderScene scene, int viewIndex, CockpitKind kind, Vector3 tintColor,
+        in Camera camera, float steer = 0f, float sway = 0f, float lift = 0f)
+    {
+        if (_cockpitModels == null) return;
+        Mesh mesh = _cockpitModels.MeshFor(kind);
+        if (mesh == null) return;
+        // CockpitModels authors its geometry against a 90° vertical field of view, where the
+        // visible half-height at depth d is exactly d. The gameplay camera derives its vertical
+        // FOV from the player's horizontal setting and the aspect — about 63° by default — so the
+        // interior has to be brought in to match, or it sits entirely off the bottom and sides.
+        //
+        // The correction is in X and Y only. Scaling uniformly is what the first attempt did and
+        // it changes nothing at all: a uniform scale about the camera moves every vertex along
+        // its own view ray, so every angle — and therefore the whole picture — is identical.
+        float fit = MathF.Tan(camera.FovY * 0.5f);
+        Matrix4x4 local = Matrix4x4.CreateScale(fit, fit, 1f)
+                        * Matrix4x4.CreateRotationZ(-steer * 0.9f + sway * 0.35f)
+                        * Matrix4x4.CreateRotationX(lift * 0.5f);
+
+        Matrix4x4 view = Matrix4x4.CreateWorld(camera.Position, camera.Forward, camera.Up);
+        Matrix4x4 xf = local * view;
+
+        foreach (var section in _cockpitModels.SectionsFor(kind))
+        {
+            Material mat = Materials.Get(section.Material);
+            // Tint the structural panels with the vehicle's colour and leave the lit strips and
+            // grips alone, so each chassis reads as its own machine without turning the whole
+            // interior into a block of flat colour. Darkened well below the exterior: an interior
+            // is a shaded box, and at full brightness under an open sky the dashboard lit up the
+            // same value as the sand in front of it and stopped reading as an interior at all.
+            bool structural = section.Material == (int)MatId.ArmorPlate
+                || section.Material == (int)MatId.RustMetal;
+            Vector4 tint = structural
+                ? new Vector4(tintColor * 0.32f, 1f)
+                : new Vector4(mat.BaseColor.X * 0.55f, mat.BaseColor.Y * 0.55f,
+                    mat.BaseColor.Z * 0.55f, mat.BaseColor.W);
+            scene.Opaque.Add(new DrawCall
+            {
+                Mesh = mesh,
+                IndexOffset = section.IndexOffset,
+                IndexCount = section.IndexCount,
+                Material = mat,
+                Transform = xf,
+                BoneBase = -1,
+                Tint = tint,
+                Emissive = mat.Emissive,
+                Alpha = 1f,
+                Center = camera.Position,
+                Radius = 2f,
+                CastShadow = false,
+                RimStrength = 0.30f,
+                RimColor = tintColor * 0.6f,
+                UvScale = mat.UvScale,
+                OwnerView = viewIndex,
+                FirstPerson = true,
+            });
+        }
     }
 
     // ---------------------------------------------------------------- sound mapping

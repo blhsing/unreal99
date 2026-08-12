@@ -277,6 +277,8 @@ public static class Loc
     public const string VehDarkwalker = "暗行者";
     public const string VehHoverboard = "懸浮滑板";
 
+    public const string HudNoFreeSeat = "沒有其他空位";
+    public static string SeatMoved(string role) => $"換到{role}座";
     public const string VehSeatDriver = "駕駛";
     public const string VehSeatPilot = "飛行員";
     public const string VehSeatGunner = "射手";

@@ -87,6 +87,12 @@ public sealed class PlayerController : Controller
         var input = new PawnInput { WeaponSelect = -1 };
         if (Pawn == null) return input;
 
+        // Riding: the hull carries the view round with it, so steering left actually looks left.
+        // Applied to the accumulated yaw rather than replacing it, which leaves the mouse free to
+        // look around from wherever the vehicle currently points.
+        if (Pawn.InVehicle && world.FindVehicle(Pawn.VehicleId) is { Alive: true } ride)
+            _yaw = MathX.WrapAngle(_yaw + ride.YawDelta);
+
         if (DocumentationFireMode >= 0)
         {
             _documentationFireTime += dt;
@@ -196,6 +202,7 @@ public sealed class PlayerController : Controller
 
         input.UseVehicle = _input.ActionPressed(Device, GameAction.UseVehicle);
         input.Hoverboard = _input.ActionPressed(Device, GameAction.Hoverboard);
+        input.SwitchSeat = _input.ActionPressed(Device, GameAction.SwitchSeat);
         input.Jump = _input.ActionDown(Device, GameAction.Jump);
         input.Crouch = _input.ActionDown(Device, GameAction.Crouch);
         input.Fire = _input.ActionDown(Device, GameAction.Fire);
@@ -254,10 +261,16 @@ public sealed class PlayerController : Controller
 
         if (_input.PadPressed(pad, ButtonName.Y)) input.WeaponCycle = 1;
         if (_input.PadPressed(pad, ButtonName.X)) input.WeaponCycle = -1;
-        if (_input.PadPressed(pad, ButtonName.DPadUp)) input.WeaponSelect = (int)WeaponKind.RocketLauncher;
-        if (_input.PadPressed(pad, ButtonName.DPadDown)) input.WeaponSelect = (int)WeaponKind.ShockRifle;
         if (_input.PadPressed(pad, ButtonName.DPadLeft)) input.WeaponSelect = (int)WeaponKind.FlakCannon;
         if (_input.PadPressed(pad, ButtonName.DPadRight)) input.WeaponSelect = (int)WeaponKind.SniperRifle;
+
+        // Vehicles. A pad had none of these at all, which left a pad player unable to board
+        // anything — the three vehicle modes were simply not playable on one. The right stick is
+        // the only button the scheme had genuinely spare, so the other two come from the D-pad:
+        // it kept four weapon shortcuts, and X/Y cycling already reaches every weapon anyway.
+        input.UseVehicle = _input.PadPressed(pad, ButtonName.RightStick);
+        input.Hoverboard = _input.PadPressed(pad, ButtonName.DPadUp);
+        input.SwitchSeat = _input.PadPressed(pad, ButtonName.DPadDown);
 
         if (_input.PadPressed(pad, ButtonName.LeftStick) && _padDodgeCooldown <= 0f && axis != Vector2.Zero)
         {

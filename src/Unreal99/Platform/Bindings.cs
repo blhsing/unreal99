@@ -15,6 +15,8 @@ public enum GameAction
     UseVehicle,
     /// <summary>Deploy or stow the personal hoverboard.</summary>
     Hoverboard,
+    /// <summary>Move to the next vacant seat of the vehicle already being ridden.</summary>
+    SwitchSeat,
     Weapon1, Weapon2, Weapon3, Weapon4, Weapon5,
     Weapon6, Weapon7, Weapon8, Weapon9, Weapon10,
     Count
@@ -70,6 +72,7 @@ public sealed class BindingProfile
             p[GameAction.Jump] = InputBinding.OnKey(Key.Space);
             p[GameAction.UseVehicle] = InputBinding.OnKey(Key.F);
             p[GameAction.Hoverboard] = InputBinding.OnKey(Key.R);
+            p[GameAction.SwitchSeat] = InputBinding.OnKey(Key.C);
             p[GameAction.Crouch] = InputBinding.OnKey(Key.ControlLeft);
             p[GameAction.NextWeapon] = InputBinding.OnKey(Key.E);
             p[GameAction.PrevWeapon] = InputBinding.OnKey(Key.Q);
@@ -96,6 +99,7 @@ public sealed class BindingProfile
             p[GameAction.Jump] = InputBinding.OnKey(Key.ShiftRight);
             p[GameAction.UseVehicle] = InputBinding.OnKey(Key.Enter);
             p[GameAction.Hoverboard] = InputBinding.OnKey(Key.KeypadAdd);
+            p[GameAction.SwitchSeat] = InputBinding.OnKey(Key.KeypadSubtract);
             p[GameAction.Crouch] = InputBinding.OnKey(Key.ControlRight);
             p[GameAction.NextWeapon] = InputBinding.OnKey(Key.PageUp);
             p[GameAction.PrevWeapon] = InputBinding.OnKey(Key.PageDown);
@@ -117,6 +121,7 @@ public sealed class BindingProfile
             // one and two on the same shared keyboard. K sits beside the YGHJ cluster and is free.
             p[GameAction.UseVehicle] = InputBinding.OnKey(Key.K);
             p[GameAction.Hoverboard] = InputBinding.OnKey(Key.V);
+            p[GameAction.SwitchSeat] = InputBinding.OnKey(Key.L);
             p[GameAction.NextWeapon] = InputBinding.OnKey(Key.U);
             p[GameAction.PrevWeapon] = InputBinding.OnKey(Key.T);
             p[GameAction.Scoreboard] = InputBinding.OnKey(Key.B);
@@ -136,6 +141,7 @@ public sealed class BindingProfile
             p[GameAction.Jump] = InputBinding.OnKey(Key.ShiftRight);
             p[GameAction.UseVehicle] = InputBinding.OnKey(Key.Enter);
             p[GameAction.Hoverboard] = InputBinding.OnKey(Key.KeypadAdd);
+            p[GameAction.SwitchSeat] = InputBinding.OnKey(Key.KeypadSubtract);
             p[GameAction.Crouch] = InputBinding.OnKey(Key.ControlRight);
             p[GameAction.NextWeapon] = InputBinding.OnKey(Key.PageUp);
             p[GameAction.PrevWeapon] = InputBinding.OnKey(Key.PageDown);
@@ -236,6 +242,7 @@ public static class BindingNames
         GameAction.Scoreboard => "計分板",
         GameAction.UseVehicle => "上下載具",
         GameAction.Hoverboard => "氣墊滑板",
+        GameAction.SwitchSeat => "切換座位",
         >= GameAction.Weapon1 and <= GameAction.Weapon10 => $"武器槽 {action - GameAction.Weapon1 + 1}",
         _ => "",
     };

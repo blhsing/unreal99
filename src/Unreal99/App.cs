@@ -47,6 +47,7 @@ public sealed class App : IDisposable
     private ProjectileModels _projectileModels;
     private PickupModels _pickupModels;
     private VehicleModels _vehicleModels;
+    private CockpitModels _cockpitModels;
 
     private GameWorld _world;
     private Level _level;
@@ -82,6 +83,9 @@ public sealed class App : IDisposable
     private bool _autoStartMatch;
     private int _loadSlotAtBoot = -1;
     private int _forceWeapon = -1;
+    private int _cockpitShot = -1;
+    private string _cockpitShotPath;
+    private int _cockpitShotFrame;
     private bool _demoMode;
     private bool _windowed;
     private bool _flyby;
@@ -430,6 +434,22 @@ public sealed class App : IDisposable
                     // which is otherwise awkward because the pawn auto-selects its best gun.
                     if (int.TryParse(args[i + 1], out int wk)) _forceWeapon = wk;
                     i++;
+                    break;
+                case "--cockpitshot" when i + 2 < args.Length:
+                    // One clean plate of a chosen interior. Photographing these in a live match
+                    // means waiting for a bot to leave the right seat of the right vehicle free;
+                    // this draws the same mesh the game draws, with nothing else in the frame.
+                    if (int.TryParse(args[i + 1], out int ck)) _cockpitShot = ck;
+                    _cockpitShotPath = args[i + 2];
+                    _menu.Map = MapId.Torlan;
+                    _menu.ModeKind = GameModeKind.Onslaught;
+                    _menu.LocalPlayers = 1;
+                    _menu.BotCount = 0;
+                    _cliOverrides.UnionWith(["map", "mode", "players", "bots"]);
+                    _autoStartMatch = true;
+                    _windowed = true;
+                    _noHud = true;
+                    i += 2;
                     break;
                 case "--vehicletest":
                     // Boards the production Godlike autopilot into every vehicle in turn and
@@ -1552,6 +1572,7 @@ public sealed class App : IDisposable
                 _projectileModels = new ProjectileModels(_gl);
                 _pickupModels = new PickupModels(_gl);
                 _vehicleModels = new VehicleModels(_gl);
+                _cockpitModels = new CockpitModels(_gl);
                 _renderer.BuildWeaponHudAtlas(_weaponModels);
                 _hud.WeaponThumbnailAtlas = _renderer.WeaponHudAtlas;
                 break;
@@ -1559,7 +1580,8 @@ public sealed class App : IDisposable
                 _menuLevel = Maps.Build(_gl, MapId.Deck16);
                 break;
             default:
-                _world = new GameWorld(_renderer, _character, _weaponModels, _projectileModels, _pickupModels, _vehicleModels);
+                _world = new GameWorld(_renderer, _character, _weaponModels, _projectileModels,
+                    _pickupModels, _vehicleModels, _cockpitModels);
                 _world.OnSound = PlaySound;
                 if (_loadSlotAtBoot >= 0 && SaveStore.Read(_loadSlotAtBoot) != null)
                     LoadFromSlot(_loadSlotAtBoot);
@@ -2145,7 +2167,16 @@ public sealed class App : IDisposable
         var viewports = ComputeViewports(viewCount, Width, Height, _menu.VerticalSplit);
 
         _scene.Clear();
-        if ((_weaponProfileCapture >= 0 || _vehicleTurntableCapture >= 0) && _players.Count > 0)
+        if (_cockpitShot >= 0 && _players.Count > 0)
+        {
+            _renderer.Particles.Clear();
+            _renderer.Effects.Clear();
+            _world.SubmitCockpitTurntable(_scene,
+                (CockpitKind)MathX.Clamp(_cockpitShot, 0, (int)CockpitKind.Count - 1),
+                WeaponTurntableBase, 0.9f, VehicleDef.Get(VehicleKind.Hellbender).Tint);
+            _scene.StudioPlate = true;
+        }
+        else if ((_weaponProfileCapture >= 0 || _vehicleTurntableCapture >= 0) && _players.Count > 0)
         {
             // Match updates can still emit ambient arena particles; exclude them from the clean
             // capture plate so only the intended live weapon scene is visible.
@@ -2184,6 +2215,7 @@ public sealed class App : IDisposable
             var pawn = _players[i].Pawn;
             var rect = viewports[Math.Min(i, viewports.Length - 1)];
             _cameras[i] = BuildCamera(pawn, _players[i], rect, dt);
+            if (_cockpitShot >= 0) continue;
             if (!_noHud) _world.SubmitViewModel(_scene, i, pawn, _cameras[i]);
         }
 
@@ -2272,6 +2304,19 @@ public sealed class App : IDisposable
         cam.FovY = VerticalFov(targetFov, aspect);
         cam.Near = 0.055f;
         cam.Far = 600f;
+
+        if (_cockpitShot >= 0 && controller.PlayerIndex == 0)
+        {
+            // Three-quarter view from slightly above: the dash, one pillar and the seat's own
+            // control all read at once, which a straight-on shot flattens.
+            cam.Position = WeaponTurntableBase + new Vector3(1.28f, 1.42f, 2.10f);
+            Vector3 look = MathX.SafeNormalize(
+                WeaponTurntableBase + new Vector3(0f, 0.86f, 0f) - cam.Position, -MathX.Forward);
+            MathX.YawPitchFromDir(look, out cam.Yaw, out cam.Pitch);
+            cam.Roll = 0f;
+            cam.Update(aspect);
+            return cam;
+        }
 
         if ((_weaponProfileCapture >= 0 || _vehicleTurntableCapture >= 0)
             && controller.PlayerIndex == 0)
@@ -3527,6 +3572,18 @@ public sealed class App : IDisposable
             SaveScreenshot(path, copyToClipboard: true);
         _pendingScreenshots.Clear();
 
+        // A few frames of warm-up so the plate is lit and the first-frame flash is gone.
+        if (_cockpitShot >= 0 && _cockpitShotPath != null && _state == AppState.Playing)
+        {
+            if (++_cockpitShotFrame < 30) return;
+            string cockpitDir = Path.GetDirectoryName(_cockpitShotPath);
+            if (!string.IsNullOrEmpty(cockpitDir)) Directory.CreateDirectory(cockpitDir);
+            SaveScreenshot(_cockpitShotPath);
+            Console.WriteLine($"座艙截圖已儲存: {_cockpitShotPath}");
+            _window.Close();
+            return;
+        }
+
         if (_autoShotFrames < 0) return;
         if (_traversalTest && (_state != AppState.Playing || _world == null ||
             _world.ResumeCountdown > 0f || _world.Mode.State == MatchState.Warmup)) return;
@@ -3891,6 +3948,7 @@ public sealed class App : IDisposable
         _weaponModels?.Dispose();
         _projectileModels?.Dispose();
         _pickupModels?.Dispose();
+        _cockpitModels?.Dispose();
         if (_level != _menuLevel) _level?.Dispose();
         _menuLevel?.Dispose();
         _renderer?.Dispose();

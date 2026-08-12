@@ -17,6 +17,7 @@ if (args.Contains("--aimtest"))
     return BotAimPrediction.RunSelfTest() | BotController.RunDifficultySelfTest();
 if (args.Contains("--moderulestest")) return ObjectiveModeSelfTest.Run();
 if (args.Contains("--vehiclecoverage")) return VehicleCoverageSelfTest.Run();
+if (args.Contains("--vehiclecontrol")) return VehicleControlSelfTest.Run();
 if (args.Contains("--weaponcoverage")) return WeaponCoverageSelfTest.Run();
 if (args.Contains("--weaponmechanicstest")) return WeaponMechanicsSelfTest.Run();
 if (args.Contains("--collisiontest")) return CollisionWorld.RunStepTraversalSelfTest();

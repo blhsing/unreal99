@@ -273,6 +273,73 @@ public sealed class VehicleModels : IDisposable
         mb.Material = restore;
     }
 
+    // ================================================================ Necris detail
+    // The Axon vehicles carry their density in wheels, suspension and turret hardware. The Necris
+    // craft have none of that — they are smooth shells — so without their own vocabulary of parts
+    // they came out at a fraction of the roster's triangle count and read as untextured blanks
+    // beside a Scorpion. These are the pieces that give a grown hull its surface.
+
+    /// <summary>
+    /// Necris rib: a raised spar running along a hull, tapering at both ends. Grown armour rather
+    /// than bolted plate, so the ribs are the equivalent of the Axon vehicles' panel seams.
+    /// </summary>
+    private static void Rib(MeshBuilder mb, Vector3 from, Vector3 to, float thickness, int steps = 6)
+    {
+        var arc = new List<MeshBuilder.LoftStation>(steps + 1);
+        for (int i = 0; i <= steps; i++)
+        {
+            float t = i / (float)steps;
+            // Fattest in the middle, closed at both tips.
+            float scale = MathF.Sin(t * MathX.Pi) * 0.85f + 0.15f;
+            arc.Add(new MeshBuilder.LoftStation(Vector3.Lerp(from, to, t),
+                new Vector2(thickness * scale, thickness * scale * 0.55f)));
+        }
+        mb.AddLoft(Sections.RoundedRect(1f, 0.7f, 0.4f, 3),
+            System.Runtime.InteropServices.CollectionsMarshal.AsSpan(arc), false, false);
+    }
+
+    /// <summary>A row of glowing vents let into a hull — the Necris equivalent of a light strip.</summary>
+    private static void Vents(MeshBuilder mb, Vector3 from, Vector3 to, int count, float size)
+    {
+        int restore = mb.Material;
+        for (int i = 0; i < count; i++)
+        {
+            Vector3 p = Vector3.Lerp(from, to, count == 1 ? 0.5f : i / (float)(count - 1));
+            mb.Material = (int)MatId.TechPanelDark;
+            mb.AddBox(p, new Vector3(size * 1.25f, size * 0.5f, size * 0.5f));
+            mb.Material = (int)MatId.EnergyPanel;
+            mb.AddBox(p + new Vector3(0f, size * 0.30f, 0f), new Vector3(size, size * 0.22f, size * 0.3f));
+        }
+        mb.Material = restore;
+    }
+
+    /// <summary>
+    /// A claw: three tapering talons around a socket. Necris craft land and grip on these instead
+    /// of wheels or skids, and they are what stops the undersides being featureless.
+    /// </summary>
+    private static void Claw(MeshBuilder mb, Vector3 root, float reach, float spread, float thickness)
+    {
+        int restore = mb.Material;
+        mb.Material = (int)MatId.RustMetal;
+        mb.AddSphere(root, thickness * 1.8f, 8, 10);
+        mb.Material = (int)MatId.Trim;
+        for (int i = 0; i < 3; i++)
+        {
+            float a = i / 3f * MathX.TwoPi + 0.5f;
+            Vector3 mid = root + new Vector3(MathF.Cos(a) * spread, -reach * 0.55f, MathF.Sin(a) * spread);
+            Vector3 tip = root + new Vector3(MathF.Cos(a) * spread * 1.5f, -reach,
+                MathF.Sin(a) * spread * 1.5f);
+            Span<MeshBuilder.LoftStation> talon =
+            [
+                new(root, new Vector2(thickness, thickness)),
+                new(mid, new Vector2(thickness * 0.7f, thickness * 0.7f)),
+                new(tip, new Vector2(thickness * 0.25f, thickness * 0.25f)),
+            ];
+            mb.AddLoft(Sections.Circle(1f, 7), talon, false, true);
+        }
+        mb.Material = restore;
+    }
+
     // ================================================================ the vehicles
 
     /// <summary>Sloped-armour cross-section: flat deck, chined sides. Unit-sized, scaled per station.</summary>
@@ -282,6 +349,18 @@ public sealed class VehicleModels : IDisposable
 
     /// <summary>Smooth aerodynamic cross-section for fliers and hovercraft.</summary>
     private static Vector2[] FairingSection() => Sections.Superellipse(1f, 1f, 2.6f, 18);
+
+    /// <summary>
+    /// Triangle count without a GL context. Used to hold the first-person interiors to the same
+    /// density as the exteriors they belong to.
+    /// </summary>
+    public static int TriangleCountFor(VehicleKind kind)
+    {
+        var mb = new MeshBuilder { WorldUv = false, Material = (int)MatId.ArmorPlate };
+        Build(kind, mb);
+        var (_, indices, _) = mb.Build();
+        return indices.Length / 3;
+    }
 
     private static void Build(VehicleKind kind, MeshBuilder mb)
     {
@@ -951,6 +1030,24 @@ public sealed class VehicleModels : IDisposable
         // The self-destruct core, glowing through the spine.
         mb.AddLathe([new Vector2(0.13f, -0.28f), new Vector2(0.19f, 0f), new Vector2(0.13f, 0.28f)],
             new Vector3(0f, 0.60f, -0.20f), 12, capBottom: false, capTop: false);
+
+        // Grown ribbing down the spine and along both flanks, the glow slots between them, and
+        // the landing claws underneath.
+        mb.Material = (int)MatId.Trim;
+        Rib(mb, new Vector3(0f, 0.74f, 1.30f), new Vector3(0f, 0.80f, -1.30f), 0.075f, 8);
+        foreach (int s in new[] { -1, 1 })
+        {
+            Rib(mb, new Vector3(s * 0.34f, 0.46f, 1.40f), new Vector3(s * 0.46f, 0.52f, -1.35f), 0.055f, 7);
+            Rib(mb, new Vector3(s * 0.20f, 0.16f, 1.20f), new Vector3(s * 0.30f, 0.20f, -1.20f), 0.045f, 6);
+            Vents(mb, new Vector3(s * 0.42f, 0.60f, 0.55f), new Vector3(s * 0.46f, 0.62f, -0.55f), 4, 0.055f);
+            Claw(mb, new Vector3(s * 0.36f, 0.14f, 0.62f), 0.30f, 0.10f, 0.045f);
+            Claw(mb, new Vector3(s * 0.34f, 0.14f, -0.72f), 0.30f, 0.10f, 0.045f);
+        }
+        // Intake scoops either side of the nose.
+        mb.Material = (int)MatId.RustMetal;
+        foreach (int s in new[] { -1, 1 })
+            mb.AddLathe([new Vector2(0.10f, -0.14f), new Vector2(0.16f, 0f), new Vector2(0.09f, 0.16f)],
+                new Vector3(s * 0.30f, 0.44f, 1.05f), 10, capBottom: false, capTop: false);
     }
 
     /// <summary>Scavenger: an energy sphere carried in a three-legged cradle.</summary>
@@ -1065,6 +1162,26 @@ public sealed class VehicleModels : IDisposable
         }
         Thruster(mb, new Vector3(-0.42f, 0.78f, -2.10f), 0.17f, 0.26f);
         Thruster(mb, new Vector3(0.42f, 0.78f, -2.10f), 0.17f, 0.26f);
+
+        // A support craft is the one that should look busiest: it carries the deployables it
+        // hands out, so the hull is ribbed, vented and hung with claws and canisters.
+        mb.Material = (int)MatId.Trim;
+        Rib(mb, new Vector3(0f, 1.34f, 1.90f), new Vector3(0f, 0.92f, -2.05f), 0.10f, 9);
+        foreach (int s in new[] { -1, 1 })
+        {
+            Rib(mb, new Vector3(s * 0.50f, 1.02f, 1.95f), new Vector3(s * 0.66f, 0.86f, -2.00f), 0.075f, 8);
+            Rib(mb, new Vector3(s * 0.34f, 0.34f, 1.70f), new Vector3(s * 0.44f, 0.40f, -1.80f), 0.055f, 7);
+            Vents(mb, new Vector3(s * 0.62f, 1.00f, 0.85f), new Vector3(s * 0.68f, 0.94f, -1.05f), 5, 0.07f);
+            Claw(mb, new Vector3(s * 0.52f, 0.30f, 1.05f), 0.40f, 0.14f, 0.058f);
+            Claw(mb, new Vector3(s * 0.50f, 0.30f, -1.15f), 0.40f, 0.14f, 0.058f);
+            // Deployable canisters slung under the spine.
+            mb.Material = (int)MatId.RustMetal;
+            for (int i = 0; i < 3; i++)
+                mb.AddLathe([new Vector2(0f, -0.16f), new Vector2(0.11f, -0.11f),
+                        new Vector2(0.11f, 0.11f), new Vector2(0f, 0.16f)],
+                    new Vector3(s * 0.78f, 0.66f, 0.55f - i * 0.55f), 10);
+            mb.Material = (int)MatId.Trim;
+        }
     }
 
     /// <summary>Fury: a Necris interceptor — a thin dart with long curved blade wings.</summary>
@@ -1097,6 +1214,26 @@ public sealed class VehicleModels : IDisposable
         mb.Material = (int)MatId.EnergyPanel;
         Thruster(mb, new Vector3(0f, 0.82f, -2.05f), 0.24f, 0.34f);
         LinkedCannons(mb, new Vector3(0f, 0.74f, 1.35f), 0.17f, 0.60f, 0.042f);
+
+        // Spine and wing-root ribbing, glow slots along the flanks, and the talons it perches on.
+        mb.Material = (int)MatId.Trim;
+        Rib(mb, new Vector3(0f, 1.00f, 1.70f), new Vector3(0f, 0.92f, -1.85f), 0.085f, 9);
+        foreach (int s in new[] { -1, 1 })
+        {
+            Rib(mb, new Vector3(s * 0.30f, 0.80f, 0.50f), new Vector3(s * 1.55f, 0.98f, -0.70f), 0.060f, 7);
+            Rib(mb, new Vector3(s * 0.34f, 0.30f, 1.45f), new Vector3(s * 0.44f, 0.36f, -1.60f), 0.050f, 7);
+            Vents(mb, new Vector3(s * 0.46f, 0.66f, 0.75f), new Vector3(s * 0.52f, 0.70f, -0.85f), 4, 0.060f);
+            Claw(mb, new Vector3(s * 0.40f, 0.24f, 0.55f), 0.34f, 0.12f, 0.048f);
+            Claw(mb, new Vector3(s * 0.38f, 0.24f, -0.95f), 0.34f, 0.12f, 0.048f);
+            // Wing-tip rakes, the silhouette detail a Fury is recognised by.
+            Span<MeshBuilder.LoftStation> rake =
+            [
+                new(new Vector3(s * 1.95f, 1.20f, -0.85f), new Vector2(0.16f, 0.030f)),
+                new(new Vector3(s * 2.05f, 1.52f, -1.15f), new Vector2(0.09f, 0.018f)),
+                new(new Vector3(s * 2.02f, 1.78f, -1.40f), new Vector2(0.035f, 0.010f)),
+            ];
+            mb.AddLoft(Sections.Airfoil(1f, 0.30f, 5), rake);
+        }
     }
 
     /// <summary>
