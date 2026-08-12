@@ -4490,12 +4490,13 @@ public sealed class GameWorld
     }
 
     /// <summary>Adds the first-person weapon for one view. Called once per local player.</summary>
-    public void SubmitViewModel(RenderScene scene, int viewIndex, Pawn pawn, in Camera camera)
+    public void SubmitViewModel(RenderScene scene, int viewIndex, Pawn pawn, in Camera camera,
+        float aspect = 16f / 9f)
     {
         if (!pawn.Alive) return;
         // Aboard a vehicle the hands and gun are simply wrong: the pawn is strapped into
         // something, and which seat it is strapped into is information the player needs.
-        if (pawn.InVehicle) { SubmitCockpit(scene, viewIndex, pawn, camera); return; }
+        if (pawn.InVehicle) { SubmitCockpit(scene, viewIndex, pawn, camera, aspect); return; }
         var def = pawn.WeaponDef;
         var mesh = _weaponModels.MeshFor(pawn.Weapon);
         if (mesh == null) return;
@@ -4556,7 +4557,7 @@ public sealed class GameWorld
     /// yoke means they are steering, a gun mount means they are on a weapon, a rail means they
     /// are a passenger — and the hull's own tint tells them what they are riding in.
     /// </summary>
-    private void SubmitCockpit(RenderScene scene, int viewIndex, Pawn pawn, in Camera camera)
+    private void SubmitCockpit(RenderScene scene, int viewIndex, Pawn pawn, in Camera camera, float aspect)
     {
         var v = FindVehicle(pawn.VehicleId);
         if (v == null || !v.Alive) return;
@@ -4565,7 +4566,7 @@ public sealed class GameWorld
         // The steering lean is deliberately larger than the hull's — a driver reads their turn
         // from the yoke swinging, and a rigidly-welded interior gives no such feedback.
         SubmitCockpitPlate(scene, viewIndex, CockpitModels.For(v.Def, pawn.VehicleSeat), v.Def.Tint,
-            camera, MathX.Clamp(v.YawDelta * 26f, -0.34f, 0.34f),
+            camera, aspect, MathX.Clamp(v.YawDelta * 26f, -0.34f, 0.34f),
             MathX.Clamp(v.Roll, -0.5f, 0.5f), MathX.Clamp(v.Pitch, -0.4f, 0.4f));
     }
 
@@ -4576,20 +4577,23 @@ public sealed class GameWorld
     /// draws, not a stand-in built for the screenshot.
     /// </summary>
     public void SubmitCockpitPlate(RenderScene scene, int viewIndex, CockpitKind kind, Vector3 tintColor,
-        in Camera camera, float steer = 0f, float sway = 0f, float lift = 0f)
+        in Camera camera, float aspect, float steer = 0f, float sway = 0f, float lift = 0f)
     {
         if (_cockpitModels == null) return;
         Mesh mesh = _cockpitModels.MeshFor(kind);
         if (mesh == null) return;
         // CockpitModels authors its geometry against a 90° vertical field of view, where the
-        // visible half-height at depth d is exactly d. The gameplay camera derives its vertical
-        // FOV from the player's horizontal setting and the aspect — about 63° by default — so the
-        // interior has to be brought in to match, or it sits entirely off the bottom and sides.
+        // visible half-height at depth d is exactly d. It has to be brought in to match the
+        // projection it is actually drawn with — and that is NOT the player's camera. The
+        // renderer gives first-person geometry its own fixed 58° frustum so a wide FOV setting
+        // cannot stretch the held weapon, which at 16:9 is about 35° vertical against the
+        // camera's 63°. Fitting to the camera left the interior roughly twice too large, with
+        // only its outer corners intruding on the frame.
         //
-        // The correction is in X and Y only. Scaling uniformly is what the first attempt did and
+        // The correction is in X and Y only. Scaling uniformly is what an earlier attempt did and
         // it changes nothing at all: a uniform scale about the camera moves every vertex along
         // its own view ray, so every angle — and therefore the whole picture — is identical.
-        float fit = MathF.Tan(camera.FovY * 0.5f);
+        float fit = Renderer.ViewModelFit(aspect);
         Matrix4x4 local = Matrix4x4.CreateScale(fit, fit, 1f)
                         * Matrix4x4.CreateRotationZ(-steer * 0.9f + sway * 0.35f)
                         * Matrix4x4.CreateRotationX(lift * 0.5f);

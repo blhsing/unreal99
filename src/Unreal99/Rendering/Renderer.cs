@@ -634,6 +634,23 @@ public sealed class Renderer : IDisposable
     /// front sliver of the depth buffer. The narrow FOV keeps the model a sane on-screen size
     /// regardless of the player's field of view, and the depth range stops it clipping into walls.
     /// </summary>
+    /// <summary>
+    /// First-person geometry is projected with its own fixed field of view rather than the
+    /// player's, so a wide FOV setting cannot stretch the held weapon. Anything authored to fill
+    /// the first-person frame has to be sized against <em>this</em>, not the camera — sizing a
+    /// vehicle interior against the camera's 63° left it about twice too large and almost
+    /// entirely off screen.
+    /// </summary>
+    public const float WeaponFovDegrees = 58f;
+
+    /// <summary>
+    /// Half-tangent of the view-model projection: the visible half-height at depth d is d times
+    /// this. Geometry authored against a 90° vertical FOV (half-tangent 1) is scaled in X and Y
+    /// by this to frame correctly.
+    /// </summary>
+    public static float ViewModelFit(float aspect)
+        => MathF.Tan(MathX.VerticalFov(WeaponFovDegrees * MathX.Deg2Rad, aspect) * 0.5f);
+
     private void RenderViewModel(int viewIndex, in Camera camera, RenderScene scene, int nLights, float aspect)
     {
         bool any = false;
@@ -641,7 +658,6 @@ public sealed class Renderer : IDisposable
             if (dc.FirstPerson && dc.OwnerView == viewIndex) { any = true; break; }
         if (!any) return;
 
-        const float WeaponFovDegrees = 58f;
         Matrix4x4 proj = MathX.Perspective(MathX.VerticalFov(WeaponFovDegrees * MathX.Deg2Rad, aspect),
             aspect, 0.012f, 12f);
         Matrix4x4 viewProj = camera.View * proj;

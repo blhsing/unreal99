@@ -2216,7 +2216,7 @@ public sealed class App : IDisposable
             var rect = viewports[Math.Min(i, viewports.Length - 1)];
             _cameras[i] = BuildCamera(pawn, _players[i], rect, dt);
             if (_cockpitShot >= 0) continue;
-            if (!_noHud) _world.SubmitViewModel(_scene, i, pawn, _cameras[i]);
+            if (!_noHud) _world.SubmitViewModel(_scene, i, pawn, _cameras[i], rect.Aspect);
         }
 
         // --- shadows once for the whole frame, focused on the first player ---
