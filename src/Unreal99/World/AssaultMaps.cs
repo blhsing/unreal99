@@ -54,6 +54,9 @@ public static partial class Maps
         b.Solid(new Vector3(-250f, -6f, -130f), new Vector3(250f, Sand, 130f), MatId.Rock, true, 0.35f);
         b.Room(new Vector3(-254f, -6f, -134f), new Vector3(254f, 34f, 134f), 4f,
             MatId.Rock, MatId.Rock, MatId.Rock, withCeiling: false, withFloor: false);
+        // Desert canyon: strata and spurs up the walls so the convoy runs through rock rather
+        // than between two painted planes, plus the line of masts following the road.
+        DressOutdoor(b, 254f, 134f, -6f, 34f, MatId.Rock, MatId.Trim, 8);
 
         var rng = new Rng(0x0C07);
         // Dunes: low and broad near the convoy, taller further out, so the eye reads distance.
@@ -270,6 +273,7 @@ public static partial class Maps
         // arena only needs to be closed, not enclosed.
         b.Room(new Vector3(-94f, -10f, -64f), new Vector3(94f, 38f, 64f), 4f,
             MatId.Rock, MatId.Rock, MatId.Rock, withCeiling: false, withFloor: false);
+        DressOutdoor(b, 94f, 64f, -10f, 38f, MatId.Rock, MatId.Trim, 5);
         b.Water(new Vector3(-90f, -1.5f, -60f), new Vector3(90f, WaterTop, 60f));
 
         // --- the cargo bay the attackers start in, on the quay ---
@@ -482,6 +486,7 @@ public static partial class Maps
         b.Water(new Vector3(-150f, -10f, -70f), new Vector3(-92f, Ice - 0.6f, 70f));
         b.Room(new Vector3(-194f, -10f, -74f), new Vector3(194f, 56f, 74f), 4f,
             MatId.Rock, MatId.Rock, MatId.Rock, withCeiling: false, withFloor: false);
+        DressOutdoor(b, 194f, 74f, -10f, 56f, MatId.Rock, MatId.Trim, 7);
         // Attacker shore, then the lake, then the station apron. The apron starts past the ramp,
         // not under it: a ramp buried inside the block it climbs is no ramp at all, and the bots
         // simply stood on the ice.

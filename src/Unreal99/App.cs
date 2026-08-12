@@ -66,6 +66,15 @@ public sealed class App : IDisposable
     private float _fps;
     private float _fpsAccumulator;
     private int _fpsFrames;
+    // Benchmark mode. Frame cost has to be sampled off the wall clock rather than the simulation
+    // delta, because every other automated mode pins dt to a fixed 1/60 and would report the
+    // tick rate back instead of what the GPU actually managed.
+    private bool _benchmark;
+    private int _benchmarkWarmup = 240;
+    private long _benchmarkTriangles;
+    private long _benchmarkDrawCalls;
+    private readonly List<double> _benchmarkSamples = new(8192);
+    private readonly System.Diagnostics.Stopwatch _benchmarkClock = new();
     private bool _showDebug;
     private float _menuCameraAngle;
     private string _statusMessage = "";
@@ -170,7 +179,8 @@ public sealed class App : IDisposable
         options.Title = Loc.WindowTitle;
         options.API = new GraphicsAPI(ContextAPI.OpenGL, ContextProfile.Core, ContextFlags.Default,
             new APIVersion(3, 3));
-        options.VSync = !_traversalTest && !_vehicleTest && _weaponFootageMode < 0
+        // Benchmarking with VSync on measures the monitor, not the renderer.
+        options.VSync = !_traversalTest && !_vehicleTest && !_benchmark && _weaponFootageMode < 0
             && _weaponTurntableDirectory == null && _vehicleTurntableDirectory == null;
         options.PreferredDepthBufferBits = 24;
         options.PreferredStencilBufferBits = 0;
@@ -254,6 +264,31 @@ public sealed class App : IDisposable
                     _renderSettings.Apply(QualityLevel.Low);
                     _cliOverrides.UnionWith(["players", "bots", "skill", "demoskill", "frags",
                         "captures", "domination", "time", "respawn", "quality", "participantteams",
+                        "botskilloverrides"]);
+                    i += 2;
+                    break;
+                case "--benchmark" when i + 2 < args.Length:
+                    // Same deterministic demo match as the traversal gate, but at the quality a
+                    // player actually gets and with the wall clock left alone, so the number means
+                    // frames per second rather than ticks per second.
+                    _benchmark = true;
+                    _windowed = true;
+                    _demoMode = true;
+                    _autoStartMatch = true;
+                    _autoShotFrames = Math.Max(120,
+                        int.TryParse(args[i + 1], out int benchFrames) ? benchFrames : 1800);
+                    _autoShotPath = args[i + 2];
+                    _menu.LocalPlayers = 1;
+                    _menu.BotCount = 3;
+                    _menu.BotSkill = 0;
+                    _menu.DemoSkill = 5;
+                    _menu.FragLimit = 0;
+                    _menu.CaptureLimit = 0;
+                    _menu.DominationLimit = 0;
+                    _menu.TimeLimitMinutes = 0;
+                    _menu.RespawnDelaySeconds = 0;
+                    _cliOverrides.UnionWith(["players", "bots", "skill", "demoskill", "frags",
+                        "captures", "domination", "time", "respawn", "participantteams",
                         "botskilloverrides"]);
                     i += 2;
                     break;
@@ -673,7 +708,7 @@ public sealed class App : IDisposable
         _menu.OnDeleteSlot = DeleteSlot;
 
         LoadUserSettings();
-        if (_traversalTest || _vehicleTest || _weaponFootageMode >= 0) _window.VSync = false;
+        if (_traversalTest || _vehicleTest || _benchmark || _weaponFootageMode >= 0) _window.VSync = false;
         RefreshSaveSlots();
     }
 
@@ -1414,6 +1449,28 @@ public sealed class App : IDisposable
             dt = 1f / 60f;
         _time += dt;
         if (_audio != null) _audio.Time = _time;
+
+        if (_benchmark)
+        {
+            // Sample only live play: menu and warm-up frames render a different scene and would
+            // flatter the result. The first sample after the clock starts is discarded because it
+            // spans level load rather than a frame.
+            if (_state == AppState.Playing)
+            {
+                // Level load, shader compilation and the first texture uploads all land inside the
+                // first second of play and cost hundreds of milliseconds each. Those are startup
+                // cost, not frame cost, so a warm-up is discarded before sampling begins.
+                if (_benchmarkWarmup > 0) _benchmarkWarmup--;
+                else if (_benchmarkClock.IsRunning)
+                {
+                    _benchmarkSamples.Add(_benchmarkClock.Elapsed.TotalMilliseconds);
+                    _benchmarkTriangles += _renderer?.TriangleCount ?? 0;
+                    _benchmarkDrawCalls += _renderer?.DrawCallCount ?? 0;
+                }
+                _benchmarkClock.Restart();
+            }
+            else _benchmarkClock.Reset();
+        }
 
         _fpsAccumulator += dt;
         _fpsFrames++;
@@ -3610,8 +3667,49 @@ public sealed class App : IDisposable
                                   $"速度 {pawn.Velocity.Length():0.00} m/s · " +
                                   $"行進 {_autoShotTravelDistances.GetValueOrDefault(pawnId):0.0} m · " +
                                   $"最長停滯 {_autoShotLongestStalls.GetValueOrDefault(pawnId):0.00} s");
+        if (_benchmark) FinishBenchmark();
         if (_traversalTest) FinishTraversalTest();
         _window.Close();
+    }
+
+    /// <summary>
+    /// Reports the frame-cost distribution gathered during a <c>--benchmark</c> run as one
+    /// machine-readable line. Averages alone hide stalls, so the 1% low — the mean of the slowest
+    /// hundredth of frames — is reported beside them; that is the number a player feels.
+    /// </summary>
+    private void FinishBenchmark()
+    {
+        if (_benchmarkSamples.Count < 8)
+        {
+            Console.WriteLine("BENCHMARK FAIL 樣本不足");
+            return;
+        }
+
+        var sorted = _benchmarkSamples.ToArray();
+        Array.Sort(sorted);
+        double total = 0;
+        foreach (double ms in sorted) total += ms;
+        double mean = total / sorted.Length;
+        double median = sorted[sorted.Length / 2];
+
+        int lowCount = Math.Max(1, sorted.Length / 100);
+        double lowTotal = 0;
+        for (int i = sorted.Length - lowCount; i < sorted.Length; i++) lowTotal += sorted[i];
+        double onePercentLow = lowTotal / lowCount;
+
+        // On a contended desktop the scheduler only ever *adds* time to a frame, so the fast tail
+        // is the uncontended cost and the slow tail is the machine, not the renderer. p10 is the
+        // figure to compare builds on; the mean and the 1% low describe this box, not the change.
+        double best = sorted[0];
+        double p10 = sorted[Math.Min(sorted.Length - 1, sorted.Length / 10)];
+
+        Console.WriteLine($"BENCHMARK map={(int)_menu.Map} name={Maps.Name(_menu.Map)} "
+            + $"frames={sorted.Length} "
+            + $"tris_per_frame={_benchmarkTriangles / sorted.Length} "
+            + $"draws_per_frame={_benchmarkDrawCalls / sorted.Length} "
+            + $"min_ms={best:0.000} p10_ms={p10:0.000} median_ms={median:0.000} "
+            + $"mean_ms={mean:0.000} p99_ms={onePercentLow:0.000} "
+            + $"p10_fps={1000.0 / p10:0.0} median_fps={1000.0 / median:0.0}");
     }
 
     /// <summary>

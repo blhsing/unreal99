@@ -28,6 +28,20 @@ public sealed class MeshBuilder
 
     public int VertexCount => _vertices.Count;
 
+    /// <summary>
+    /// Triangles written so far, across every material. Available without a GL context, so map
+    /// density can be measured headlessly by <c>--mapstats</c> rather than only by eye.
+    /// </summary>
+    public int TriangleCount
+    {
+        get
+        {
+            int indices = 0;
+            foreach (var list in _indicesByMaterial.Values) indices += list.Count;
+            return indices / 3;
+        }
+    }
+
     public void PushTransform(Matrix4x4 m)
     {
         _stack.Push(Transform);

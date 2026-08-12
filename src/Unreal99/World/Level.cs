@@ -251,6 +251,8 @@ public sealed class Level : IDisposable
     public string Description = "";
     public CollisionWorld Collision = new();
     public Mesh Geometry;
+    /// <summary>Static geometry triangle count, recorded even when built without a GL context.</summary>
+    public int GeometryTriangles;
     public MeshSection[] Sections = [];
     public Mesh[] MoverMeshes = [];
     public MeshSection[][] MoverSections = [];
@@ -525,6 +527,42 @@ public sealed class LevelBuilder
     public void Decor(Vector3 min, Vector3 max, MatId material, float uvScale = 1f)
         => Solid(min, max, material, collide: false, uvScale);
 
+    /// <summary>
+    /// Non-solid beam running between two arbitrary points. <see cref="Decor"/> is a min/max box
+    /// and therefore axis-aligned, which is why the arenas had no diagonals in them at all: no
+    /// truss bracing, no arch voussoirs, no buttresses, no raked roof edges. Those are most of what
+    /// makes the originals' architecture read as built rather than stacked, so they get a primitive.
+    /// Never collides — detail passes must not be able to disturb navigation.
+    /// </summary>
+    public void DecorBeam(Vector3 from, Vector3 to, float halfWidth, float halfHeight,
+        MatId material, float uvScale = 1f)
+    {
+        Vector3 delta = to - from;
+        float length = delta.Length();
+        if (length < 1e-4f) return;
+
+        Vector3 forward = delta / length;
+        // Any reference up-vector works except one parallel to the run itself.
+        Vector3 reference = MathF.Abs(forward.Y) > 0.98f ? MathX.Right : MathX.Up;
+        Vector3 side = Vector3.Normalize(Vector3.Cross(reference, forward));
+        Vector3 up = Vector3.Cross(forward, side);
+
+        // Row-major basis: System.Numerics transforms row vectors, so the rows are the axes.
+        var basis = new Matrix4x4(
+            side.X, side.Y, side.Z, 0f,
+            up.X, up.Y, up.Z, 0f,
+            forward.X, forward.Y, forward.Z, 0f,
+            0f, 0f, 0f, 1f);
+        basis.Translation = (from + to) * 0.5f;
+
+        _mesh.Material = (int)material;
+        _mesh.WorldUv = true;
+        _mesh.WorldUvScale = uvScale;
+        _mesh.PushTransform(basis);
+        _mesh.AddBox(Vector3.Zero, new Vector3(halfWidth, halfHeight, length * 0.5f));
+        _mesh.PopTransform();
+    }
+
     public void Prism(Vector3 center, float radius, float height, int sides, MatId material,
         bool collide = true, float rotation = 0f)
     {
@@ -746,9 +784,26 @@ public sealed class LevelBuilder
     public void CeilingLamp(Vector3 position, Vector3 color, float radius = 13f, float intensity = 5.5f,
         float size = 0.9f)
     {
+        // A lit panel and a plate read as a texture swap on the ceiling. Real fixtures have a
+        // housing, a reflector that steps out past the pane, and a cage over the glass; every
+        // arena in the game places these, so the detail lands everywhere at once.
         Decor(position - new Vector3(size, 0.16f, size), position + new Vector3(size, 0.05f, size), MatId.EnergyPanel, 0.9f);
         Decor(position - new Vector3(size * 1.25f, 0.28f, size * 1.25f),
               position + new Vector3(size * 1.25f, 0.02f, size * 1.25f), MatId.Trim, 1.2f);
+        Decor(position - new Vector3(size * 1.5f, 0.40f, size * 1.5f),
+              position + new Vector3(size * 1.5f, -0.24f, size * 1.5f), MatId.Trim, 1.2f);
+        // Cage bars across the pane, and corner mounts back up into the ceiling.
+        for (int i = 0; i < 3; i++)
+        {
+            float o = MathX.Lerp(-size * 0.62f, size * 0.62f, i * 0.5f);
+            Decor(position + new Vector3(o - 0.05f, -0.21f, -size),
+                  position + new Vector3(o + 0.05f, -0.13f, size), MatId.Trim, 1.2f);
+        }
+        foreach (float sx in new[] { -1f, 1f })
+            foreach (float sz in new[] { -1f, 1f })
+                Decor(position + new Vector3(sx * size * 1.28f - 0.07f, -0.28f, sz * size * 1.28f - 0.07f),
+                      position + new Vector3(sx * size * 1.28f + 0.07f, 0.34f, sz * size * 1.28f + 0.07f),
+                      MatId.Trim, 1.2f);
         AddLight(position - new Vector3(0, 0.5f, 0), color, radius, intensity);
     }
 
@@ -1155,6 +1210,9 @@ public sealed class LevelBuilder
             BrushKind.Void));
         _level.Collision.Rebuild();
         SettleVehicleSpawns();
+
+        // Recorded before the headless early-out so map density can be reported without a GPU.
+        _level.GeometryTriangles = _mesh.TriangleCount;
 
         // Headless callers pass a null GL. They want the gameplay placements — vehicle pads, node
         // graph, objectives — not the geometry, so the upload and the nav bake are both skipped.

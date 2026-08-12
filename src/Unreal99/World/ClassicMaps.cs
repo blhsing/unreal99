@@ -90,6 +90,61 @@ public static partial class Maps
                     new Vector3(TowerHalf + Wall, TowerTop, MathF.Max(outerFace, outerFace + Wall * sign)),
                     teamMat, true, 0.55f);
 
+            // The towers are the map. Ribbed pilasters up all four faces, banded string courses,
+            // a corbelled parapet and team banners hanging down the inner face — the original's
+            // silhouette is heavily articulated, and a smooth block reads as scenery.
+            for (int i = 0; i <= 6; i++)
+            {
+                float u = MathX.Lerp(-TowerHalf, TowerHalf, i / 6f);
+                foreach (int sx in new[] { -1, 1 })
+                    b.Decor(new Vector3(sx * (TowerHalf + Wall) - sx * 0.1f, DeckY, MathF.Min(innerFace, outerFace) + (u + TowerHalf) * 0f + u * 0f),
+                            new Vector3(sx * (TowerHalf + Wall) + sx * 0.5f, TowerTop, MathF.Max(innerFace, outerFace)), teamMat, 0.55f);
+                b.Decor(new Vector3(u - 0.42f, DeckY, MathF.Min(outerFace, outerFace + Wall * sign) - 0.5f),
+                        new Vector3(u + 0.42f, TowerTop, MathF.Max(outerFace, outerFace + Wall * sign) + 0.5f), MatId.Trim, 1.4f);
+                b.Decor(new Vector3(u - 0.42f, DeckY, MathF.Min(innerFace, innerFace - Wall * sign) - 0.5f),
+                        new Vector3(u + 0.42f, TowerTop * 0.42f, MathF.Max(innerFace, innerFace - Wall * sign) + 0.5f), MatId.Trim, 1.4f);
+            }
+            for (int i = 0; i <= 5; i++)
+            {
+                float v = MathX.Lerp(-TowerHalf, TowerHalf, i / 5f);
+                foreach (int sz in new[] { -1, 1 })
+                    b.Decor(new Vector3(-TowerHalf - Wall - 0.5f, DeckY, z + sz * TowerHalf + v * 0f),
+                            new Vector3(TowerHalf + Wall + 0.5f, TowerTop, z + sz * TowerHalf), MatId.Trim, 1.4f);
+                b.Decor(new Vector3(-TowerHalf - Wall - 0.5f, DeckY, z + v - 0.42f),
+                        new Vector3(-TowerHalf - Wall + 0.1f, TowerTop, z + v + 0.42f), MatId.Trim, 1.4f);
+                b.Decor(new Vector3(TowerHalf + Wall - 0.1f, DeckY, z + v - 0.42f),
+                        new Vector3(TowerHalf + Wall + 0.5f, TowerTop, z + v + 0.42f), MatId.Trim, 1.4f);
+            }
+            // String courses at three heights and a corbelled cap.
+            foreach (float bandY in new[] { TowerTop * 0.30f, TowerTop * 0.58f, TowerTop * 0.82f })
+                for (int step = 0; step < 2; step++)
+                {
+                    float o = 0.55f + step * 0.28f;
+                    float y0 = bandY + step * 0.34f;
+                    b.Decor(new Vector3(-TowerHalf - Wall - o, y0, z - TowerHalf - Wall - o),
+                            new Vector3(TowerHalf + Wall + o, y0 + 0.34f, z + TowerHalf + Wall + o), MatId.Trim, 1.5f);
+                }
+            for (int step = 0; step < 3; step++)
+            {
+                float o = 0.4f + step * 0.45f;
+                b.Decor(new Vector3(-TowerHalf - Wall - o, TowerTop + step * 0.5f, z - TowerHalf - Wall - o),
+                        new Vector3(TowerHalf + Wall + o, TowerTop + step * 0.5f + 0.5f, z + TowerHalf + Wall + o), MatId.Trim, 1.5f);
+            }
+            // Merlons round the roof, and the team's banners on the face that looks down the map.
+            for (int i = 0; i < 9; i++)
+            {
+                float u = MathX.Lerp(-TowerHalf - Wall, TowerHalf + Wall, i / 8f);
+                foreach (int sz in new[] { -1, 1 })
+                    b.Decor(new Vector3(u - 1.05f, TowerTop + 1.5f, z + sz * (TowerHalf + Wall + 1.2f) - 0.7f),
+                            new Vector3(u + 1.05f, TowerTop + 3.6f, z + sz * (TowerHalf + Wall + 1.2f) + 0.7f), teamMat, 1.3f);
+                foreach (int sx in new[] { -1, 1 })
+                    b.Decor(new Vector3(sx * (TowerHalf + Wall + 1.2f) - 0.7f, TowerTop + 1.5f, z + u - 1.05f),
+                            new Vector3(sx * (TowerHalf + Wall + 1.2f) + 0.7f, TowerTop + 3.6f, z + u + 1.05f), teamMat, 1.3f);
+            }
+            foreach (float bx in new[] { -6.5f, 6.5f })
+                Banner(b, new Vector3(bx, TowerTop * 0.80f, innerFace - Wall * sign * 1.4f), 3.4f, 11f, 1, teamMat);
+            b.AddLight(new Vector3(0f, TowerTop * 0.62f, innerFace - Wall * sign * 2f), teamColor * 1.4f, 26f, 4f);
+
             float f0 = MathF.Min(innerFace, innerFace - Wall * sign);
             float f1 = MathF.Max(innerFace, innerFace - Wall * sign);
 
@@ -292,6 +347,43 @@ public static partial class Maps
         {
             Vector3 c = towers[t];
             float roof = RoofY - t * 3.5f;   // staggered heights make the jumps read differently
+
+            // A skyscraper is a curtain wall: mullions the full height, spandrel bands at every
+            // floor, and the plant and parapet that make a roof somewhere rather than a lid.
+            for (int i = 0; i <= 10; i++)
+            {
+                float u = MathX.Lerp(-Half, Half, i / 10f);
+                foreach (int s in new[] { -1, 1 })
+                {
+                    b.Decor(c + new Vector3(u - 0.20f, 0f, s * Half - s * 0.35f), c + new Vector3(u + 0.20f, roof, s * Half + s * 0.15f), MatId.Trim, 1.6f);
+                    b.Decor(c + new Vector3(s * Half - s * 0.35f, 0f, u - 0.20f), c + new Vector3(s * Half + s * 0.15f, roof, u + 0.20f), MatId.Trim, 1.6f);
+                }
+            }
+            for (int floor = 1; floor * 4.2f < roof - 1f; floor++)
+            {
+                float y = floor * 4.2f;
+                foreach (int s in new[] { -1, 1 })
+                {
+                    b.Decor(c + new Vector3(-Half - 0.35f, y - 0.42f, s * Half - s * 0.4f), c + new Vector3(Half + 0.35f, y, s * Half + s * 0.2f), MatId.TechPanelDark, 1.6f);
+                    b.Decor(c + new Vector3(s * Half - s * 0.4f, y - 0.42f, -Half - 0.35f), c + new Vector3(s * Half + s * 0.2f, y, Half + 0.35f), MatId.TechPanelDark, 1.6f);
+                }
+            }
+            // Parapet, roof plant and a mast with warning lamps.
+            foreach (int s in new[] { -1, 1 })
+            {
+                b.Decor(c + new Vector3(-Half - 0.5f, roof, s * Half - s * 0.6f), c + new Vector3(Half + 0.5f, roof + 1.15f, s * Half + s * 0.4f), MatId.Trim, 1.5f);
+                b.Decor(c + new Vector3(s * Half - s * 0.6f, roof, -Half - 0.5f), c + new Vector3(s * Half + s * 0.4f, roof + 1.15f, Half + 0.5f), MatId.Trim, 1.5f);
+            }
+            b.Decor(c + new Vector3(-4.5f, roof, -4.5f), c + new Vector3(4.5f, roof + 2.4f, 4.5f), MatId.TechPanelDark, 1.4f);
+            Louvres(b, c + new Vector3(-4.2f, roof + 0.4f, -4.7f), c + new Vector3(4.2f, roof + 2.2f, -4.4f), MatId.Trim, 7);
+            foreach (var (bx, bz) in new[] { (-8.5f, 7.5f), (8.5f, 7.5f), (0f, -9f) })
+            {
+                Barrel(b, c + new Vector3(bx, roof, bz), MatId.RustMetal, 1.5f, 0.75f);
+                Pipe(b, c + new Vector3(bx, roof + 1.5f, bz), c + new Vector3(0f, roof + 1.9f, 0f), 0.18f, MatId.Trim, 5f);
+            }
+            Truss(b, c + new Vector3(0f, roof + 2.4f, 0f), c + new Vector3(0f, roof + 12f, 0f), 0.85f, 5, MatId.Trim, 0.12f);
+            b.Sphere(c + new Vector3(0f, roof + 12.4f, 0f), 0.5f, MatId.EnergyPanel, 6, 10);
+            b.AddLight(c + new Vector3(0f, roof + 12.4f, 0f), new Vector3(1f, 0.2f, 0.15f), 12f, 3f, 2.2f, 0.5f);
 
             // --- the building itself, tapering slightly toward the top ---
             b.Solid(new Vector3(c.X - Half, roof - 62f, c.Z - Half),
@@ -521,6 +613,35 @@ public static partial class Maps
         b.Solid(new Vector3(-9f, Lower - 1.4f, HullHalfZ), new Vector3(9f, Lower, HullHalfZ + 12f),
             MatId.SkyMetal, true, 0.7f);
 
+        // A starship's interior is its frame: transverse rib arches the length of the hull, a
+        // keel girder down the spine, and conduit banks following both flanks between decks.
+        DressHull(b, new Vector3(-HullHalfX, Lower, -HullHalfZ), new Vector3(HullHalfX, Upper + 6f, HullHalfZ),
+            MatId.SkyMetal, MatId.Trim, 14);
+        Girder(b, new Vector3(0f, Lower - 1.6f, -HullHalfZ - 12f), new Vector3(0f, Lower - 1.6f, HullHalfZ + 12f), 0.5f, MatId.SkyMetal);
+        for (int s = -1; s <= 1; s += 2)
+        {
+            Pipe(b, new Vector3(s * (HullHalfX - 0.8f), Mid - 1.2f, -HullHalfZ), new Vector3(s * (HullHalfX - 0.8f), Mid - 1.2f, HullHalfZ), 0.24f, MatId.Trim, 7f);
+            Pipe(b, new Vector3(s * (HullHalfX - 0.8f), Upper - 1.2f, -HullHalfZ), new Vector3(s * (HullHalfX - 0.8f), Upper - 1.2f, HullHalfZ), 0.2f, MatId.RustMetal, 7f);
+            // Hull plate seams and rivets along the flanks.
+            BoltLine(b, new Vector3(s * (HullHalfX - 0.25f), Lower + 0.5f, -HullHalfZ + 2f), new Vector3(s * (HullHalfX - 0.25f), Lower + 0.5f, HullHalfZ - 2f), 0.085f, MatId.Trim, 3f);
+            for (int i = 0; i < 8; i++)
+            {
+                float z = MathX.Lerp(-HullHalfZ + 4f, HullHalfZ - 4f, i / 7f);
+                WallLamp(b, new Vector3(s * (HullHalfX - 0.5f), Mid + 2.6f, z), 0, MatId.Trim, new Vector3(0.6f, 0.8f, 1f), 12f, 2.4f);
+            }
+        }
+        // Prow framing, so the nose is a shape rather than a wedge.
+        for (int i = 0; i < 6; i++)
+        {
+            float t = i / 5f;
+            float w = MathX.Lerp(9f, 1.6f, t);
+            foreach (int s in new[] { -1, 1 })
+            {
+                b.DecorBeam(new Vector3(s * w, Lower, -HullHalfZ - 12f * t), new Vector3(s * w, Lower + 3.4f - t * 1.6f, -HullHalfZ - 12f * t), 0.22f, 0.22f, MatId.SkyMetal, 1.4f);
+                b.DecorBeam(new Vector3(s * w, Lower, HullHalfZ + 12f * t), new Vector3(s * w, Lower + 3.4f - t * 1.6f, HullHalfZ + 12f * t), 0.22f, 0.22f, MatId.SkyMetal, 1.4f);
+            }
+        }
+
         // --- the two end rooms and the spine corridor between them ---
         for (int end = 0; end < 2; end++)
         {
@@ -721,6 +842,68 @@ public static partial class Maps
             }
         }
 
+        // --- the arcade gets the arches it is named for ---
+        // The gallery was described as a covered walkway "on arches" and stood on bare octagonal
+        // posts. Arcades are the whole visual identity of this arena, so the bays are sprung twice:
+        // once under the gallery deck, once between the upper columns carrying the roofline.
+        for (int i = 0; i < 6; i++)
+        {
+            float mid = -27f + i * 9f + 4.5f;
+            foreach (var (ax, az, axis) in new[]
+                     {
+                         (mid, -H + 8f, 0), (mid, H - 8f, 0), (-H + 8f, mid, 1), (H - 8f, mid, 1),
+                     })
+            {
+                Arch(b, new Vector3(ax, Gallery - 3.1f, az), 9f, 2.5f, 1.5f, axis, MatId.Concrete, 9, 0.36f);
+                Arch(b, new Vector3(ax, Gallery + 10.4f, az), 9f, 2.9f, 1.2f, axis, MatId.Concrete, 9, 0.30f);
+                // Keystone.
+                b.Decor(new Vector3(ax - 0.42f, Gallery - 0.75f, az - 1.6f),
+                        new Vector3(ax + 0.42f, Gallery - 0.05f, az + 1.6f), MatId.Trim, 1.4f);
+            }
+        }
+
+        // Bases and capitals on every arcade post, and a moulded string course at deck level.
+        for (int i = 0; i < 7; i++)
+        {
+            float t = -27f + i * 9f;
+            foreach (var (px, pz) in new[] { (t, -H + 8f), (t, H - 8f), (-H + 8f, t), (H - 8f, t) })
+            {
+                b.Decor(new Vector3(px - 2.1f, 0f, pz - 2.1f), new Vector3(px + 2.1f, 0.5f, pz + 2.1f), MatId.Trim, 1.4f);
+                b.Decor(new Vector3(px - 1.8f, 0.5f, pz - 1.8f), new Vector3(px + 1.8f, 0.85f, pz + 1.8f), MatId.Trim, 1.4f);
+                b.Torus(new Vector3(px, Gallery - 0.95f, pz), 1.62f, 0.16f, MatId.Trim, 14, 6);
+                b.Decor(new Vector3(px - 1.95f, Gallery - 0.62f, pz - 1.95f),
+                        new Vector3(px + 1.95f, Gallery - 0.2f, pz + 1.95f), MatId.Trim, 1.4f);
+                b.Torus(new Vector3(px, Gallery + 12.9f, pz), 1.32f, 0.13f, MatId.Trim, 14, 6);
+            }
+        }
+
+        // --- outer wall: string courses, buttresses, traceried windows and a crenellated top ---
+        foreach (int s in new[] { -1, 1 })
+        {
+            for (int i = 0; i < 7; i++)
+            {
+                float t = -27f + i * 9f;
+                Buttress(b, new Vector3(t, -2f, s * H), WallTop - 2f, new Vector3(0f, 0f, s * 2.6f), MatId.Rock);
+                Buttress(b, new Vector3(s * H, -2f, t), WallTop - 2f, new Vector3(s * 2.6f, 0f, 0f), MatId.Rock);
+                if (i % 2 == 0) continue;
+                Window(b, new Vector3(t - 2.6f, Gallery + 3f, s * H - 0.4f),
+                    new Vector3(t + 2.6f, Gallery + 9.5f, s * H + 0.4f), 1, MatId.Trim, 2);
+                Window(b, new Vector3(s * H - 0.4f, Gallery + 3f, t - 2.6f),
+                    new Vector3(s * H + 0.4f, Gallery + 9.5f, t + 2.6f), 0, MatId.Trim, 2);
+            }
+            // String course, then merlons along the parapet.
+            b.Decor(new Vector3(-H - 2.4f, Gallery + 0.9f, s * H - 0.3f), new Vector3(H + 2.4f, Gallery + 1.5f, s * H + 2.3f), MatId.Trim, 1.5f);
+            b.Decor(new Vector3(s * H - 0.3f, Gallery + 0.9f, -H - 2.4f), new Vector3(s * H + 2.3f, Gallery + 1.5f, H + 2.4f), MatId.Trim, 1.5f);
+            b.Decor(new Vector3(-H - 2.4f, WallTop - 0.9f, s * H - 0.4f), new Vector3(H + 2.4f, WallTop - 0.2f, s * H + 2.4f), MatId.Trim, 1.5f);
+            b.Decor(new Vector3(s * H - 0.4f, WallTop - 0.9f, -H - 2.4f), new Vector3(s * H + 2.4f, WallTop - 0.2f, H + 2.4f), MatId.Trim, 1.5f);
+            for (int i = 0; i < 19; i++)
+            {
+                float t = -H - 1f + i * 3.8f;
+                b.Decor(new Vector3(t, WallTop - 0.2f, s * H - 0.4f), new Vector3(t + 2f, WallTop + 1.5f, s * H + 2.4f), MatId.Rock, 1.3f);
+                b.Decor(new Vector3(s * H - 0.4f, WallTop - 0.2f, t), new Vector3(s * H + 2.4f, WallTop + 1.5f, t + 2f), MatId.Rock, 1.3f);
+            }
+        }
+
         // --- stairs up to the gallery at the four corners ---
         b.Stairs(new Vector3(-H + 4f, 0f, -H + 10f), new Vector3(-H + 4f, Gallery, -H + 20f), 6f, 14, MatId.Concrete, false);
         b.Stairs(new Vector3(H - 4f, 0f, H - 10f), new Vector3(H - 4f, Gallery, H - 20f), 6f, 14, MatId.Concrete, false);
@@ -820,10 +1003,25 @@ public static partial class Maps
         b.Solid(new Vector3(-HX, -1.4f, -HZ), new Vector3(HX, 0f, HZ), MatId.TechFloor, true, 0.9f);
         b.Room(new Vector3(-HX - 2f, -6f, -HZ - 2f), new Vector3(HX + 2f, CeilY, HZ + 2f), 2f,
             MatId.TechFloor, MatId.RustMetal, MatId.TechPanelDark, withCeiling: true, withFloor: false);
+        DressIndustrial(b, new Vector3(-HX, 0f, -HZ), new Vector3(HX, CeilY, HZ),
+            MatId.RustMetal, MatId.TechPanelDark, 4);
 
         // --- the turbine: a huge drum in the middle you can run around and climb ---
         b.Prism(new Vector3(0f, 6f, 0f), 7.5f, 12f, 12, MatId.RustMetal);
         b.Prism(new Vector3(0f, 12.4f, 0f), 8.6f, 1.2f, 12, MatId.Trim);
+        // The machine itself: casing ribs, bolted flanges, and the ducts feeding it.
+        for (int i = 0; i < 12; i++)
+        {
+            float a = i / 12f * MathX.TwoPi;
+            Vector3 d = new(MathF.Cos(a), 0f, MathF.Sin(a));
+            b.DecorBeam(d * 7.6f + new Vector3(0f, 0.4f, 0f), d * 7.6f + new Vector3(0f, 12.2f, 0f),
+                0.22f, 0.22f, MatId.Trim, 1.3f);
+            Pipe(b, d * 8.2f + new Vector3(0f, 9.5f, 0f), d * 15f + new Vector3(0f, 13.5f, 0f), 0.3f, MatId.RustMetal);
+        }
+        foreach (float ry in new[] { 2.2f, 6f, 9.8f })
+            b.Torus(new Vector3(0f, ry, 0f), 7.9f, 0.28f, MatId.Trim, 24, 8);
+        BoltLine(b, new Vector3(-7.4f, 12.6f, 0f), new Vector3(7.4f, 12.6f, 0f), 0.11f, MatId.Trim, 1.4f);
+        BoltLine(b, new Vector3(0f, 12.6f, -7.4f), new Vector3(0f, 12.6f, 7.4f), 0.11f, MatId.Trim, 1.4f);
         b.Prism(new Vector3(0f, 0.4f, 0f), 9.2f, 1.2f, 12, MatId.Trim);
         for (int i = 0; i < 6; i++)
         {

@@ -117,6 +117,7 @@ public static partial class Maps
         foreach (int s in new[] { -1, 1 })
             b.Solid(new Vector3(-HX, -6f, s > 0 ? Bank : -HZ), new Vector3(HX, Ground, s > 0 ? HZ : -Bank),
                 MatId.Rock, true, 0.35f);
+        DressOutdoor(b, HX, HZ, Ground, 64f, MatId.Rock, MatId.Trim, 8);
         b.Room(new Vector3(-HX - 4f, -6f, -HZ - 4f), new Vector3(HX + 4f, 64f, HZ + 4f), 4f,
             MatId.Rock, MatId.Rock, MatId.Rock, withCeiling: false, withFloor: false);
 
@@ -357,6 +358,7 @@ public static partial class Maps
         foreach (int s in new[] { -1, 1 })
             b.Solid(new Vector3(s > 0 ? Bank : -HX, -6f, -HZ), new Vector3(s > 0 ? HX : -Bank, Ground, HZ),
                 MatId.Rock, true, 0.4f);
+        DressOutdoor(b, HX, HZ, Ground, 58f, MatId.Rock, MatId.Trim, 7);
         b.Room(new Vector3(-HX - 4f, -6f, -HZ - 4f), new Vector3(HX + 4f, 58f, HZ + 4f), 4f,
             MatId.Rock, MatId.Rock, MatId.Rock, withCeiling: false, withFloor: false);
 
@@ -520,6 +522,7 @@ public static partial class Maps
 
         const float HX = 128f, HZ = 78f, Ground = 0f;
         b.Solid(new Vector3(-HX, -6f, -HZ), new Vector3(HX, Ground, HZ), MatId.Concrete, true, 0.4f);
+        DressOutdoor(b, HX, HZ, Ground, 70f, MatId.Rock, MatId.Trim, 7);
         b.Room(new Vector3(-HX - 4f, -6f, -HZ - 4f), new Vector3(HX + 4f, 70f, HZ + 4f), 4f,
             MatId.Concrete, MatId.Rock, MatId.Rock, withCeiling: false, withFloor: false);
 
@@ -701,6 +704,7 @@ public static partial class Maps
         foreach (int s in new[] { -1, 1 })
             b.Solid(new Vector3(s > 0 ? Bank : -HX, -6f, -HZ), new Vector3(s > 0 ? HX : -Bank, Ground, HZ),
                 MatId.Concrete, true, 0.4f);
+        DressOutdoor(b, HX, HZ, Ground, 60f, MatId.Rock, MatId.Trim, 7);
         b.Room(new Vector3(-HX - 4f, -6f, -HZ - 4f), new Vector3(HX + 4f, 60f, HZ + 4f), 4f,
             MatId.Concrete, MatId.Rock, MatId.Rock, withCeiling: false, withFloor: false);
 
@@ -858,6 +862,7 @@ public static partial class Maps
         const float HX = 116f, HZ = 84f, SeaY = -3.4f;
         b.Solid(new Vector3(-HX, -14f, -HZ), new Vector3(HX, SeaY - 0.01f, HZ), MatId.Rock, true, 0.5f);
         b.Water(new Vector3(-HX, -14f, -HZ), new Vector3(HX, SeaY, HZ));
+        DressOutdoor(b, HX, HZ, SeaY, 62f, MatId.Rock, MatId.Trim, 7);
         b.Room(new Vector3(-HX - 4f, -14f, -HZ - 4f), new Vector3(HX + 4f, 62f, HZ + 4f), 4f,
             MatId.Rock, MatId.Rock, MatId.Rock, withCeiling: false, withFloor: false);
 

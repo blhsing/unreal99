@@ -21,6 +21,7 @@ if (args.Contains("--vehiclecontrol")) return VehicleControlSelfTest.Run();
 if (args.Contains("--weaponcoverage")) return WeaponCoverageSelfTest.Run();
 if (args.Contains("--weaponmechanicstest")) return WeaponMechanicsSelfTest.Run();
 if (args.Contains("--collisiontest")) return CollisionWorld.RunStepTraversalSelfTest();
+if (args.Contains("--mapstats")) return MapStats.Run(args);
 if (args.Contains("--hotplugtest"))
     return DeviceAssignment.RunSelfTest() | InputSystem.RunPointerResetSelfTest()
         | InputSystem.RunLookRoutingSelfTest();

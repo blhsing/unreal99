@@ -54,6 +54,14 @@ public static partial class Maps
         }
         b.Solid(new Vector3(-PitX + PitHalf, -16f, -HZ), new Vector3(PitX - PitHalf, Ground, HZ),
             MatId.Rock, true, 0.5f);
+        // An Egyptian temple court: a colonnade round the field and strata up the enclosing walls.
+        DressOutdoor(b, HX, HZ, Ground, 40f, MatId.Rock, MatId.Trim, 6);
+        for (int i = 0; i <= 11; i++)
+        {
+            float x = MathX.Lerp(-HX + 8f, HX - 8f, i / 11f);
+            foreach (int s in new[] { -1, 1 })
+                Column(b, new Vector3(x, Ground, s * (HZ - 3.5f)), 11f, 1.7f, MatId.Concrete, MatId.Trim, 12);
+        }
         b.Room(new Vector3(-HX - 4f, -20f, -HZ - 4f), new Vector3(HX + 4f, 40f, HZ + 4f), 4f,
             MatId.Rock, MatId.Rock, MatId.Rock, withCeiling: false, withFloor: false);
 
@@ -215,6 +223,7 @@ public static partial class Maps
 
         const float HX = 104f, HZ = 54f, Ground = 0f;
         b.Solid(new Vector3(-HX, -6f, -HZ), new Vector3(HX, Ground, HZ), MatId.Rock, true, 0.5f);
+        DressOutdoor(b, HX, HZ, Ground, 46f, MatId.Rock, MatId.Trim, 7);
         b.Room(new Vector3(-HX - 4f, -6f, -HZ - 4f), new Vector3(HX + 4f, 46f, HZ + 4f), 4f,
             MatId.Rock, MatId.Rock, MatId.Rock, withCeiling: false, withFloor: false);
 

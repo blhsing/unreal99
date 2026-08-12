@@ -123,6 +123,63 @@ public static partial class Maps
             for (int i = -1; i <= 1; i++)
                 b.CeilingLamp(new Vector3(x * 22f, CeilY - 1.4f, i * 18f), new Vector3(0.88f, 0.92f, 1f), 30f, 9f, 1.6f);
 
+        // --- the plant this deck is part of ---
+        // Deck 16 is a refinery, and the original sells that with structure you can see: roof
+        // trusses over the whole hall, pipework running the length of the walls to the channel,
+        // panelled bulkheads and riveted plate around the lava. None of that touches the floor
+        // plan, and none of it collides.
+        foreach (float tz in new[] { -24f, -12f, 0f, 12f, 24f })
+            Truss(b, new Vector3(-HX, CeilY - 1.3f, tz), new Vector3(HX, CeilY - 1.3f, tz),
+                1.7f, 12, MatId.RustMetal, 0.17f);
+        Truss(b, new Vector3(-2f, CeilY - 3.6f, -HZ), new Vector3(-2f, CeilY - 3.6f, HZ), 1.3f, 14, MatId.RustMetal, 0.15f);
+        Truss(b, new Vector3(2f, CeilY - 3.6f, -HZ), new Vector3(2f, CeilY - 3.6f, HZ), 1.3f, 14, MatId.RustMetal, 0.15f);
+
+        for (int s = -1; s <= 1; s += 2)
+        {
+            // Pipework along both long walls, dropping into the channel at the ends.
+            Pipe(b, new Vector3(s * (HX - 1.1f), 13.4f, -HZ), new Vector3(s * (HX - 1.1f), 13.4f, HZ), 0.32f, MatId.RustMetal);
+            Pipe(b, new Vector3(s * (HX - 1.1f), 12.3f, -HZ), new Vector3(s * (HX - 1.1f), 12.3f, HZ), 0.22f, MatId.Trim);
+            Pipe(b, new Vector3(s * (HX - 1.6f), 15.1f, -HZ), new Vector3(s * (HX - 1.6f), 15.1f, HZ), 0.26f, MatId.RustMetal);
+            foreach (float pz in new[] { -HZ + 4f, HZ - 4f })
+                Pipe(b, new Vector3(s * (HX - 1.1f), 13.4f, pz), new Vector3(s * (Chan + 2f), 2.4f, pz), 0.28f, MatId.RustMetal);
+
+            // Panelled bulkheads between the deck and the catwalk, and above it.
+            WallPanels(b, new Vector3(s * HX, 0.4f, -HZ + 2f), new Vector3(s * HX, Upper - 1f, HZ - 2f), 0, MatId.TechPanelDark, 9, 1);
+            WallPanels(b, new Vector3(s * HX, Upper + 0.6f, -HZ + 2f), new Vector3(s * HX, CeilY - 5f, HZ - 2f), 0, MatId.TechPanelDark, 9, 1);
+
+            // Riveted plate along the lava channel lip, the surface everyone stares at.
+            b.Decor(new Vector3(s * Chan - s * 1.0f, 0f, -HZ), new Vector3(s * Chan - s * 0.55f, 0.26f, HZ), MatId.Trim, 1.2f);
+            BoltLine(b, new Vector3(s * (Chan - 0.72f), 0.30f, -HZ + 1f), new Vector3(s * (Chan - 0.72f), 0.30f, HZ - 1f), 0.075f, MatId.Trim, 2.2f);
+            BoltLine(b, new Vector3(s * (Chan - 0.4f), -5.5f, -HZ + 6f), new Vector3(s * (Chan - 0.4f), -5.5f, HZ - 6f), 0.07f, MatId.Trim, 2.6f);
+
+            // Brackets carrying the catwalk ring off the wall.
+            for (int i = 0; i < 9; i++)
+            {
+                float z = MathX.Lerp(-HZ + 3f, HZ - 3f, i / 8f);
+                b.DecorBeam(new Vector3(s * (HX - 0.2f), Upper - 3.2f, z), new Vector3(s * (HX - 6.6f), Upper - 0.6f, z),
+                    0.13f, 0.13f, MatId.RustMetal, 1.4f);
+                b.Decor(new Vector3(s * (HX - 7f), Upper - 0.62f, z - 0.16f), new Vector3(s * (HX - 0.2f), Upper - 0.46f, z + 0.16f), MatId.RustMetal, 1.4f);
+            }
+        }
+
+        // Girders under the two catwalks that cross the channel.
+        foreach (float gz in new[] { -2.4f, 2.4f })
+            Girder(b, new Vector3(-Chan - 1f, Upper - 0.75f, gz), new Vector3(Chan + 1f, Upper - 0.75f, gz), 0.2f, MatId.RustMetal);
+        Girder(b, new Vector3(-Chan, -0.75f, 0f), new Vector3(Chan, -0.75f, 0f), 0.22f, MatId.RustMetal);
+
+        // Vents, drums and crates against the walls — set dressing, none of it in anyone's way.
+        for (int s = -1; s <= 1; s += 2)
+            foreach (float vz in new[] { -16f, 0f, 16f })
+                Louvres(b, new Vector3(s * (HX - 0.45f), 3.2f, vz - 1.7f),
+                    new Vector3(s * (HX - 0.1f), 6.0f, vz + 1.7f), MatId.RustMetal, 7);
+        foreach (var (cx, cz) in new[] { (-HX + 2.2f, -12f), (HX - 2.2f, 12f), (-HX + 2.2f, 9f), (HX - 2.2f, -9f) })
+        {
+            Crate(b, new Vector3(cx, 0f, cz), 1.7f, MatId.RustMetal, MatId.Trim);
+            Crate(b, new Vector3(cx, 1.7f, cz + 0.2f), 1.2f, MatId.TechPanelDark, MatId.Trim);
+            Barrel(b, new Vector3(cx + 1.4f, 0f, cz + 1.6f), MatId.RustMetal);
+            Barrel(b, new Vector3(cx + 1.9f, 0f, cz + 2.3f), MatId.Trim);
+        }
+
         // --- placements: shock on the bridge, the belt down where the lava is ---
         b.Weapon(new Vector3(0f, 0.9f, 0f), WeaponKind.ShockRifle);
         b.Ammo(new Vector3(0f, 0.7f, 2.2f), AmmoKind.ShockCore);
@@ -198,6 +255,26 @@ public static partial class Maps
 
         b.Room(new Vector3(-H - 2f, -14f, -H - 2f), new Vector3(H + 2f, CeilY, H + 2f), 2f,
             MatId.Concrete, MatId.RustMetal, MatId.TechPanelDark, withCeiling: true, withFloor: false);
+        DressIndustrial(b, new Vector3(-H, 0f, -H), new Vector3(H, CeilY, H),
+            MatId.RustMetal, MatId.TechPanelDark, 4);
+        // Machinery over the shaft: a gantry ring on brackets, and the drive shafts feeding the drum.
+        for (int i = 0; i < 16; i++)
+        {
+            float a = i / 16f * MathX.TwoPi;
+            Vector3 d = new(MathF.Cos(a), 0f, MathF.Sin(a));
+            b.DecorBeam(d * (PitR + 1.2f) + new Vector3(0f, 0.35f, 0f),
+                        d * (PitR + 1.2f) + new Vector3(0f, -13f, 0f), 0.17f, 0.17f, MatId.RustMetal, 1.3f);
+            if (i % 4 != 0) continue;
+            Pipe(b, d * (PitR + 1.4f) + new Vector3(0f, -2f, 0f), d * (H - 1f) + new Vector3(0f, -2f, 0f), 0.28f, MatId.RustMetal);
+        }
+        foreach (float ry in new[] { -4.5f, -9f })
+            for (int i = 0; i < 24; i++)
+            {
+                float a0 = i / 24f * MathX.TwoPi, a1 = (i + 1) / 24f * MathX.TwoPi;
+                b.DecorBeam(new Vector3(MathF.Cos(a0), 0f, MathF.Sin(a0)) * (PitR + 1.2f) + new Vector3(0f, ry, 0f),
+                            new Vector3(MathF.Cos(a1), 0f, MathF.Sin(a1)) * (PitR + 1.2f) + new Vector3(0f, ry, 0f),
+                            0.13f, 0.13f, MatId.Trim, 1.3f);
+            }
 
         // --- ring floor with the pit punched out of the middle ---
         b.Annulus(Vector3.Zero, -1.4f, 0f, PitR, H * 1.45f, MatId.TechFloor, slabs: 28, collide: true, uvScale: 0.9f);
@@ -336,6 +413,26 @@ public static partial class Maps
         // --- shaft walls, open to the sky at the top ---
         b.Room(new Vector3(-H - 2f, -7f, -H - 2f), new Vector3(H + 2f, Top, H + 2f), 2f,
             MatId.TechFloor, MatId.TechWall, MatId.TechPanelDark, withCeiling: false, withFloor: false);
+        // A corporate tower's service shaft: every storey gets panelled bulkheads, the corners
+        // carry conduit the full height, and a girder band marks each floor line.
+        for (int lv = 0; lv < 5; lv++)
+        {
+            float y0 = levels[lv] + 1.2f;
+            float y1 = (lv + 1 < 5 ? levels[lv + 1] : Top) - 1.4f;
+            if (y1 - y0 < 2f) continue;
+            foreach (int s in new[] { -1, 1 })
+            {
+                WallPanels(b, new Vector3(s * H, y0, -H + 3f), new Vector3(s * H, y1, H - 3f), 0, MatId.TechPanelDark, 5, 1);
+                WallPanels(b, new Vector3(-H + 3f, y0, s * H), new Vector3(H - 3f, y1, s * H), 1, MatId.TechPanelDark, 5, 1);
+                b.Decor(new Vector3(-H - 0.3f, levels[lv] + 0.2f, s * H - s * 0.75f), new Vector3(H + 0.3f, levels[lv] + 0.85f, s * H), MatId.Trim, 1.4f);
+                b.Decor(new Vector3(s * H - s * 0.75f, levels[lv] + 0.2f, -H - 0.3f), new Vector3(s * H, levels[lv] + 0.85f, H + 0.3f), MatId.Trim, 1.4f);
+            }
+        }
+        foreach (var (cx, cz) in new[] { (-1f, -1f), (1f, -1f), (-1f, 1f), (1f, 1f) })
+        {
+            Pipe(b, new Vector3(cx * (H - 0.9f), -6f, cz * (H - 0.9f)), new Vector3(cx * (H - 0.9f), Top, cz * (H - 0.9f)), 0.3f, MatId.Trim, 9f);
+            Pipe(b, new Vector3(cx * (H - 1.9f), -6f, cz * (H - 0.9f)), new Vector3(cx * (H - 1.9f), Top, cz * (H - 0.9f)), 0.2f, MatId.RustMetal, 11f);
+        }
 
         // --- the core: a lit column you can never quite hide behind ---
         b.Prism(new Vector3(0f, -7f, 0f), CoreR, Top + 7f, 8, MatId.TechPanelDark);
@@ -492,6 +589,28 @@ public static partial class Maps
         b.Solid(new Vector3(-HX, -2f, -HZ), new Vector3(HX, 0f, HZ), MatId.Rock, true, 0.65f);
         b.Room(new Vector3(-HX - 3f, -2f, -HZ - 3f), new Vector3(HX + 3f, RimTop, HZ + 3f), 3f,
             MatId.Rock, MatId.Rock, MatId.Rock, withCeiling: false, withFloor: false);
+        // A shrine cut into a summit: strata up the rim, and the remains of a colonnade that once
+        // ran round the courtyard, now standing as piers against the rock.
+        for (int band = 0; band < 4; band++)
+        {
+            float y = 0.6f + band * 2.6f;
+            float d = 0.8f + (band % 2) * 1.0f;
+            foreach (int s in new[] { -1, 1 })
+            {
+                b.Decor(new Vector3(-HX - 3f, y, s * HZ - s * d), new Vector3(HX + 3f, y + 1.6f, s * HZ), MatId.Rock, 0.6f);
+                b.Decor(new Vector3(s * HX - s * d, y, -HZ - 3f), new Vector3(s * HX, y + 1.6f, HZ + 3f), MatId.Rock, 0.6f);
+            }
+        }
+        for (int i = 0; i <= 7; i++)
+        {
+            float x = MathX.Lerp(-HX + 3f, HX - 3f, i / 7f);
+            float z = MathX.Lerp(-HZ + 3f, HZ - 3f, i / 7f);
+            foreach (int s in new[] { -1, 1 })
+            {
+                Column(b, new Vector3(x, 0f, s * (HZ - 1.4f)), 6.5f, 0.85f, MatId.Concrete, MatId.Trim, 10);
+                Column(b, new Vector3(s * (HX - 1.4f), 0f, z), 6.5f, 0.85f, MatId.Concrete, MatId.Trim, 10);
+            }
+        }
         // Broken crenellations along the rim, so the wall reads as weathered rock.
         var rng = new Rng(0x5E4A);
         for (int i = 0; i < 26; i++)
@@ -644,6 +763,58 @@ public static partial class Maps
             slabs: 28, collide: true, uvScale: 0.9f);
         RingPosts(b, Upper, 8.9f, 16, 0.95f);
 
+        // One round room, so all of its detail is in the wall order and the dome. A pilaster
+        // between every bay, two cornice rings, brackets under the gallery, and ribs converging
+        // on a boss at the crown.
+        for (int i = 0; i < 16; i++)
+        {
+            float a = i / 16f * MathX.TwoPi;
+            Vector3 d = new(MathF.Cos(a), 0f, MathF.Sin(a));
+            Vector3 t = new(-d.Z, 0f, d.X);
+            b.DecorBeam(d * (OuterR - 0.2f), d * (OuterR - 0.2f) + new Vector3(0f, DomeTop, 0f), 0.62f, 0.36f, MatId.Concrete, 1.2f);
+            b.Decor(d * (OuterR - 0.55f) - new Vector3(0.8f, 0f, 0.8f), d * (OuterR - 0.2f) + new Vector3(0.8f, 0.7f, 0.8f), MatId.Trim, 1.3f);
+            b.Decor(d * (OuterR - 0.55f) - new Vector3(0.8f, -DomeTop + 0.9f, 0.8f), d * (OuterR - 0.2f) + new Vector3(0.8f, DomeTop, 0.8f), MatId.Trim, 1.3f);
+            // Bracket under the gallery deck.
+            b.DecorBeam(d * (OuterR - 0.3f) + new Vector3(0f, Upper - 3.2f, 0f),
+                        d * (OuterR - 3.4f) + new Vector3(0f, Upper - 0.7f, 0f), 0.16f, 0.16f, MatId.Trim, 1.3f);
+            // Dome rib, springing from the cornice to the crown.
+            b.DecorBeam(d * (OuterR - 0.3f) + new Vector3(0f, DomeTop, 0f), new Vector3(0f, DomeTop + 5.5f, 0f),
+                0.24f, 0.3f, MatId.Concrete, 1.2f);
+            _ = t;
+        }
+        foreach (float rr in new[] { OuterR - 0.35f, 8.7f })
+            for (int i = 0; i < 30; i++)
+            {
+                float a0 = i / 30f * MathX.TwoPi, a1 = (i + 1) / 30f * MathX.TwoPi;
+                b.DecorBeam(new Vector3(MathF.Cos(a0), 0f, MathF.Sin(a0)) * rr + new Vector3(0f, DomeTop - 0.4f, 0f),
+                            new Vector3(MathF.Cos(a1), 0f, MathF.Sin(a1)) * rr + new Vector3(0f, DomeTop - 0.4f, 0f),
+                            0.26f, 0.26f, MatId.Trim, 1.3f);
+            }
+        b.Sphere(new Vector3(0f, DomeTop + 5.2f, 0f), 1.5f, MatId.Trim, 10, 16);
+        b.Torus(new Vector3(0f, DomeTop + 4.4f, 0f), 2.1f, 0.24f, MatId.Trim, 20, 8);
+
+        // Recessed bays between every pilaster, on both storeys, and a coffered floor pattern.
+        for (int i = 0; i < 16; i++)
+        {
+            float a = (i + 0.5f) / 16f * MathX.TwoPi;
+            Vector3 d = new(MathF.Cos(a), 0f, MathF.Sin(a));
+            foreach (var (y0, y1) in new[] { (1.4f, Upper - 1.8f), (Upper + 1.4f, DomeTop - 2.2f) })
+            {
+                b.DecorBeam(d * (OuterR - 0.15f) + new Vector3(0f, y0, 0f), d * (OuterR - 0.15f) + new Vector3(0f, y1, 0f), 1.45f, 0.16f, MatId.TechPanelDark, 1.4f);
+                b.DecorBeam(d * (OuterR - 0.5f) + new Vector3(0f, y0 - 0.3f, 0f), d * (OuterR - 0.5f) + new Vector3(0f, y0, 0f), 1.6f, 0.16f, MatId.Trim, 1.4f);
+                b.DecorBeam(d * (OuterR - 0.5f) + new Vector3(0f, y1, 0f), d * (OuterR - 0.5f) + new Vector3(0f, y1 + 0.3f, 0f), 1.6f, 0.16f, MatId.Trim, 1.4f);
+            }
+            WallLamp(b, d * (OuterR - 0.6f) + new Vector3(0f, Upper - 3.4f, 0f),
+                MathF.Abs(d.X) > MathF.Abs(d.Z) ? 0 : 1, MatId.Trim, new Vector3(0.7f, 0.85f, 1f), 12f, 2.2f);
+        }
+        foreach (float rr in new[] { 5.5f, 9.5f, 13.5f })
+            for (int i = 0; i < 26; i++)
+            {
+                float a0 = i / 26f * MathX.TwoPi, a1 = (i + 1) / 26f * MathX.TwoPi;
+                b.DecorBeam(new Vector3(MathF.Cos(a0), 0.02f, MathF.Sin(a0)) * rr,
+                            new Vector3(MathF.Cos(a1), 0.02f, MathF.Sin(a1)) * rr, 0.22f, 0.05f, MatId.Trim, 1.3f);
+            }
+
         // --- pillars on both floors, as the original has ---
         for (int i = 0; i < 4; i++)
         {
@@ -746,6 +917,17 @@ public static partial class Maps
 
         b.Room(new Vector3(-HX - 2f, -2f, -EndZ - 2f), new Vector3(HX + 2f, CeilY, EndZ + 2f), 2f,
             MatId.TechFloor, MatId.TechWall, MatId.TechPanelDark, withCeiling: true, withFloor: true);
+        DressHull(b, new Vector3(-HX, 0f, -EndZ), new Vector3(HX, CeilY, EndZ), MatId.TechWall, MatId.Trim, 12);
+        for (int i = 0; i < 10; i++)
+        {
+            float z = MathX.Lerp(-EndZ + 4f, EndZ - 4f, i / 9f);
+            foreach (int s in new[] { -1, 1 })
+            {
+                WallLamp(b, new Vector3(s * (HX - 0.5f), 4.6f, z), 0, MatId.Trim, new Vector3(0.62f, 0.82f, 1f), 12f, 2.4f);
+                if (i % 3 == 0)
+                    Louvres(b, new Vector3(s * (HX - 0.42f), 1.2f, z - 1.4f), new Vector3(s * (HX - 0.08f), 3.4f, z + 1.4f), MatId.Trim, 5);
+            }
+        }
 
         // --- central hall: open, two storeys, the place both routes converge ---
         b.Solid(new Vector3(-HX, -0.6f, -14f), new Vector3(HX, 0f, 14f), MatId.TechFloor, true, 0.9f);
@@ -912,6 +1094,24 @@ public static partial class Maps
 
         b.Room(new Vector3(-HX - 2f, -10f, -EndZ - 2f), new Vector3(HX + 2f, CeilY, EndZ + 2f), 2f,
             MatId.Concrete, MatId.Concrete, MatId.TechPanelDark, withCeiling: true, withFloor: false);
+        // A submarine pen: roof trusses the length of the hall, a travelling crane rail down each
+        // apron, and conduit and vents along the concrete.
+        DressIndustrial(b, new Vector3(-HX, Dock, -EndZ), new Vector3(HX, CeilY, EndZ),
+            MatId.RustMetal, MatId.TechPanelDark, 5);
+        for (int s = -1; s <= 1; s += 2)
+        {
+            Girder(b, new Vector3(s * (HX - 3.5f), CeilY - 5.5f, -EndZ), new Vector3(s * (HX - 3.5f), CeilY - 5.5f, EndZ), 0.34f, MatId.RustMetal);
+            for (int i = 0; i < 9; i++)
+            {
+                float z = MathX.Lerp(-EndZ + 3f, EndZ - 3f, i / 8f);
+                b.DecorBeam(new Vector3(s * (HX - 0.3f), CeilY - 7.5f, z), new Vector3(s * (HX - 3.5f), CeilY - 5.2f, z), 0.15f, 0.15f, MatId.RustMetal, 1.4f);
+            }
+        }
+        // The crane itself, parked over the water at one end.
+        Truss(b, new Vector3(-HX + 3f, CeilY - 5.2f, -EndZ * 0.55f), new Vector3(HX - 3f, CeilY - 5.2f, -EndZ * 0.55f), 1.5f, 8, MatId.Trim, 0.2f);
+        b.Decor(new Vector3(-2.2f, CeilY - 8.6f, -EndZ * 0.55f - 1.6f), new Vector3(2.2f, CeilY - 6.9f, -EndZ * 0.55f + 1.6f), MatId.RustMetal, 1.3f);
+        foreach (float hx in new[] { -1.4f, 1.4f })
+            b.DecorBeam(new Vector3(hx, CeilY - 8.6f, -EndZ * 0.55f), new Vector3(hx, Dock + 3.5f, -EndZ * 0.55f), 0.07f, 0.07f, MatId.Trim, 1.4f);
 
         // --- the flooded channel down the middle ---
         b.Solid(new Vector3(-HX, -10f, -EndZ), new Vector3(HX, -9f, EndZ), MatId.Concrete, true, 0.8f);

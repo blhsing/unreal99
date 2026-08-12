@@ -48,6 +48,7 @@ public static partial class Maps
 
         // --- the plain, and the ridge wall that closes it ---
         b.Solid(new Vector3(-HX, -6f, -HZ), new Vector3(HX, Ground, HZ), MatId.Rock, true, 0.35f);
+        DressOutdoor(b, HX, HZ, 0f, WallTop, MatId.Rock, MatId.Trim, 7);
         b.Room(new Vector3(-HX - 4f, -6f, -HZ - 4f), new Vector3(HX + 4f, WallTop, HZ + 4f), 4f,
             MatId.Rock, MatId.Rock, MatId.Rock, withCeiling: false, withFloor: false);
 
@@ -229,6 +230,7 @@ public static partial class Maps
         const float Ground = 0f;
 
         b.Solid(new Vector3(-HX, -6f, -HZ), new Vector3(HX, Ground, HZ), MatId.Rock, true, 0.4f);
+        DressOutdoor(b, HX, HZ, 0f, 54f, MatId.Rock, MatId.Trim, 6);
         b.Room(new Vector3(-HX - 4f, -6f, -HZ - 4f), new Vector3(HX + 4f, 54f, HZ + 4f), 4f,
             MatId.Rock, MatId.Rock, MatId.Rock, withCeiling: false, withFloor: false);
 

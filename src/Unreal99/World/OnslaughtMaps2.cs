@@ -43,6 +43,7 @@ public static partial class Maps
 
         const float HX = 130f, HZ = 108f, Ground = 0f;
         b.Solid(new Vector3(-HX, -6f, -HZ), new Vector3(HX, Ground, HZ), MatId.Rock, true, 0.4f);
+        DressOutdoor(b, HX, HZ, Ground, 72f, MatId.Rock, MatId.Trim, 8);
         b.Room(new Vector3(-HX - 4f, -6f, -HZ - 4f), new Vector3(HX + 4f, 72f, HZ + 4f), 4f,
             MatId.Rock, MatId.Rock, MatId.Rock, withCeiling: false, withFloor: false);
 
@@ -283,6 +284,7 @@ public static partial class Maps
 
         const float HX = 138f, HZ = 96f, Ground = 0f;
         b.Solid(new Vector3(-HX, -6f, -HZ), new Vector3(HX, Ground, HZ), MatId.Rock, true, 0.4f);
+        DressOutdoor(b, HX, HZ, Ground, 78f, MatId.Rock, MatId.Trim, 8);
         b.Room(new Vector3(-HX - 4f, -6f, -HZ - 4f), new Vector3(HX + 4f, 78f, HZ + 4f), 4f,
             MatId.Rock, MatId.Rock, MatId.Rock, withCeiling: false, withFloor: false);
 

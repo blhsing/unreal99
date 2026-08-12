@@ -214,19 +214,35 @@ public static partial class Maps
 
     // ================================================================ shared helpers
 
-    /// <summary>Non-colliding guard rail run: a top bar plus evenly spaced posts.</summary>
+    /// <summary>
+    /// Non-colliding guard rail run: top rail, mid rail, kick plate and posts on base flanges.
+    ///
+    /// A single bar on bare posts is the industrial equivalent of an untrimmed wall. Real handrail
+    /// has three horizontals and a plate at deck level, and this runs along every catwalk, gallery
+    /// and bridge in the game, so the profile is worth building properly once.
+    /// </summary>
     private static void RailRun(LevelBuilder b, Vector3 a, Vector3 c, float height = 0.95f,
         MatId mat = MatId.Trim)
     {
         Vector3 min = Vector3.Min(a, c), max = Vector3.Max(a, c);
+        // Top rail, doubled into a slight cap so it has an edge rather than one flat face.
         b.Decor(new Vector3(min.X - 0.07f, min.Y + height - 0.10f, min.Z - 0.07f),
                 new Vector3(max.X + 0.07f, max.Y + height, max.Z + 0.07f), mat, 1.4f);
+        b.Decor(new Vector3(min.X - 0.10f, min.Y + height, min.Z - 0.10f),
+                new Vector3(max.X + 0.10f, max.Y + height + 0.06f, max.Z + 0.10f), mat, 1.4f);
+        // Mid rail and kick plate.
+        b.Decor(new Vector3(min.X - 0.05f, min.Y + height * 0.52f, min.Z - 0.05f),
+                new Vector3(max.X + 0.05f, max.Y + height * 0.52f + 0.09f, max.Z + 0.05f), mat, 1.4f);
+        b.Decor(new Vector3(min.X - 0.06f, min.Y + 0.02f, min.Z - 0.06f),
+                new Vector3(max.X + 0.06f, max.Y + 0.20f, max.Z + 0.06f), mat, 1.4f);
+
         float len = Vector3.Distance(a, c);
         int posts = Math.Max(2, (int)(len / 2.6f));
         for (int i = 0; i <= posts; i++)
         {
             Vector3 p = Vector3.Lerp(a, c, i / (float)posts);
             b.Decor(p - new Vector3(0.06f, 0f, 0.06f), p + new Vector3(0.06f, height, 0.06f), mat, 1.4f);
+            b.Decor(p - new Vector3(0.13f, 0f, 0.13f), p + new Vector3(0.13f, 0.07f, 0.13f), mat, 1.4f);
         }
     }
 

@@ -41,8 +41,40 @@ public static partial class Maps
         b.Lava(new Vector3(-HX - 44f, -9f, -BaseZ - 46f), new Vector3(HX + 44f, -5.5f, BaseZ + 46f));
         b.Solid(new Vector3(-HX, -6f, -BaseZ - 20f), new Vector3(HX, 0f, BaseZ + 20f), MatId.Rock, true, 0.45f);
 
+        // Shoreline and strata. A volcanic island whose rock is one smooth slab reads as a table
+        // with lava painted round it; the original's silhouette is all ledges, spurs and a crust
+        // where the sea has cooled against the shore.
+        for (int band = 0; band < 4; band++)
+        {
+            float y = -5.2f + band * 1.25f;
+            float inset = 1.2f + band * 1.6f;
+            b.Decor(new Vector3(-HX - 1.4f + inset * 0.35f, y, -BaseZ - 21f), new Vector3(-HX + inset, y + 0.9f, BaseZ + 21f), MatId.Rock, 0.45f);
+            b.Decor(new Vector3(HX - inset, y, -BaseZ - 21f), new Vector3(HX + 1.4f - inset * 0.35f, y + 0.9f, BaseZ + 21f), MatId.Rock, 0.45f);
+            b.Decor(new Vector3(-HX - 1.4f, y, -BaseZ - 21f + inset * 0.35f), new Vector3(HX + 1.4f, y + 0.9f, -BaseZ - 20f + inset), MatId.Rock, 0.45f);
+            b.Decor(new Vector3(-HX - 1.4f, y, BaseZ + 20f - inset), new Vector3(HX + 1.4f, y + 0.9f, BaseZ + 21f - inset * 0.35f), MatId.Rock, 0.45f);
+        }
+        var shoreRng = new Rng(0x1A9A);
+        for (int i = 0; i < 40; i++)
+        {
+            float t = shoreRng.Range(-BaseZ - 18f, BaseZ + 18f);
+            float sx = shoreRng.Chance(0.5f) ? -1f : 1f;
+            float r = shoreRng.Range(1.1f, 2.9f);
+            b.Decor(new Vector3(sx * HX - r, -1.4f, t - r), new Vector3(sx * HX + r * 0.55f, shoreRng.Range(0.6f, 2.6f), t + r), MatId.Rock, 0.5f);
+        }
+
         // --- the central ridge: a wall of rock with a high pass over the top ---
         b.Solid(new Vector3(-HX, 0f, -9f), new Vector3(-24f, RidgeTop, 9f), MatId.Rock, true, 0.5f);
+        // Strata up the ridge face, so the pass is cut through rock rather than a fence of blocks.
+        for (int band = 0; band < 5; band++)
+        {
+            float y = 0.8f + band * 2.3f;
+            float d = 0.7f + (band % 2) * 0.8f;
+            foreach (int s in new[] { -1, 1 })
+            {
+                b.Decor(new Vector3(-HX, y, s * 9f - s * d), new Vector3(-24f + d, y + 1.5f, s * 9f), MatId.Rock, 0.5f);
+                b.Decor(new Vector3(24f - d, y, s * 9f - s * d), new Vector3(HX, y + 1.5f, s * 9f), MatId.Rock, 0.5f);
+            }
+        }
         b.Solid(new Vector3(24f, 0f, -9f), new Vector3(HX, RidgeTop, 9f), MatId.Rock, true, 0.5f);
         b.Solid(new Vector3(-24f, 0f, -9f), new Vector3(24f, RidgeTop - 4f, 9f), MatId.Rock, true, 0.5f);
         // The saddle in the middle of the ridge — the high road between the bases.
@@ -50,6 +82,36 @@ public static partial class Maps
             MatId.Concrete, true, 0.8f);
         b.Ramp(new Vector3(-10f, 0f, -22f), new Vector3(10f, RidgeTop - 3.4f, -7f), 2, MatId.Rock, true, 0.6f);
         b.Ramp(new Vector3(-10f, 0f, 7f), new Vector3(10f, RidgeTop - 3.4f, 22f), 3, MatId.Rock, true, 0.6f);
+        // The ridge is the map's landmark, so it gets a skyline: broken crags along the crest,
+        // a cut stair-face either side of the saddle, and boulder fall down onto the flats.
+        var ridgeRng = new Rng(0x3C71);
+        for (int i = 0; i < 22; i++)
+        {
+            float x = ridgeRng.Range(-HX + 2f, HX - 2f);
+            if (MathF.Abs(x) < 12f) continue;
+            float w = ridgeRng.Range(1.6f, 4.2f);
+            float h = ridgeRng.Range(1.5f, 6f);
+            b.Decor(new Vector3(x - w, RidgeTop, -9f), new Vector3(x + w, RidgeTop + h, 9f), MatId.Rock, 0.5f);
+            b.Decor(new Vector3(x - w * 0.6f, RidgeTop + h, -6.5f), new Vector3(x + w * 0.6f, RidgeTop + h + ridgeRng.Range(0.8f, 2.6f), 6.5f), MatId.Rock, 0.5f);
+        }
+        for (int i = 0; i < 34; i++)
+        {
+            float x = ridgeRng.Range(-HX + 3f, HX - 3f);
+            float z = ridgeRng.Chance(0.5f) ? ridgeRng.Range(-24f, -10f) : ridgeRng.Range(10f, 24f);
+            float r = ridgeRng.Range(0.9f, 2.6f);
+            b.Decor(new Vector3(x - r, 0f, z - r), new Vector3(x + r, r * ridgeRng.Range(0.9f, 1.7f), z + r), MatId.Rock, 0.55f);
+        }
+        for (int band = 0; band < 6; band++)
+        {
+            float y = 0.5f + band * 2f;
+            float d = 0.6f + (band % 3) * 0.9f;
+            foreach (int s in new[] { -1, 1 })
+            {
+                b.Decor(new Vector3(-HX, y, s * 9f - s * d), new Vector3(HX, y + 1.2f, s * 9f), MatId.Rock, 0.5f);
+                b.Decor(new Vector3(-HX, y, s * 9f), new Vector3(HX, y + 0.5f, s * 9f + s * 0.4f), MatId.Rock, 0.5f);
+            }
+        }
+
         // Flank passes hugging the outer walls.
         b.Solid(new Vector3(-HX, -0.1f, -9f), new Vector3(-30f, 0f, 9f), MatId.Rock, true, 0.5f);
         b.Solid(new Vector3(30f, -0.1f, -9f), new Vector3(HX, 0f, 9f), MatId.Rock, true, 0.5f);
@@ -72,6 +134,41 @@ public static partial class Maps
                     new Vector3(22f, 12f, MathF.Max(back, back + 3f * sign)), teamMat, true, 0.6f);
             b.Solid(new Vector3(-22f, 12f, z - 16f * sign), new Vector3(22f, 13.4f, z + 16f * sign),
                 MatId.TechPanelDark, true, 0.7f);
+
+            // The fort as a fort: battered buttresses down the flanks, a machicolated parapet,
+            // merlons, braziers on the corners and the team's colours hung on the inner face.
+            for (int i = 0; i <= 6; i++)
+            {
+                float tz = MathX.Lerp(z - 15f * sign, z + 15f * sign, i / 6f);
+                foreach (int sx in new[] { -1, 1 })
+                {
+                    Buttress(b, new Vector3(sx * 20.5f, 0f, tz), 11.5f, new Vector3(sx * 2.4f, 0f, 0f), teamMat);
+                    b.Decor(new Vector3(sx * 19f - sx * 0.4f, 5.6f, tz - 1.5f), new Vector3(sx * 22f + sx * 0.5f, 6.4f, tz + 1.5f), MatId.Trim, 1.3f);
+                }
+            }
+            foreach (int sx in new[] { -1, 1 })
+            {
+                b.Decor(new Vector3(sx * 19f - sx * 0.9f, 11.2f, z - 16f * sign), new Vector3(sx * 22f + sx * 0.9f, 12f, z + 16f * sign), MatId.Trim, 1.3f);
+                for (int i = 0; i < 11; i++)
+                {
+                    float tz = MathX.Lerp(z - 15.5f * sign, z + 15.5f * sign, i / 10f);
+                    b.Decor(new Vector3(sx * 19f - sx * 0.7f, 13.4f, tz - 1.1f), new Vector3(sx * 22f + sx * 0.7f, 15.4f, tz + 1.1f), teamMat, 1.3f);
+                }
+            }
+            for (int i = 0; i < 11; i++)
+            {
+                float x = MathX.Lerp(-21.5f, 21.5f, i / 10f);
+                b.Decor(new Vector3(x - 1.1f, 13.4f, MathF.Min(back, back + 3.7f * sign)),
+                        new Vector3(x + 1.1f, 15.4f, MathF.Max(back, back + 3.7f * sign)), teamMat, 1.3f);
+            }
+            foreach (var (bx, bz) in new[] { (-20.5f, z - 15f * sign), (20.5f, z - 15f * sign), (-20.5f, z + 15f * sign), (20.5f, z + 15f * sign) })
+            {
+                b.Prism(new Vector3(bx, 14.2f, bz), 1.1f, 1.6f, 8, MatId.Trim, false);
+                b.Decor(new Vector3(bx - 0.7f, 15f, bz - 0.7f), new Vector3(bx + 0.7f, 16.1f, bz + 0.7f), MatId.Lava, 0.8f);
+                b.AddLight(new Vector3(bx, 16.4f, bz), new Vector3(1f, 0.52f, 0.16f), 20f, 4.5f, 5f, 0.3f);
+            }
+            foreach (float bx in new[] { -9f, 9f })
+                Banner(b, new Vector3(bx, 11.4f, z - 16f * sign + 0.8f * sign), 3.6f, 7f, 1, teamMat);
 
             // Explosions and the ridge approach can put players on the fort roof. It used to be
             // an isolated navigation island with no physical way down, so bots coasted to an
@@ -215,6 +312,23 @@ public static partial class Maps
         b.Solid(new Vector3(HX, -2f, -HZ - 2f), new Vector3(HX + 2f, CeilY, HZ + 2f), MatId.Rock, true, 0.5f);
         b.Solid(new Vector3(-HX, -2f, -HZ - 2f), new Vector3(HX, CeilY, -HZ), MatId.Rock, true, 0.5f);
         b.Solid(new Vector3(-HX, -2f, HZ), new Vector3(HX, CeilY, HZ + 2f), MatId.Rock, true, 0.5f);
+        // The long hall reads as a buried temple rather than a corridor once it has an order:
+        // a pier rhythm down both sides carrying a blind arcade, with the wall trimmed top and
+        // bottom. Upper storey gets its own cornice where the courtyard deck meets the wall.
+        DressStone(b, new Vector3(-HX, 0f, -HZ), new Vector3(HX, Upper, HZ), MatId.Rock, MatId.Trim, 8, true);
+        RoomTrim(b, new Vector3(-HX, Upper, -HZ), new Vector3(HX, Upper, HZ), CeilY - 1.2f, MatId.Trim, 0.34f);
+        for (int i = 0; i <= 8; i++)
+        {
+            float x = MathX.Lerp(-HX + 2f, HX - 2f, i / 8f);
+            foreach (int s in new[] { -1, 1 })
+            {
+                WallLamp(b, new Vector3(x, Upper + 4.2f, s * (HZ - 0.5f)), 1, MatId.Trim,
+                    new Vector3(1f, 0.62f, 0.28f), 14f, 2.4f);
+                if (i % 2 == 0)
+                    Window(b, new Vector3(x - 2.2f, Upper + 6.5f, s * HZ - 0.4f),
+                        new Vector3(x + 2.2f, CeilY - 3f, s * HZ + 0.4f), 1, MatId.Trim, 1);
+            }
+        }
 
         // --- upper courtyard: a broad deck over the hall, open down the middle ---
         b.Solid(new Vector3(-HX, Upper - 0.8f, -HZ), new Vector3(HX, Upper, -8f), MatId.Concrete, true, 0.7f);
@@ -348,6 +462,26 @@ public static partial class Maps
         // Shaft walls.
         b.Solid(new Vector3(-9.6f, PitFloor, -9.6f), new Vector3(-9f, 0.2f, 9.6f), MatId.Rock, true, 0.5f);
         b.Solid(new Vector3(9f, PitFloor, -9.6f), new Vector3(9.6f, 0.2f, 9.6f), MatId.Rock, true, 0.5f);
+        // A library cut into rock: an order of piers and blind arches around the main floor, and
+        // a moulded rim around the shaft so the drop reads as built rather than broken open.
+        DressStone(b, new Vector3(-H, 0f, -H), new Vector3(H, Balcony, H), MatId.Concrete, MatId.Trim, 8, true);
+        RoomTrim(b, new Vector3(-H, Balcony, -H), new Vector3(H, Balcony, H), CeilY - 1f, MatId.Trim, 0.32f);
+        foreach (float ry in new[] { 0.2f, PitFloor + 0.4f })
+        {
+            b.Decor(new Vector3(-10.3f, ry - 0.42f, -10.3f), new Vector3(10.3f, ry, -9f), MatId.Trim, 1.4f);
+            b.Decor(new Vector3(-10.3f, ry - 0.42f, 9f), new Vector3(10.3f, ry, 10.3f), MatId.Trim, 1.4f);
+            b.Decor(new Vector3(-10.3f, ry - 0.42f, -10.3f), new Vector3(-9f, ry, 10.3f), MatId.Trim, 1.4f);
+            b.Decor(new Vector3(9f, ry - 0.42f, -10.3f), new Vector3(10.3f, ry, 10.3f), MatId.Trim, 1.4f);
+        }
+        for (int i = 0; i < 6; i++)
+        {
+            float t = MathX.Lerp(-8f, 8f, i / 5f);
+            foreach (int s in new[] { -1, 1 })
+            {
+                b.DecorBeam(new Vector3(t, 0.2f, s * 9.3f), new Vector3(t, PitFloor + 0.4f, s * 9.3f), 0.2f, 0.2f, MatId.Trim, 1.3f);
+                b.DecorBeam(new Vector3(s * 9.3f, 0.2f, t), new Vector3(s * 9.3f, PitFloor + 0.4f, t), 0.2f, 0.2f, MatId.Trim, 1.3f);
+            }
+        }
         b.Solid(new Vector3(-9.6f, PitFloor, -9.6f), new Vector3(9.6f, 0.2f, -9f), MatId.Rock, true, 0.5f);
         b.Solid(new Vector3(-9.6f, PitFloor, 9f), new Vector3(9.6f, 0.2f, 9.6f), MatId.Rock, true, 0.5f);
 
@@ -475,6 +609,17 @@ public static partial class Maps
             // --- habitat block ---
             b.Room(new Vector3(-BlockHalf, 0f, z - 18f), new Vector3(BlockHalf, CeilY, z + 18f), 1.6f,
                 MatId.TechFloor, MatId.SkyMetal, MatId.TechPanelDark, withCeiling: true, withFloor: true);
+            // Pressure-vessel framing: rib arches across the habitat, conduit runs at waist height
+            // and panelled hull plate between the ribs. This is the whole look of a station module.
+            DressHull(b, new Vector3(-BlockHalf, 0f, z - 18f), new Vector3(BlockHalf, CeilY, z + 18f),
+                MatId.SkyMetal, MatId.Trim, 7);
+            for (int i = 0; i < 4; i++)
+            {
+                float lz = MathX.Lerp(z - 14f, z + 14f, i / 3f);
+                foreach (int s in new[] { -1, 1 })
+                    WallLamp(b, new Vector3(s * (BlockHalf - 0.5f), Upper + 3.4f, lz), 0, MatId.Trim,
+                        new Vector3(0.75f, 0.85f, 1f), 13f, 2.6f);
+            }
             // Glass roof panel so the star field is visible from inside.
             b.Decor(new Vector3(-9f, CeilY - 1.6f, z - 9f), new Vector3(9f, CeilY - 1.4f, z + 9f), MatId.Glass);
 
@@ -596,6 +741,17 @@ public static partial class Maps
             new Vector3(HX + 2f, CeilY, HZ + 2f), MatId.TechPanelDark);
         b.Solid(new Vector3(-HX, 0f, -HZ - 2f),
             new Vector3(HX, CeilY, -HZ), MatId.RustMetal);
+        // Brick arena: a pier order round the hall carrying a blind arcade, with the gallery
+        // cornice above it and iron sconces between the bays.
+        DressStone(b, new Vector3(-HX, 0f, -HZ), new Vector3(HX, Gallery, HZ), MatId.Concrete, MatId.Trim, 5, true);
+        RoomTrim(b, new Vector3(-HX, Gallery, -HZ), new Vector3(HX, Gallery, HZ), CeilY - 1.4f, MatId.Trim, 0.30f);
+        for (int i = 0; i < 5; i++)
+        {
+            float t = MathX.Lerp(-HX + 4f, HX - 4f, i / 4f);
+            foreach (int s in new[] { -1, 1 })
+                WallLamp(b, new Vector3(t, Gallery + 3.6f, s * (HZ - 0.5f)), 1, MatId.Trim,
+                    new Vector3(1f, 0.66f, 0.32f), 12f, 2.2f);
+        }
         b.Solid(new Vector3(-HX, 0f, HZ),
             new Vector3(HX, CeilY, HZ + 2f), MatId.RustMetal);
         b.WallWithDoor(new Vector3(-HX - 2f, 0f, -HZ - 2f),

@@ -48,6 +48,9 @@ public static partial class Maps
 
         b.Room(new Vector3(-HX - 2f, -9f, -HZ - 2f), new Vector3(HX + 2f, CeilY, HZ + 2f), 2f,
             MatId.Concrete, MatId.RustMetal, MatId.TechPanelDark, withCeiling: true, withFloor: false);
+        // A smelter: roof trusses, tapped pipework along both walls, and vent banks over the floor.
+        DressIndustrial(b, new Vector3(-HX, 0f, -HZ), new Vector3(HX, CeilY, HZ),
+            MatId.RustMetal, MatId.TechPanelDark, 5);
         b.Solid(new Vector3(-HX, -9f, -HZ), new Vector3(HX, -8f, HZ), MatId.Concrete, true, 0.8f);
 
         // --- three separate pools, not a lava sea ---
@@ -223,6 +226,17 @@ public static partial class Maps
         b.Solid(new Vector3(-48f, -1.6f, -48f), new Vector3(48f, 0f, 48f), MatId.Concrete, true, 0.7f);
         b.Room(new Vector3(-48f, -1.6f, -48f), new Vector3(48f, CeilY, 48f), 2f,
             MatId.Concrete, MatId.Rock, MatId.TechPanelDark, withCeiling: true, withFloor: false);
+        // A tomb: an order of piers round the chamber under a blind arcade, torches between bays.
+        DressStone(b, new Vector3(-48f, 0f, -48f), new Vector3(48f, CeilY, 48f), MatId.Rock, MatId.Trim, 9, true);
+        for (int i = 0; i < 9; i++)
+        {
+            float t = MathX.Lerp(-42f, 42f, i / 8f);
+            foreach (int s in new[] { -1, 1 })
+            {
+                WallLamp(b, new Vector3(t, 4.4f, s * 47.4f), 1, MatId.Trim, new Vector3(1f, 0.58f, 0.22f), 15f, 2.8f);
+                WallLamp(b, new Vector3(s * 47.4f, 4.4f, t), 0, MatId.Trim, new Vector3(1f, 0.58f, 0.22f), 15f, 2.8f);
+            }
+        }
 
         // Carve the plan by filling in everything that is not hall, corridor or chamber. Working
         // subtractively keeps the floor continuous — no pits for anyone to fall into — while
@@ -331,6 +345,18 @@ public static partial class Maps
 
         b.Room(new Vector3(-H - 2f, -7f, -H - 2f), new Vector3(H + 2f, CeilY, H + 2f), 2f,
             MatId.Concrete, MatId.Rock, MatId.TechPanelDark, withCeiling: true, withFloor: false);
+        // An aquifer under masonry: a full arcade round the cistern, carried on piers, with the
+        // vault springing off the cornice — this is the one shape the original is remembered for.
+        DressStone(b, new Vector3(-H, 0f, -H), new Vector3(H, CeilY - 5f, H), MatId.Rock, MatId.Trim, 7, true);
+        for (int i = 0; i < 7; i++)
+        {
+            float m = MathX.Lerp(-H, H, (i + 0.5f) / 7f);
+            foreach (int s in new[] { -1, 1 })
+            {
+                Arch(b, new Vector3(m, CeilY - 4.6f, s * (H - 0.6f)), (H * 2f) / 7f, 3.4f, 0.8f, 0, MatId.Rock, 9, 0.32f);
+                Arch(b, new Vector3(s * (H - 0.6f), CeilY - 4.6f, m), (H * 2f) / 7f, 3.4f, 0.8f, 1, MatId.Rock, 9, 0.32f);
+            }
+        }
         b.Solid(new Vector3(-H, -7f, -H), new Vector3(H, -5.4f, H), MatId.Rock, true, 0.7f);
 
         // --- island, moat, outer ring ---
@@ -472,6 +498,30 @@ public static partial class Maps
         b.Solid(new Vector3(-HX, -1.6f, -HZ), new Vector3(HX, 0f, HZ), MatId.Concrete, true, 0.8f);
         b.Room(new Vector3(-HX - 2f, -1.6f, -HZ - 2f), new Vector3(HX + 2f, CeilY, HZ + 2f), 2f,
             MatId.Concrete, MatId.RustMetal, MatId.TechPanelDark, withCeiling: true, withFloor: false);
+        // A foundry, so it gets the full industrial kit plus the overhead crane that served it.
+        DressIndustrial(b, new Vector3(-HX, 0f, -HZ), new Vector3(HX, CeilY, HZ),
+            MatId.RustMetal, MatId.TechPanelDark, 5);
+        for (int s = -1; s <= 1; s += 2)
+        {
+            Girder(b, new Vector3(-HX + 1.5f, CeilY - 6.5f, s * (HZ - 5f)), new Vector3(HX - 1.5f, CeilY - 6.5f, s * (HZ - 5f)), 0.36f, MatId.RustMetal);
+            for (int i = 0; i < 8; i++)
+            {
+                float x = MathX.Lerp(-HX + 3f, HX - 3f, i / 7f);
+                b.DecorBeam(new Vector3(x, CeilY - 6.2f, s * (HZ - 0.4f)), new Vector3(x, CeilY - 6.2f, s * (HZ - 5f)), 0.14f, 0.14f, MatId.RustMetal, 1.4f);
+            }
+        }
+        Truss(b, new Vector3(-6f, CeilY - 6.2f, -HZ + 5f), new Vector3(-6f, CeilY - 6.2f, HZ - 5f), 1.4f, 7, MatId.Trim, 0.2f);
+        b.Decor(new Vector3(-8.4f, CeilY - 10.5f, -3.2f), new Vector3(-3.6f, CeilY - 8f, 3.2f), MatId.RustMetal, 1.3f);
+        foreach (float cz in new[] { -2.2f, 2.2f })
+            b.DecorBeam(new Vector3(-6f, CeilY - 10.5f, cz), new Vector3(-6f, 4.5f, cz), 0.08f, 0.08f, MatId.Trim, 1.4f);
+        // Ladle and scrap by the walls.
+        foreach (var (px, pz) in new[] { (-HX + 3.5f, -HZ + 6f), (HX - 3.5f, HZ - 6f) })
+        {
+            b.Cylinder(new Vector3(px, 1.9f, pz), 2.3f, 2.9f, 3.8f, 14, MatId.RustMetal);
+            b.Torus(new Vector3(px, 3.6f, pz), 2.95f, 0.22f, MatId.Trim, 18, 7);
+            Barrel(b, new Vector3(px + 3.4f, 0f, pz + 1.2f), MatId.RustMetal);
+            Crate(b, new Vector3(px + 3.6f, 0f, pz - 2.2f), 1.8f, MatId.TechPanelDark, MatId.Trim);
+        }
 
         // --- Furnace: a glowing drum with the point on its apron ---
         Vector3 furnace = new(-25f, 0f, 0f);
