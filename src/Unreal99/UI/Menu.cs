@@ -51,6 +51,10 @@ public sealed class Menu
     private readonly List<ItemRect> _itemRects = new();
     private float _scroll;
     private float _maxScroll;
+    private int _galleryColumns = 4;
+    private float _galleryGridTop;
+    private float _galleryGridBottom;
+    private float _galleryScrollStep = 120f;
     private bool _pointerActive;
     /// <summary>
     /// True while the mouse owns selection. Unlike pointer visibility this survives a stationary
@@ -74,11 +78,8 @@ public sealed class Menu
     public Vector2 PointerPosition => _pointer;
     public bool EditingPlayerName => _editingNameSlot >= 0;
 
-    /// <summary>
-    /// Grid width for the arena gallery. Widens as the roster grows so the cards stay a
-    /// reasonable height instead of being squeezed into ever-thinner rows.
-    /// </summary>
-    private int GalleryColumns => _items.Count <= 6 ? 3 : _items.Count <= 12 ? 4 : 5;
+    /// <summary>Matches the most recently drawn gallery, so arrow navigation follows its rows.</summary>
+    private int GalleryColumns => _galleryColumns;
 
     // ---------------------------------------------------------------- settings model
 
@@ -169,6 +170,11 @@ public sealed class Menu
 
     public void Open(MenuScreen screen)
     {
+        if (screen == MenuScreen.MapGallery)
+        {
+            OpenMapGallery();
+            return;
+        }
         Screen = screen;
         SelectedIndex = 0;
         Active = true;
@@ -273,7 +279,8 @@ public sealed class Menu
         if (MathF.Abs(wheel) > 0.01f && _maxScroll > 0f)
         {
             float oldScroll = _scroll;
-            _scroll = MathX.Clamp(_scroll - wheel * 48f, 0f, _maxScroll);
+            float wheelStep = Screen == MenuScreen.MapGallery ? _galleryScrollStep : 48f;
+            _scroll = MathX.Clamp(_scroll - wheel * wheelStep, 0f, _maxScroll);
             float offset = oldScroll - _scroll;
             // Hit rectangles were produced during the preceding draw. Move them with the
             // list immediately so a wheel-and-click in the same frame targets the visible row.
@@ -338,6 +345,8 @@ public sealed class Menu
         for (int i = 0; i < _itemRects.Count; i++)
         {
             ItemRect r = _itemRects[i];
+            if (Screen == MenuScreen.MapGallery
+                && (r.Y < _galleryGridTop || r.Y + r.Height > _galleryGridBottom)) continue;
             if (position.X < r.X || position.X > r.X + r.Width) continue;
             if (position.Y < r.Y || position.Y > r.Y + r.Height) continue;
             if (r.Index < 0 || r.Index >= _items.Count) continue;
@@ -454,6 +463,7 @@ public sealed class Menu
     private void MoveBy(int delta)
     {
         if (_items.Count == 0) return;
+        _followSelection = true;
         int direction = Math.Sign(delta);
         int candidate = ((SelectedIndex + delta) % _items.Count + _items.Count) % _items.Count;
         for (int i = 0; i < _items.Count; i++)
@@ -707,6 +717,8 @@ public sealed class Menu
     {
         Screen = MenuScreen.MapGallery;
         Active = true;
+        _scroll = 0f;
+        _followSelection = true;
         Rebuild();
         SelectedIndex = MathX.Clamp((int)Map, 0, _items.Count - 1);
         if (!_items[SelectedIndex].Enabled()) MoveToSelectable(1);
@@ -1207,24 +1219,46 @@ public sealed class Menu
         ui.Text(FaceRegular, 17f * s, width * 0.5f, height * 0.065f + 62f * s,
             Loc.MapGalleryHint, UiRenderer.Rgba(0.66f, 0.76f, 0.91f), TextAlign.Center);
 
-        int columns = GalleryColumns;
+        // Cards retain a useful screenshot size and the viewport scrolls through the roster.
+        // The old layout divided one screen by every row, making thirty-six previews into thin
+        // strips whose maps could no longer be recognised.
+        int columns = width < 1200 ? 3 : 4;
+        _galleryColumns = columns;
         int rows = (_items.Count + columns - 1) / columns;
         float panelW = MathF.Min(width * 0.90f, 1080f * s);
         float gap = 18f * s;
         float cardW = (panelW - gap * (columns - 1)) / columns;
         float gridTop = height * 0.21f;
-        float gridBottom = height - 150f * s;
-        float cardH = (gridBottom - gridTop - gap * (rows - 1)) / rows;
+        float gridBottom = height - 158f * s;
+        float cardH = MathF.Max(126f * s, cardW * 0.62f);
+        float rowStep = cardH + gap;
+        _galleryScrollStep = rowStep;
+        float visible = MathF.Max(cardH, gridBottom - gridTop);
+        float total = rows * rowStep - gap;
         float startX = (width - panelW) * 0.5f;
 
         _itemRects.Clear();
-        _maxScroll = 0f;
+        _galleryGridTop = gridTop;
+        _galleryGridBottom = gridBottom;
+        _maxScroll = MathF.Max(0f, total - visible);
+        if (_followSelection && SelectedIndex >= 0)
+        {
+            float selectedTop = SelectedIndex / columns * rowStep;
+            if (selectedTop < _scroll) _scroll = selectedTop;
+            else if (selectedTop + cardH > _scroll + visible)
+                _scroll = selectedTop + cardH - visible;
+            _followSelection = false;
+        }
+        _scroll = MathX.Clamp(_scroll, 0f, _maxScroll);
         for (int i = 0; i < _items.Count; i++)
         {
             int col = i % columns;
             int row = i / columns;
             float x = startX + col * (cardW + gap);
-            float y = gridTop + row * (cardH + gap);
+            float y = gridTop + row * rowStep - _scroll;
+            // UiRenderer has no scissor stack. Draw only complete cards inside the viewport so
+            // thumbnails never spill into the title or the highlighted-map introduction.
+            if (y < gridTop - 0.5f || y + cardH > gridBottom + 0.5f) continue;
             bool selected = i == SelectedIndex;
             bool enabled = _items[i].Enabled();
 
@@ -1273,6 +1307,18 @@ public sealed class Menu
             UiRenderer.Rgba(0.76f, 0.84f, 0.95f));
         ui.Text(FaceRegular, 15f * s, width * 0.5f, height - 48f * s,
             Loc.MapGalleryControls, UiRenderer.Rgba(0.56f, 0.64f, 0.77f), TextAlign.Center);
+
+        if (_maxScroll > 0f)
+        {
+            float trackX = startX + panelW + 9f * s;
+            float trackH = gridBottom - gridTop;
+            float thumbH = MathF.Max(34f * s, trackH * visible / total);
+            float thumbY = gridTop + (_scroll / _maxScroll) * (trackH - thumbH);
+            ui.ChamferRect(trackX, gridTop, 6f * s, trackH, 3f * s,
+                UiRenderer.Rgba(0.08f, 0.12f, 0.19f, 0.85f));
+            ui.ChamferRect(trackX, thumbY, 6f * s, thumbH, 3f * s,
+                UiRenderer.Rgba(0.32f, 0.70f, 1f, 0.92f));
+        }
     }
 
     /// <summary>

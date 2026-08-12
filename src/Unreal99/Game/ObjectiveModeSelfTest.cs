@@ -1,4 +1,5 @@
 using System.Numerics;
+using Unreal99.UI;
 using Unreal99.World;
 
 namespace Unreal99.Game;
@@ -9,6 +10,15 @@ public static class ObjectiveModeSelfTest
     public static int Run()
     {
         var failures = new List<string>();
+        var warmupWorld = new GameWorld(null, null, null, null, null, null)
+        {
+            Mode = GameMode.Create(GameModeKind.Deathmatch, 10, 10f, 0),
+        };
+        var waitingPawn = new Pawn { Alive = true, Health = 100f };
+        warmupWorld.Damage(waitingPawn, null, 200f, DamageType.Fall, Vector3.Zero);
+        warmupWorld.Kill(waitingPawn, null, DamageType.Void);
+        Check(waitingPawn.Alive && waitingPawn.Health == 100f,
+            "initial countdown blocks damage and environmental death", failures);
         Check(OnslaughtState.GoalScore == 3, "Onslaught goal score", failures);
         Check(OnslaughtState.OvertimeCoreDrainPerSecond == 20f, "Onslaught core drain", failures);
 

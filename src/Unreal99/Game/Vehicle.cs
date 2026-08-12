@@ -34,6 +34,8 @@ public sealed class Vehicle
     /// <summary>Hull pitch. Wheeled and walker vehicles take it from the ground they stand on.</summary>
     public float Pitch;
     public float Roll;
+    /// <summary>Last collision result for a ground vehicle; keeps step-up available frame to frame.</summary>
+    public bool OnGround;
 
     public float Health;
     public bool Alive = true;
@@ -71,6 +73,7 @@ public sealed class Vehicle
         Position = SpawnPosition;
         Yaw = SpawnYaw;
         Pitch = Roll = 0f;
+        OnGround = false;
         Velocity = Vector3.Zero;
         Health = Def.Health;
         Alive = true;
@@ -146,7 +149,8 @@ public sealed class Vehicle
     /// rather than through a shared "apply gravity then slide" path — a Raptor that fell to the
     /// ground when idle, or a Goliath that floated, would be wrong in opposite directions.
     /// </summary>
-    public void Move(Level level, Vector2 input, bool wantUp, bool wantDown, float dt)
+    public void Move(Level level, Vector2 input, bool wantUp, bool wantDown, float dt,
+        bool hasDriver = true)
     {
         var def = Def;
         if (Immobile) { Velocity = Vector3.Zero; YawDelta = 0f; return; }
@@ -161,19 +165,33 @@ public sealed class Vehicle
         {
             case VehicleMotion.Air:
             {
-                // Full 3D: thrust along the facing, climb and dive on demand, and no gravity —
-                // an aircraft that sinks whenever the pilot stops accelerating is a glider.
-                Vector3 wish = forward * input.Y * def.MaxSpeed;
-                float climb = (wantUp ? 1f : 0f) - (wantDown ? 1f : 0f);
-                wish.Y = climb * def.MaxSpeed * 0.55f;
-                Velocity = Vector3.Lerp(Velocity, wish, MathX.Saturate(def.Acceleration * dt / MathF.Max(def.MaxSpeed, 1f)));
-                Position += Velocity * dt;
-                // Keep it off the terrain without letting it land.
-                float ground = GroundHeight(level, Position);
-                float floor = ground + def.HalfExtents.Y + 1.2f;
-                if (Position.Y < floor) { Position.Y = floor; if (Velocity.Y < 0f) Velocity.Y = 0f; }
-                Pitch = MathX.Damp(Pitch, -input.Y * 0.18f, 6f, dt);
-                Roll = MathX.Damp(Roll, input.X * 0.35f, 6f, dt);
+                if (hasDriver)
+                {
+                    // Full 3D while crewed: thrust along the facing and hold altitude unless the
+                    // pilot explicitly climbs or dives.
+                    Vector3 wish = forward * input.Y * def.MaxSpeed;
+                    float climb = (wantUp ? 1f : 0f) - (wantDown ? 1f : 0f);
+                    wish.Y = climb * def.MaxSpeed * 0.55f;
+                    Velocity = Vector3.Lerp(Velocity, wish,
+                        MathX.Saturate(def.Acceleration * dt / MathF.Max(def.MaxSpeed, 1f)));
+                }
+                else
+                {
+                    // Once the pilot is gone an aircraft is no longer an immortal platform in
+                    // the sky. Bleed its horizontal momentum and descend under controlled
+                    // gravity until the collision solver puts the hull on the terrain.
+                    Velocity.X *= MathF.Exp(-1.2f * dt);
+                    Velocity.Z *= MathF.Exp(-1.2f * dt);
+                    Velocity.Y = MathF.Max(Velocity.Y - gravity * 0.62f * dt, -24f);
+                }
+
+                MoveResult air = level.Collision.MoveBox(Position, def.HalfExtents, Velocity, dt,
+                    stepUp: false, initiallyGrounded: OnGround);
+                Position = air.Position;
+                Velocity = air.Velocity;
+                OnGround = air.OnGround;
+                Pitch = MathX.Damp(Pitch, hasDriver ? -input.Y * 0.18f : 0f, 6f, dt);
+                Roll = MathX.Damp(Roll, hasDriver ? input.X * 0.35f : 0f, 6f, dt);
                 break;
             }
 
@@ -199,7 +217,14 @@ public sealed class Vehicle
                 }
                 else Velocity.Y -= gravity * dt;
 
-                Position += Velocity * dt;
+                // Hover craft may climb a low pad instead of treating its vertical lip as an
+                // arena wall. High walls still block because they exceed this class-specific
+                // step allowance, and the same swept solver prevents tunnelling at full speed.
+                MoveResult hover = level.Collision.MoveBox(Position, def.HalfExtents, Velocity, dt,
+                    initiallyGrounded: true, stepHeight: MathF.Max(2.4f, def.HoverHeight + 0.8f));
+                Position = hover.Position;
+                Velocity = hover.Velocity;
+                OnGround = hover.OnGround;
                 Roll = MathX.Damp(Roll, input.X * 0.45f, 7f, dt);
                 Pitch = MathX.Damp(Pitch, -input.Y * 0.12f, 7f, dt);
                 break;
@@ -215,42 +240,16 @@ public sealed class Vehicle
                     MathX.Damp(Velocity.X, wish.X, def.Acceleration * 0.4f, dt),
                     Velocity.Y - gravity * dt,
                     MathX.Damp(Velocity.Z, wish.Z, def.Acceleration * 0.4f, dt));
-                Position += Velocity * dt;
-
-                float ground = GroundHeight(level, Position);
-                float rest = ground + def.HalfExtents.Y;
-                if (Position.Y <= rest + step)
-                {
-                    Position.Y = rest;
-                    if (Velocity.Y < 0f) Velocity.Y = 0f;
-                }
+                MoveResult ground = level.Collision.MoveBox(Position, def.HalfExtents, Velocity, dt,
+                    initiallyGrounded: OnGround, stepHeight: step);
+                Position = ground.Position;
+                Velocity = ground.Velocity;
+                OnGround = ground.OnGround;
+                Pitch = MathX.Damp(Pitch, MathF.Atan2(-ground.GroundNormal.Z,
+                    MathF.Max(ground.GroundNormal.Y, 0.01f)), 7f, dt);
                 Roll = MathX.Damp(Roll, input.X * 0.22f, 8f, dt);
                 break;
             }
-        }
-
-        // Horizontal walls stop everything, including aircraft — the arena has edges.
-        ResolveWalls(level, def);
-    }
-
-    private void ResolveWalls(Level level, VehicleDef def)
-    {
-        var scratch = new List<int>(16);
-        Vector3 half = def.HalfExtents;
-        // Test each axis on its own so a glancing hit slides instead of stopping dead.
-        foreach (int axis in new[] { 0, 2 })
-        {
-            Vector3 probe = Position;
-            if (!level.Collision.BoxOverlapsSolid(probe - half, probe + half, scratch)) break;
-            float push = axis == 0 ? Velocity.X : Velocity.Z;
-            if (MathF.Abs(push) < 0.001f) continue;
-            for (int i = 0; i < 6; i++)
-            {
-                if (axis == 0) Position.X -= MathF.Sign(push) * 0.25f;
-                else Position.Z -= MathF.Sign(push) * 0.25f;
-                if (!level.Collision.BoxOverlapsSolid(Position - half, Position + half, scratch)) break;
-            }
-            if (axis == 0) Velocity.X = 0f; else Velocity.Z = 0f;
         }
     }
 

@@ -169,10 +169,18 @@ public sealed class BindingProfile
             && p2[GameAction.Jump] == InputBinding.OnKey(Key.ShiftRight)
             && p3[GameAction.Fire] == InputBinding.OnMouse(0)
             && p3[GameAction.AltFire] == InputBinding.OnMouse(1);
+        Key[] p1WeaponKeys =
+        [
+            Key.Number1, Key.Number2, Key.Number3, Key.Number4, Key.Number5,
+            Key.Number6, Key.Number7, Key.Number8, Key.Number9, Key.Number0,
+        ];
+        for (int i = 0; i < p1WeaponKeys.Length; i++)
+            passed &= p1[GameAction.Weapon1 + i] == InputBinding.OnKey(p1WeaponKeys[i]);
         Console.WriteLine($"玩家一 F 上下載具: " +
                           $"{(p1[GameAction.UseVehicle] == InputBinding.OnKey(Key.F) ? "通過" : "失敗")}");
         Console.WriteLine($"玩家二右 Shift 跳躍: " +
                           $"{(p2[GameAction.Jump] == InputBinding.OnKey(Key.ShiftRight) ? "通過" : "失敗")}");
+        Console.WriteLine($"玩家一武器鍵 1～0: {(passed ? "通過" : "失敗")}");
         foreach (var item in expected)
         {
             bool itemPassed = p3[item.Action] == InputBinding.OnKey(item.Key);

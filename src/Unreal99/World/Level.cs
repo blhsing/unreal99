@@ -375,12 +375,18 @@ public sealed class Level : IDisposable
                 return new SpawnPoint { Position = Center + MathX.Up * 3f, Yaw = 0f, Team = Team.None };
         }
 
-        // Prefer the spawn furthest from every living pawn; fall back to random if all are crowded.
+        // Prefer a genuinely clear spawn. A randomized scan used to sample the same candidate
+        // repeatedly, miss the one free point, then telefrag a pawn during the initial countdown.
+        // Shuffle once and visit every candidate exactly once instead.
+        for (int i = candidates.Count - 1; i > 0; i--)
+        {
+            int j = rng.Range(0, i + 1);
+            (candidates[i], candidates[j]) = (candidates[j], candidates[i]);
+        }
         int best = -1;
         float bestScore = float.MinValue;
-        for (int attempt = 0; attempt < candidates.Count; attempt++)
+        foreach (int idx in candidates)
         {
-            int idx = candidates[rng.Range(0, candidates.Count)];
             float nearest = float.MaxValue;
             foreach (var p in avoid) nearest = MathF.Min(nearest, Vector3.Distance(Spawns[idx].Position, p));
             if (avoid.Count == 0) nearest = 1000f;

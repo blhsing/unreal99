@@ -942,29 +942,19 @@ public sealed class App : IDisposable
     private void LoadMapThumbnails()
     {
         string directory = Path.Combine(AppContext.BaseDirectory, "Assets", "Arenas");
-        string[] files =
-        [
-            "00-morbias.jpg", "01-stalwart.jpg", "02-curse.jpg", "03-grinder.jpg",
-            "04-codex.jpg", "05-gothic.jpg", "06-deck16.jpg", "07-turbine.jpg",
-            "08-phobos.jpg", "09-peak.jpg", "10-liandri.jpg", "11-morpheus.jpg",
-            "12-hyperblast.jpg", "13-coret.jpg", "14-november.jpg",
-            "15-facingworlds.jpg", "16-lavagiant.jpg",
-            "17-leadworks.jpg", "18-sesmar.jpg", "19-olden.jpg", "20-cinder.jpg",
-            "21-ons-torlan.jpg", "22-ons-primeval.jpg", "23-as-convoy.jpg", "24-as-frigate.jpg",
-        ];
-
-        for (int i = 0; i < files.Length && i < _mapThumbnails.Length; i++)
+        for (int i = 0; i < _mapThumbnails.Length; i++)
         {
+            string file = Maps.ArenaCaptureFile((MapId)i);
             try
             {
-                using var stream = File.OpenRead(Path.Combine(directory, files[i]));
+                using var stream = File.OpenRead(Path.Combine(directory, file));
                 ImageResult image = ImageResult.FromStream(stream, ColorComponents.RedGreenBlueAlpha);
                 _mapThumbnails[i] = Texture2D.FromRgba(_gl, image.Width, image.Height, image.Data,
                     mipmaps: true, srgb: true, anisotropy: 4);
             }
             catch (Exception ex)
             {
-                Console.WriteLine($"競技場預覽載入失敗（{files[i]}）: {ex.Message}");
+                Console.WriteLine($"競技場預覽載入失敗（{file}）: {ex.Message}");
             }
         }
     }
@@ -2639,6 +2629,7 @@ public sealed class App : IDisposable
     private bool _saveRespawnTest;
     private int _saveRespawnTestFrame;
     private int _saveRespawnTestDeaths;
+    private int _saveRespawnTestVerifyFrame;
     private Vector3 _saveRespawnTestDeathPosition;
     private Vector3 _saveRespawnTestPreviousPosition;
     private float _saveRespawnTestPath;
@@ -2914,10 +2905,12 @@ public sealed class App : IDisposable
             _saveRespawnTestDeathPosition = enemy.Position;
             _world.Damage(enemy, player, 1000f, DamageType.Hitscan,
                 MathX.SafeNormalize(enemy.Position - player.Position, MathX.Forward));
+            _saveRespawnTestVerifyFrame = _saveRespawnTestFrame
+                + (int)MathF.Ceiling(_world.Mode.RespawnDelay * 60f) + 30;
             return;
         }
 
-        if (_saveRespawnTestFrame != 750) return;
+        if (_saveRespawnTestFrame != _saveRespawnTestVerifyFrame) return;
         bool movedToSpawn = Vector3.DistanceSquared(enemy.Position, _saveRespawnTestDeathPosition) > 1f;
         bool passed = enemy.Alive && enemy.Health > 0f && enemy.RespawnTimer <= 0f
             && enemy.Deaths == _saveRespawnTestDeaths + 1 && movedToSpawn;
@@ -2953,6 +2946,7 @@ public sealed class App : IDisposable
     private int _vehicleTestFrame;
     private int _vehicleTestKind = -1;
     private int _vehicleTestKindFrame;
+    private int _vehicleTestPhaseFrame;
     private Vehicle _vehicleUnderTest;
     private Vector3 _vehicleTestPrevious;
     private float _vehicleTestPath;
@@ -2960,6 +2954,21 @@ public sealed class App : IDisposable
     private readonly float[] _vehicleTestDistances = new float[(int)VehicleKind.Count];
     private readonly float[] _vehicleTestTurns = new float[(int)VehicleKind.Count];
     private readonly bool[] _vehicleTestBoarded = new bool[(int)VehicleKind.Count];
+    private readonly bool[] _vehicleTestFired = new bool[(int)VehicleKind.Count];
+    private readonly bool[] _vehicleTestBotFired = new bool[(int)VehicleKind.Count];
+    private int _vehicleTestShotsAtFireStart;
+    private Pawn _vehicleTestTarget;
+    private Pawn _vehicleTestDriver;
+
+    private sealed class VehicleTestTargetController : Controller
+    {
+        public override PawnInput Update(GameWorld world, float dt) => new()
+        {
+            WeaponSelect = -1,
+            Yaw = Pawn?.Yaw ?? 0f,
+            Pitch = Pawn?.Pitch ?? 0f,
+        };
+    }
 
     /// <summary>
     /// Drives <c>--vehicletest</c>: the real Godlike <see cref="BotController"/> is boarded into
@@ -2973,10 +2982,12 @@ public sealed class App : IDisposable
         if (_state != AppState.Playing || _world?.Level == null) return;
 
         const int Settle = 24;
-        const int RunPerKind = 180;
+        const int DriveFrames = 180;
+        const int BotFireFrames = 90;
+        const int PlayerFireFrames = 30;
         if (_vehicleTestFrame < Settle) return;
 
-        if (_vehicleTestKind < 0 || _vehicleTestKindFrame >= RunPerKind)
+        if (_vehicleTestKind < 0 || _vehicleTestPhaseFrame >= PlayerFireFrames)
         {
             if (_vehicleTestKind >= 0 && _vehicleUnderTest != null)
             {
@@ -2994,12 +3005,16 @@ public sealed class App : IDisposable
                 for (int k = 0; k < (int)VehicleKind.Count; k++)
                 {
                     VehicleDef def = VehicleDef.Get((VehicleKind)k);
+                    bool armed = def.Seats.Any(seat => seat.Armed);
                     bool ok = _vehicleTestBoarded[k] && _vehicleTestDistances[k] > 3f
-                        && _vehicleTestTurns[k] > 0.12f;
+                        && _vehicleTestTurns[k] > 0.12f
+                        && (!armed || (_vehicleTestBotFired[k] && _vehicleTestFired[k]));
                     if (ok) passed++;
                     Console.WriteLine($"VEHICLE_AI_CASE {def.Name} {(ok ? "PASS" : "FAIL")} " +
                         $"motion={def.Motion} boarded={_vehicleTestBoarded[k]} " +
-                        $"path={_vehicleTestDistances[k]:F2} turn={_vehicleTestTurns[k]:F3}");
+                        $"path={_vehicleTestDistances[k]:F2} turn={_vehicleTestTurns[k]:F3} " +
+                        $"botFire={(!armed ? "N/A" : _vehicleTestBotFired[k])} " +
+                        $"playerFire={(!armed ? "N/A" : _vehicleTestFired[k])}");
                 }
                 int failed = (int)VehicleKind.Count - passed;
                 Console.WriteLine($"VEHICLE_AI_TEST {(failed == 0 ? "PASS" : "FAIL")} " +
@@ -3011,6 +3026,7 @@ public sealed class App : IDisposable
 
             Pawn pawn = _players[0].Pawn;
             if (pawn.InVehicle) _world.ExitVehicle(pawn);
+            _players[0].DocumentationFireMode = -1;
             _world.Vehicles.Clear();
             _world.NextVehicleId = 1;
             _world.Mode.State = MatchState.InProgress;
@@ -3037,6 +3053,7 @@ public sealed class App : IDisposable
 
             pawn.Team = Team.Red;
             pawn.Alive = true;
+            pawn.Invulnerable = true;
             pawn.Position = start;
             pawn.Velocity = Vector3.Zero;
             pawn.Yaw = pawn.Pitch = 0f;
@@ -3046,20 +3063,136 @@ public sealed class App : IDisposable
                 pilot.OnSpawned(_world);
             }
             _vehicleTestBoarded[_vehicleTestKind] = _world.EnterVehicle(pawn, vehicle);
+            if (_vehicleTestTarget == null)
+                _vehicleTestTarget = _world.AddPawn(new VehicleTestTargetController(),
+                    "載具射擊靶", Team.Blue, true, -1, GameTypes.TeamColor(Team.Blue));
+            _vehicleTestTarget.Team = Team.Blue;
+            _vehicleTestTarget.Alive = true;
+            _vehicleTestTarget.Invulnerable = true;
+            _vehicleTestTarget.Health = 100f;
+            _vehicleTestTarget.Position = new Vector3(-90f, 0.06f, 30f);
+            _vehicleTestTarget.Velocity = Vector3.Zero;
+            if (_vehicleTestDriver == null)
+                _vehicleTestDriver = _world.AddPawn(new VehicleTestTargetController(),
+                    "載具測試駕駛", Team.Red, true, -1, GameTypes.TeamColor(Team.Red));
+            _vehicleTestDriver.Team = Team.Red;
+            _vehicleTestDriver.Alive = true;
+            _vehicleTestDriver.Invulnerable = true;
+            _vehicleTestDriver.Health = 100f;
             _vehicleUnderTest = vehicle;
             _vehicleTestPrevious = vehicle.Position;
             _vehicleTestStartYaw = vehicle.Yaw;
             _vehicleTestPath = 0f;
             _vehicleTestKindFrame = 0;
+            _vehicleTestPhaseFrame = -DriveFrames - BotFireFrames;
             return;
         }
 
         _vehicleTestKindFrame++;
+        _vehicleTestPhaseFrame++;
         if (_vehicleUnderTest != null)
         {
             _vehicleTestPath += Vector3.Distance(_vehicleUnderTest.Position, _vehicleTestPrevious);
             _vehicleTestPrevious = _vehicleUnderTest.Position;
         }
+
+        // Finish each case in a genuinely armed seat. First the Godlike BotController has to
+        // acquire and shoot the live target; then the local PlayerController holds primary fire
+        // through the normal input -> GameWorld path. This catches either side silently ignoring
+        // a working vehicle weapon.
+        if (_vehicleTestPhaseFrame == -BotFireFrames && _vehicleUnderTest != null)
+        {
+            Pawn pawn = _players[0].Pawn;
+            for (int seat = 0; seat < _vehicleUnderTest.Occupants.Length; seat++)
+                if (_vehicleUnderTest.Occupants[seat] == pawn.Id) _vehicleUnderTest.Occupants[seat] = -1;
+            int armedSeat = Array.FindIndex(_vehicleUnderTest.Def.Seats, seat => seat.Armed);
+            if (armedSeat >= 0)
+            {
+                if (armedSeat > 0)
+                {
+                    _vehicleUnderTest.Occupants[0] = _vehicleTestDriver.Id;
+                    _vehicleTestDriver.VehicleId = _vehicleUnderTest.Id;
+                    _vehicleTestDriver.VehicleSeat = 0;
+                }
+                _vehicleUnderTest.Occupants[armedSeat] = pawn.Id;
+                pawn.VehicleId = _vehicleUnderTest.Id;
+                pawn.VehicleSeat = armedSeat;
+                PositionVehicleTestTarget(_vehicleUnderTest, armedSeat);
+                if (_players[0].AutoPilot is { } pilot)
+                {
+                    pilot.Pawn = pawn;
+                    pilot.OnSpawned(_world);
+                    pilot.RememberVisibleEnemyForTest(_vehicleTestTarget, _world.Time);
+                }
+                // During the combat phase keep a fixed-gun driver pointed at the visible live
+                // target. The test already measured autonomous steering for three seconds; this
+                // isolates the next contract: once aimed, the bot must actually pull the trigger.
+                if (!_vehicleUnderTest.Def.Seats[armedSeat].Turret)
+                {
+                    Vector3 flat = (_vehicleTestTarget.Position - _vehicleUnderTest.Position).FlatXZ();
+                    if (flat.LengthSquared() > 0.001f)
+                    {
+                        _vehicleUnderTest.Yaw = MathF.Atan2(flat.X, flat.Z);
+                        pawn.Yaw = MathX.WrapAngle(_vehicleUnderTest.Yaw + MathX.Pi);
+                    }
+                }
+                _vehicleTestShotsAtFireStart = pawn.ShotsFired;
+            }
+        }
+        if (_vehicleTestPhaseFrame > -BotFireFrames
+            && _vehicleTestPhaseFrame <= 0
+            && _vehicleUnderTest != null && _vehicleUnderTest.Def.Seats.Any(seat => seat.Armed))
+            _vehicleTestBotFired[_vehicleTestKind] |= _players[0].Pawn.ShotsFired
+                > _vehicleTestShotsAtFireStart;
+        if (_vehicleTestPhaseFrame == 0
+            && _vehicleUnderTest != null && _vehicleUnderTest.Def.Seats.Any(seat => seat.Armed))
+        {
+            int seat = _players[0].Pawn.VehicleSeat;
+            if (seat >= 0 && seat < _vehicleUnderTest.SeatCooldown.Length)
+                _vehicleUnderTest.SeatCooldown[seat] = 0f;
+            _vehicleTestShotsAtFireStart = _players[0].Pawn.ShotsFired;
+            _players[0].DocumentationFireMode = 0;
+        }
+        if (_vehicleTestPhaseFrame > 0 && _vehicleUnderTest != null
+            && _vehicleUnderTest.Def.Seats.Any(seat => seat.Armed))
+            _vehicleTestFired[_vehicleTestKind] |= _players[0].Pawn.ShotsFired
+                > _vehicleTestShotsAtFireStart;
+    }
+
+    /// <summary>Places the live target in a clear arc around the vehicle being exercised.</summary>
+    private void PositionVehicleTestTarget(Vehicle vehicle, int seat)
+    {
+        Vector3 muzzle = vehicle.SeatWorld(seat) + MathX.Up * 0.4f;
+        bool turret = vehicle.Def.Seats[seat].Turret;
+        // A hull-mounted weapon faces the model's +Z. Keep that target ahead; lateral fallbacks
+        // make perception succeed but ask the fixed gun to turn ninety degrees inside a short
+        // test window, which tests route geometry rather than whether the bot knows how to fire.
+        float[] offsets = turret
+            ? [0f, MathX.Pi * 0.5f, -MathX.Pi * 0.5f, MathX.Pi]
+            : [0f];
+        foreach (float offset in offsets)
+        {
+            float yaw = vehicle.Yaw + offset;
+            Vector3 direction = new(MathF.Sin(yaw), 0f, MathF.Cos(yaw));
+            foreach (float range in new[] { 16f, 12f, 8f, 5f })
+            {
+                Vector3 xz = vehicle.Position + direction * range;
+                float floor = _world.Level.Collision.FloorHeight(xz + MathX.Up * 30f, 100f);
+                if (float.IsNaN(floor)) continue;
+                Vector3 candidate = new(xz.X, floor + 0.06f, xz.Z);
+                Vector3 center = candidate + MathX.Up * (Physics.PawnHeight * 0.55f);
+                if (!_world.Level.Collision.LineOfSight(muzzle, center)) continue;
+                _vehicleTestTarget.Position = candidate;
+                _vehicleTestTarget.Velocity = Vector3.Zero;
+                return;
+            }
+        }
+
+        // Torlan's apron is open; this fallback keeps a failed placement diagnosable rather than
+        // silently retaining the previous vehicle's target on the other side of the map.
+        Vector3 fallback = vehicle.Position + new Vector3(0f, 0f, 10f);
+        _vehicleTestTarget.Position = fallback;
+        _vehicleTestTarget.Velocity = Vector3.Zero;
     }
 
     // ---------------------------------------------------------------- save/load self-test
@@ -3344,6 +3477,15 @@ public sealed class App : IDisposable
         }
 
         metrics.Elapsed += dt;
+        // Vehicle steering has its own destination-progress, oscillation recovery and bail-out
+        // gates. Mixing those hull positions into the on-foot rolling window leaves a window that
+        // spans board/dismount transitions and can report deliberate reversing as pawn pacing.
+        if (pawn.InVehicle)
+        {
+            metrics.Samples.Clear();
+            metrics.CurrentOscillation = 0f;
+            metrics.WasOscillating = false;
+        }
         metrics.CurrentSteepDown = pawn.Pitch < -1.05f
             ? metrics.CurrentSteepDown + dt : 0f;
         metrics.LongestSteepDown = MathF.Max(metrics.LongestSteepDown,
@@ -3396,8 +3538,19 @@ public sealed class App : IDisposable
         // its return cycle and resemble an X/Z reversal even though vertical traversal is live.
         bool activeLiftRoute = (_world.ControllerFor(pawn) as PlayerController)?.AutoPilot
             ?.DiagnosticActiveLiftBrush >= 0;
-        bool oscillating = !activeLiftRoute && duration >= 5f && path >= 9f && net <= 2.5f &&
-                           spatialExtent <= 6.5f && reversals >= 3;
+        BotController diagnosticBot = (_world.ControllerFor(pawn) as PlayerController)?.AutoPilot;
+        bool confinedOscillation = duration >= 5f && spatialExtent <= 6.5f && reversals >= 3;
+        // Objective pacing is often a longer two-point shuttle: it can span most of a corridor,
+        // so the old 6.5 m footprint silently accepted exactly the back-and-forth a player sees.
+        // Keep the broader threshold scoped to an objective route to avoid classifying ordinary
+        // combat strafing as a navigation failure.
+        bool objectivePacing = diagnosticBot?.DiagnosticObjectiveGoal == true
+            && ((duration >= 2.4f && path >= 4.5f && net <= 1.8f
+                    && spatialExtent <= 4.8f && verticalExtent <= 3f && reversals >= 2)
+                || (duration >= 5f && horizontalExtent <= 14f && verticalExtent <= 3f && reversals >= 2
+                    && path >= spatialExtent * 1.65f && net <= 3.5f));
+        bool oscillating = !activeLiftRoute && path >= 4.5f
+            && ((confinedOscillation && net <= 3.5f) || objectivePacing);
 
         if (oscillating)
         {
@@ -3413,7 +3566,7 @@ public sealed class App : IDisposable
                 metrics.WorstWindowVerticalExtent = verticalExtent;
                 metrics.MaxWindowReversals = reversals;
                 metrics.WorstPosition = pawn.Position;
-                if (_world.ControllerFor(pawn) is PlayerController { AutoPilot: { } bot })
+                if (diagnosticBot is { } bot)
                 {
                     metrics.WorstState = bot.DiagnosticState.ToString();
                     metrics.WorstGoalNode = bot.DiagnosticGoalNode;

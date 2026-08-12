@@ -160,6 +160,121 @@ public static class VehicleControlSelfTest
             }
         }
 
+        // Torlan's base aprons are deliberately 1.2 m tall, more than twice the normal pawn step.
+        // Every vehicle on one of those slabs must therefore have either a walk-on ramp ending at
+        // its surface or a jump-pad landing on that level. Merely proving that the hull was close
+        // to the slab did not prove that a player could reach the slab in the first place.
+        using (Level torlan = Maps.Build(null, MapId.Torlan))
+        {
+            foreach (var spawn in torlan.VehicleSpawns)
+            {
+                VehicleDef def = VehicleDef.Get(spawn.Kind);
+                float? surface = LevelBuilder.SurfaceUnderVehicle(torlan.Collision,
+                    spawn.Position, def.HalfExtents.Y);
+                if (surface is not { } deck || deck <= torlan.Collision.StepHeight + 0.05f) continue;
+
+                bool rampAccess = torlan.Collision.Brushes.Any(brush =>
+                    brush.Kind == BrushKind.Ramp && MathF.Abs(brush.Max.Y - deck) <= 0.12f
+                    && (brush.Center - spawn.Position).FlatXZ().Length() <= 32f);
+                bool jumpPadAccess = torlan.JumpPads.Any(pad =>
+                    MathF.Abs(pad.Destination.Y - deck - 2f) <= 3f
+                    && (pad.Destination - spawn.Position).FlatXZ().Length() <= 24f);
+                Check(rampAccess || jumpPadAccess,
+                    $"{Maps.Name(MapId.Torlan)} 的 {def.Name} @{spawn.Position} 平台 y={deck:F1} "
+                        + "沒有玩家可用的斜坡或跳躍墊",
+                    failures);
+            }
+
+            // Exercise the real pawn solver over the new 1.2 m centre-tower approach. This is
+            // stricter than inspecting brush metadata: it proves that holding forward actually
+            // carries a standing player from the field onto the apron without a jump.
+            var pawn = new Pawn
+            {
+                Position = new Vector3(0f, 0.002f, -22f),
+                OnGround = true,
+                Yaw = MathX.Pi,
+            };
+            bool reachedApron = false;
+            for (int frame = 0; frame < 240; frame++)
+            {
+                PawnInput input = new()
+                {
+                    Move = new Vector2(0f, 1f),
+                    Yaw = MathX.Pi,
+                    Pitch = 0f,
+                };
+                pawn.Move(torlan, input, 1f / 60f);
+                reachedApron |= pawn.Position.Y >= 1.15f && pawn.Position.Z is > -13f and < 13f;
+            }
+            Check(reachedApron,
+                $"{Maps.Name(MapId.Torlan)} 玩家無法無跳躍走上中央載具平台 "
+                    + $"(位置={pawn.Position})",
+                failures);
+        }
+
+        // The settled spawn is already a hull centre. The runtime loader used to add another
+        // half-height here, which made the very placements validated above unreachable in the
+        // actual match while this headless test still passed.
+        var runtimeSpawn = new VehicleSpawn
+        {
+            Kind = VehicleKind.Leviathan,
+            Position = new Vector3(4f, 7f, 9f),
+        };
+        Check(GameWorld.RuntimeVehiclePosition(runtimeSpawn) == runtimeSpawn.Position,
+            "執行期不應再次抬高已安置的載具出生點", failures);
+
+        // ---------------------------------------------------------------- real platform traversal
+        // Run the production swept-box solver across a low loading platform and off its far edge.
+        // This catches both failure modes reported in play: the vertical lip behaving like a wall,
+        // and a vehicle refusing to leave a platform because the old overlap push trapped it.
+        foreach (VehicleKind kind in Enum.GetValues<VehicleKind>())
+        {
+            if (kind == VehicleKind.Count || VehicleDef.Get(kind).Motion == VehicleMotion.Air) continue;
+            var testLevel = new Level { GravityScale = 1f };
+            testLevel.Collision.Add(Brush.Box(new Vector3(-20f, -1f, -20f),
+                new Vector3(20f, 0f, 160f)));
+            testLevel.Collision.Add(Brush.Box(new Vector3(-8f, 0f, -1f),
+                new Vector3(8f, 0.55f, 10f)));
+            testLevel.Collision.Rebuild();
+
+            VehicleDef def = VehicleDef.Get(kind);
+            var vehicle = new Vehicle();
+            vehicle.Configure(kind, new Vector3(0f, def.HalfExtents.Y + 0.01f, -8f), 0f);
+            float highest = vehicle.Position.Y;
+            for (int frame = 0; frame < 300; frame++)
+            {
+                vehicle.Move(testLevel, new Vector2(0f, 0.72f), false, false, 1f / 60f);
+                highest = MathF.Max(highest, vehicle.Position.Y);
+            }
+            bool climbed = highest >= def.HalfExtents.Y + 0.50f;
+            float expectedRest = def.Motion == VehicleMotion.Hover
+                ? def.HoverHeight : def.HalfExtents.Y;
+            bool droveOff = vehicle.Position.Z > 12f
+                && vehicle.Position.Y <= expectedRest + 0.12f;
+            Check(climbed && droveOff,
+                $"{def.Name} 無法駛上再駛下載具平台（z={vehicle.Position.Z:F1}, "
+                    + $"最高 y={highest:F2}, 結束 y={vehicle.Position.Y:F2}）", failures);
+        }
+
+        // ---------------------------------------------------------------- pilot-loss landing
+        foreach (VehicleKind kind in Enum.GetValues<VehicleKind>())
+        {
+            if (kind == VehicleKind.Count || VehicleDef.Get(kind).Motion != VehicleMotion.Air) continue;
+            var testLevel = new Level { GravityScale = 1f };
+            testLevel.Collision.Add(Brush.Box(new Vector3(-30f, -1f, -30f),
+                new Vector3(30f, 0f, 30f)));
+            testLevel.Collision.Rebuild();
+            VehicleDef def = VehicleDef.Get(kind);
+            var aircraft = new Vehicle();
+            aircraft.Configure(kind, new Vector3(0f, 22f, 0f), 0f);
+            for (int frame = 0; frame < 300; frame++)
+                aircraft.Move(testLevel, Vector2.Zero, false, false, 1f / 60f,
+                    hasDriver: false);
+            Check(aircraft.OnGround
+                    && aircraft.Position.Y <= def.HalfExtents.Y + 0.12f,
+                $"{def.Name} 失去飛行員後沒有降落（y={aircraft.Position.Y:F2}）", failures);
+        }
+
         // ---------------------------------------------------------------- water that exists
         // A water volume authored inside a solid is invisible and does nothing: you cannot see it,
         // swim in it, or be slowed by it, and anything the map parks "in the river" spawns inside

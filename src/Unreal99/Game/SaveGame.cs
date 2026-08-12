@@ -419,6 +419,17 @@ public static class SaveStore
         mode.WarmupRemaining = save.WarmupRemaining;
         mode.TimeRemaining = save.TimeRemaining;
         mode.FirstBloodPending = save.FirstBloodPending;
+        // Warmup is pre-match, so an old save cannot legitimately contain a corpse or score.
+        // Earlier builds allowed spawn telefrags while the countdown was locked; repair those
+        // saves on load as well as preventing the death path in current matches.
+        if (mode.State == MatchState.Warmup)
+        {
+            foreach (Pawn pawn in world.Pawns)
+            {
+                pawn.Frags = pawn.Deaths = pawn.Suicides = 0;
+                if (!pawn.Alive) world.RespawnPawn(pawn);
+            }
+        }
         if (mode.Kind == GameModeKind.Domination)
         {
             // Version-one saves predate fractional Domination state. Their exact fields default
@@ -432,6 +443,14 @@ public static class SaveStore
         {
             mode.TeamScores[0] = save.TeamScore0;
             mode.TeamScores[1] = save.TeamScore1;
+        }
+        // Apply the pre-match score repair after restoring the mode-specific score payload.
+        // Otherwise a legacy countdown save could immediately overwrite the zeroes above.
+        if (mode.State == MatchState.Warmup)
+        {
+            mode.TeamScores[0] = mode.TeamScores[1] = 0;
+            if (mode.Kind == GameModeKind.Domination)
+                mode.RestoreDominationScores(0f, 0f, 0f);
         }
         mode.LivesLeft.Clear();
         foreach (var l in save.Lives) mode.LivesLeft[l.PawnId] = l.Remaining;

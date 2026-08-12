@@ -13,11 +13,13 @@
 #
 # Usage:  pwsh docs/capture-arenas.ps1
 #         pwsh docs/capture-arenas.ps1 -Maps 21,22,23,24   # only the listed arenas
+#         pwsh docs/capture-arenas.ps1 -ConvertOnly        # rebuild JPGs from validated PNGs
 #
 # -Maps re-shoots a subset and leaves every other docs/arenas/*.jpg untouched, which is what you
-# want after adding or restyling a single arena — a full run is roughly twenty minutes.
+# want after adding or restyling a single arena — a full run is roughly twenty minutes. A major
+# geometry or polygon-density pass requires omitting -Maps so every gallery image is refreshed.
 
-param([int[]]$Maps)
+param([int[]]$Maps, [switch]$ConvertOnly)
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
@@ -91,22 +93,31 @@ $targets = if ($Maps) { @($Maps | Where-Object { $_ -ge 0 -and $_ -le $last } | 
            else       { 0..$last }
 if (-not $targets) { throw "No valid arena ids in -Maps (range is 0..$last)." }
 
-dotnet build $proj -c Release -v q --nologo
+if (-not $ConvertOnly) {
+    dotnet build $proj -c Release -v q --nologo
 
-foreach ($i in $targets) {
-    $png = Join-Path $tmp "map$i.png"
-    $args = @('--windowed', '--nohud', '--demo', '--players', '1', '--bots', '6', '--map', $i)
-    # Let the bots hold points for a while before the shutter, or every point is still neutral.
-    if     ($i -ge $brFirst)  { $args += @('--mode', 9) }
-    elseif ($i -ge $warFirst) { $args += @('--mode', 8) }
-    elseif ($i -ge $asFirst)  { $args += @('--mode', 7) }
-    elseif ($i -ge $onsFirst) { $args += @('--mode', 6) }
-    elseif ($i -ge $domFirst) { $args += @('--mode', 5) }
-    $frames = if ($i -ge $domFirst) { 1500 } else { 400 }
-    if ($authored.ContainsKey($i)) { $args += @('--flycam') + $authored[$i].Split(' ') + @('--autoshot', $frames, $png) }
-    else                          { $args += @('--flyby', '--autoshot', 460, $png) }
-    & dotnet run --project $proj -c Release --no-build -- @args | Select-Object -Last 1
-    Start-Sleep -Seconds 2
+    foreach ($i in $targets) {
+        $png = Join-Path $tmp "map$i.png"
+        # A second game instance exits successfully by design. Remove the old output first and
+        # require a fresh non-empty file afterward, so the pipeline cannot silently publish a
+        # stale image when another instance is still holding the single-instance mutex.
+        if ([System.IO.File]::Exists($png)) { [System.IO.File]::Delete($png) }
+        $args = @('--windowed', '--nohud', '--demo', '--players', '1', '--bots', '6', '--map', $i)
+        # Let the bots hold points for a while before the shutter, or every point is still neutral.
+        if     ($i -ge $brFirst)  { $args += @('--mode', 9) }
+        elseif ($i -ge $warFirst) { $args += @('--mode', 8) }
+        elseif ($i -ge $asFirst)  { $args += @('--mode', 7) }
+        elseif ($i -ge $onsFirst) { $args += @('--mode', 6) }
+        elseif ($i -ge $domFirst) { $args += @('--mode', 5) }
+        $frames = if ($i -ge $domFirst) { 1500 } else { 400 }
+        if ($authored.ContainsKey($i)) { $args += @('--flycam') + $authored[$i].Split(' ') + @('--autoshot', $frames, $png) }
+        else                          { $args += @('--flyby', '--autoshot', 460, $png) }
+        & dotnet run --project $proj -c Release --no-build -- @args | Select-Object -Last 1
+        if (-not [System.IO.File]::Exists($png) -or (Get-Item -LiteralPath $png).Length -lt 1024) {
+            throw "Arena $i did not produce a fresh screenshot. Close any running game instance and retry."
+        }
+        Start-Sleep -Seconds 2
+    }
 }
 
 # Downscale to something a repository should carry: 960px wide, JPEG quality 82 (~90KB each).
@@ -115,7 +126,11 @@ $codec = [System.Drawing.Imaging.ImageCodecInfo]::GetImageEncoders() | Where-Obj
 $ep = New-Object System.Drawing.Imaging.EncoderParameters 1
 $ep.Param[0] = New-Object System.Drawing.Imaging.EncoderParameter ([System.Drawing.Imaging.Encoder]::Quality), 82L
 foreach ($i in $targets) {
-    $img = [System.Drawing.Image]::FromFile((Join-Path $tmp "map$i.png"))
+    $sourcePng = Join-Path $tmp "map$i.png"
+    if (-not [System.IO.File]::Exists($sourcePng) -or (Get-Item -LiteralPath $sourcePng).Length -lt 1024) {
+        throw "Missing or empty lossless capture for arena ${i}: $sourcePng"
+    }
+    $img = [System.Drawing.Image]::FromFile($sourcePng)
     $w = 960; $h = [int]($img.Height * $w / $img.Width)
     $bmp = New-Object System.Drawing.Bitmap $w, $h
     $g = [System.Drawing.Graphics]::FromImage($bmp)

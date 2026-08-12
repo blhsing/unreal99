@@ -119,6 +119,8 @@ public sealed class GameWorld
     public readonly List<Pawn> Pawns = new(16);
     public readonly List<Controller> Controllers = new(16);
     public readonly List<PickupEntity> Pickups = new(96);
+    /// <summary>Compact, map-authored arsenal used by the HUD and numeric weapon bindings.</summary>
+    public WeaponKind[][] WeaponSlots { get; private set; } = [];
     public readonly Projectile[] Projectiles = new Projectile[MaxProjectiles];
     public readonly List<KillFeedEntry> KillFeed = new(8);
     public readonly Dictionary<int, Feedback> Feedbacks = new();
@@ -366,6 +368,13 @@ public sealed class GameWorld
 
     // ---------------------------------------------------------------- setup
 
+    /// <summary>
+    /// VehicleSpawn.Position is authored and settled as a hull centre, not a point on the pad.
+    /// Keeping that conversion named makes it difficult for load, save and validation paths to
+    /// accidentally add the half-height a second time.
+    /// </summary>
+    internal static Vector3 RuntimeVehiclePosition(in VehicleSpawn spawn) => spawn.Position;
+
     public void LoadLevel(Level level, GameMode mode)
     {
         Level = level;
@@ -411,6 +420,7 @@ public sealed class GameWorld
                 Phase = Rng.Range(0f, MathX.TwoPi),
             });
         }
+        WeaponSlots = Weapons.MapWeaponSlots(level, mode.Kind);
 
         Onslaught.Warfare = Mode.Kind == GameModeKind.Warfare;
         Onslaught.Reset(level);
@@ -428,7 +438,10 @@ public sealed class GameWorld
         foreach (var vs in vehiclesAllowed ? level.VehicleSpawns : [])
         {
             var v = new Vehicle { Id = NextVehicleId++ };
-            v.Configure(vs.Kind, vs.Position + new Vector3(0f, VehicleDef.Get(vs.Kind).HalfExtents.Y, 0f), vs.Yaw);
+            // LevelBuilder already settles VehicleSpawn.Position at the hull centre. Adding the
+            // half-height again here floated large vehicles several metres above their pad and
+            // put their seats outside boarding reach.
+            v.Configure(vs.Kind, RuntimeVehiclePosition(vs), vs.Yaw);
             v.SpawnRespawnSeconds = vs.RespawnSeconds;
             v.AuthoredSpawnTeam = vs.Team;
             v.SpawnTeam = vs.Team;
@@ -1866,7 +1879,7 @@ public sealed class GameWorld
     public void Damage(Pawn target, Pawn attacker, float amount, DamageType type, Vector3 direction,
         bool headshot = false)
     {
-        if (!target.Alive || target.Invulnerable || amount <= 0f) return;
+        if (Mode.State == MatchState.Warmup || !target.Alive || target.Invulnerable || amount <= 0f) return;
         if (attacker != null && attacker != target && Mode.Kind != GameModeKind.Instagib
             && ControllerFor(attacker) is BotController bot)
             amount *= bot.DamageScale;
@@ -1934,7 +1947,7 @@ public sealed class GameWorld
 
     public void Kill(Pawn victim, Pawn killer, DamageType type, bool headshot = false)
     {
-        if (!victim.Alive || victim.Invulnerable) return;
+        if (Mode.State == MatchState.Warmup || !victim.Alive || victim.Invulnerable) return;
         bool killedFlagCarrier = Mode.Kind == GameModeKind.CaptureTheFlag && victim.HasFlag;
         if (type == DamageType.Void) VoidDeaths++;
         else if (type == DamageType.Fall) FallDeaths++;
@@ -3335,7 +3348,7 @@ public sealed class GameWorld
                 if (v.SelfDestructTimer <= 0f) DetonateVehicle(v);
             }
 
-            v.Move(Level, drive, up, down, dt);
+            v.Move(Level, drive, up, down, dt, hasDriver: driver != null);
 
             // Carry the crew.
             for (int s = 0; s < v.Occupants.Length; s++)

@@ -65,6 +65,33 @@ public enum MapId
 /// </summary>
 public static partial class Maps
 {
+    /// <summary>
+    /// Repository and packaged filename for every arena preview, in <see cref="MapId"/> order.
+    /// Keeping this beside the enum prevents the menu loader from silently losing thumbnails
+    /// whenever another mode adds maps in the middle of the roster.
+    /// </summary>
+    public static readonly string[] ArenaCaptureFiles =
+    [
+        "00-morbias.jpg", "01-stalwart.jpg", "02-curse.jpg", "03-grinder.jpg",
+        "04-codex.jpg", "05-gothic.jpg", "06-deck16.jpg", "07-turbine.jpg",
+        "08-phobos.jpg", "09-peak.jpg", "10-liandri.jpg", "11-morpheus.jpg",
+        "12-hyperblast.jpg", "13-coret.jpg", "14-november.jpg",
+        "15-facingworlds.jpg", "16-lavagiant.jpg", "17-leadworks.jpg",
+        "18-sesmar.jpg", "19-olden.jpg", "20-cinder.jpg", "21-ons-torlan.jpg",
+        "22-ons-primeval.jpg", "23-ons-crossfire.jpg", "24-ons-dria.jpg",
+        "25-as-convoy.jpg", "26-as-frigate.jpg", "27-as-glacier.jpg",
+        "28-war-torlan.jpg", "29-war-torlan-necris.jpg", "30-war-serenity.jpg",
+        "31-war-avalanche.jpg", "32-war-onyxcoast.jpg", "33-war-islander.jpg",
+        "34-br-anubis.jpg", "35-br-colossus.jpg",
+    ];
+
+    public static string ArenaCaptureFile(MapId id)
+    {
+        int index = (int)id;
+        return index >= 0 && index < ArenaCaptureFiles.Length
+            ? ArenaCaptureFiles[index] : ArenaCaptureFiles[(int)MapId.Deck16];
+    }
+
     public static string Name(MapId id) => id switch
     {
         MapId.Morbias => Loc.MapMorbias,

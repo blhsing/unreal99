@@ -396,7 +396,8 @@ public sealed class CollisionWorld
     /// move is sub-stepped so fast projectiles and dodges never tunnel through thin brushes.
     /// </summary>
     public MoveResult MoveBox(Vector3 position, Vector3 halfExtents, Vector3 velocity, float dt,
-        bool stepUp = true, float gravityDir = -1f, bool initiallyGrounded = false)
+        bool stepUp = true, float gravityDir = -1f, bool initiallyGrounded = false,
+        float? stepHeight = null)
     {
         MoveResult r = default;
         r.Position = position;
@@ -416,7 +417,7 @@ public sealed class CollisionWorld
             if (Blocked(r.Position, halfExtents, out float pushX, 0))
             {
                 if (stepUp && (initiallyGrounded || r.OnGround)
-                    && TryStepUp(ref r, halfExtents, 0)) { }
+                    && TryStepUp(ref r, halfExtents, 0, stepHeight ?? StepHeight)) { }
                 else
                 {
                     r.Position.X += pushX;
@@ -431,7 +432,7 @@ public sealed class CollisionWorld
             if (Blocked(r.Position, halfExtents, out float pushZ, 2))
             {
                 if (stepUp && (initiallyGrounded || r.OnGround)
-                    && TryStepUp(ref r, halfExtents, 2)) { }
+                    && TryStepUp(ref r, halfExtents, 2, stepHeight ?? StepHeight)) { }
                 else
                 {
                     r.Position.Z += pushZ;
@@ -539,12 +540,13 @@ public sealed class CollisionWorld
     }
 
     /// <summary>Lets the pawn walk up small ledges without jumping.</summary>
-    private bool TryStepUp(ref MoveResult r, Vector3 half, int axis)
+    private bool TryStepUp(ref MoveResult r, Vector3 half, int axis, float stepHeight)
     {
-        Vector3 raised = r.Position + new Vector3(0, StepHeight, 0);
+        stepHeight = MathF.Max(0.02f, stepHeight);
+        Vector3 raised = r.Position + new Vector3(0, stepHeight, 0);
         if (Blocked(raised, half, out _, axis)) return false;
         // Make sure there is floor under the raised position before committing to the step.
-        Vector3 settle = raised - new Vector3(0, StepHeight * 0.9f, 0);
+        Vector3 settle = raised - new Vector3(0, stepHeight * 0.9f, 0);
         if (!Blocked(settle, half, out float down, 1) || down <= 0f) return false;
         r.Position = settle;
         r.Position.Y += down;

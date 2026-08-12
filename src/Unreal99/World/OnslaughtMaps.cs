@@ -73,6 +73,15 @@ public static partial class Maps
             // Base pad with a low wall around the back, so a core has something to sit behind.
             b.Solid(new Vector3(x - 20f, Ground, -26f), new Vector3(x + 20f, Ground + 1.2f, 26f),
                 MatId.Concrete, true, 0.6f);
+            // These are vehicle aprons, not display plinths. Their 1.2 m vertical front used to
+            // exceed the pawn step height, leaving four perfectly usable vehicles per base on a
+            // slab the player could only mount by an awkward running jump. A broad driveable
+            // approach makes the whole apron walk-on accessible and also gives vehicles a clean
+            // way off it.
+            float apronEdge = x - sign * 20f;
+            b.Ramp(new Vector3(MathF.Min(apronEdge, apronEdge - sign * 5f), Ground, -5f),
+                new Vector3(MathF.Max(apronEdge, apronEdge - sign * 5f), Ground + 1.2f, 5f),
+                sign < 0f ? 1 : 0, MatId.Concrete, true, 0.6f);
             b.Solid(new Vector3(x + sign * 20f, Ground, -26f), new Vector3(x + sign * 23f, Ground + 7f, 26f),
                 teamMat, true, 0.7f);
             for (int i = -2; i <= 2; i++)
@@ -145,6 +154,8 @@ public static partial class Maps
         {
             // A pad so the node reads as somewhere worth holding rather than a pole in a field.
             b.Solid(pos + new Vector3(-9f, 0f, -9f), pos + new Vector3(9f, 1.2f, 9f), MatId.Concrete, true, 0.6f);
+            b.Ramp(pos + new Vector3(9f, 0f, -3.5f),
+                pos + new Vector3(14f, 1.2f, 3.5f), 1, MatId.Concrete, true, 0.6f);
             for (int i = 0; i < kinds.Length; i++)
                 b.AddVehicle(kinds[i], pos + new Vector3(-6f + i * 6f, 2.6f, 11f), 0f);
             // Prime nodes get the Mine Layer locker; the corner Goliath nodes get the Grenade
@@ -159,6 +170,8 @@ public static partial class Maps
 
         // --- the communications tower over the centre node ---
         b.Solid(n3 + new Vector3(-13f, 0f, -13f), n3 + new Vector3(13f, 1.2f, 13f), MatId.Concrete, true, 0.6f);
+        b.Ramp(n3 + new Vector3(-5f, 0f, -18f),
+            n3 + new Vector3(5f, 1.2f, -13f), 2, MatId.Concrete, true, 0.6f);
         for (int i = 0; i < 4; i++)
         {
             float a = i / 4f * MathX.TwoPi + MathX.Pi * 0.25f;
@@ -193,6 +206,16 @@ public static partial class Maps
             float px = rng.Range(-HX + 12f, HX - 12f);
             float pz = rng.Range(-HZ + 12f, HZ - 12f);
             if (MathF.Abs(pz) < 18f && MathF.Abs(px) < 100f) continue;   // keep the riverbed clear
+            Vector3 rockPosition = new(px, Ground, pz);
+            // Procedural cover must not turn authored vehicle bays into accidental plinths. The
+            // collision settle pass correctly parks a vehicle on the highest surface beneath its
+            // centre; before this exclusion, a random boulder could therefore lift a node vehicle
+            // several metres onto a surface that had no authored access route.
+            if ((MathF.Abs(px - (HX - 22f)) < 27f && MathF.Abs(pz) < 31f)
+                || (MathF.Abs(px + (HX - 22f)) < 27f && MathF.Abs(pz) < 31f)
+                || new[] { n1, n2, n3, n4, n5 }.Any(node =>
+                    (rockPosition - node).FlatXZ().LengthSquared() < 22f * 22f))
+                continue;
             float sz = rng.Range(1.8f, 4.4f);
             b.Solid(new Vector3(px - sz, Ground, pz - sz),
                     new Vector3(px + sz, Ground + rng.Range(2.2f, 5.5f), pz + sz), MatId.Rock, true, 0.6f);

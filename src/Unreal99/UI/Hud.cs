@@ -3,6 +3,7 @@ using Unreal99.Core;
 using Unreal99.Game;
 using Unreal99.Platform;
 using Unreal99.Rendering;
+using Unreal99.World;
 
 namespace Unreal99.UI;
 
@@ -56,12 +57,13 @@ public sealed class Hud
         Vector3 accent = mode.TeamBased ? GameTypes.TeamColor(pawn.Team) : pawn.AccentColor;
 
         DrawPlayerLabels(ui, world, pawn, camera, width, height, s);
+        DrawObjectiveMarkers(ui, world, pawn, camera, width, height, s);
         DrawCrosshair(ui, world, pawn, width, height, s);
         DrawDamageIndicators(ui, feedback, width, height, s);
         if (pawn.Alive) DrawCombatNumbers(ui, feedback, width, height, s);
         DrawHealthArmor(ui, pawn, width, height, s, accent);
         DrawAmmoWeapon(ui, pawn, width, height, s, accent);
-        DrawWeaponInventory(ui, pawn, controller.Device.Bindings, width, height, s, accent);
+        DrawWeaponInventory(ui, world, pawn, controller.Device.Bindings, width, height, s, accent);
         DrawPowerups(ui, pawn, width, height, s);
         DrawMatchStatus(ui, world, pawn, width, height, s, accent);
         DrawKillFeed(ui, world, width, height, s);
@@ -78,6 +80,199 @@ public sealed class Hud
     }
 
     // ---------------------------------------------------------------- player identification
+
+    private readonly record struct ObjectiveMarker(Vector3 Position, string Label, Vector3 Color);
+
+    /// <summary>
+    /// World-space objective beacons. A marker stays clamped to the useful viewport when its
+    /// target is behind the player or off screen, so every objective mode always says both what
+    /// matters and which way to turn. Markers deliberately ignore line of sight: an objective
+    /// arrow must remain useful on the other side of a wall.
+    /// </summary>
+    private void DrawObjectiveMarkers(UiRenderer ui, GameWorld world, Pawn pawn, in Camera camera,
+        int width, int height, float s)
+    {
+        if (!pawn.Alive) return;
+        List<ObjectiveMarker> markers = ObjectiveMarkersFor(world, pawn);
+        if (markers.Count == 0) return;
+
+        bool compact = CompactLayout(width, height);
+        float font = LayoutFont((compact ? 14f : 15f) * s);
+        float marginX = compact ? 34f : MathF.Max(44f, 52f * s);
+        float top = compact ? 82f : MathF.Max(94f, 108f * s);
+        float bottom = compact ? height - 226f : height - MathF.Max(178f, 198f * s);
+        var occupied = new List<(float Left, float Top, float Right, float Bottom)>(markers.Count);
+
+        foreach (ObjectiveMarker marker in markers)
+        {
+            Vector3 to = marker.Position - camera.Position;
+            float distance = to.Length();
+            if (distance < 0.1f) continue;
+
+            bool projected = camera.WorldToScreen(marker.Position + MathX.Up * 1.2f, out Vector2 uv);
+            bool inView = projected && uv.X >= 0.04f && uv.X <= 0.96f
+                && uv.Y >= 0.08f && uv.Y <= 0.91f;
+            Vector2 direction;
+            Vector2 point;
+            if (inView)
+            {
+                point = new Vector2(uv.X * width, (1f - uv.Y) * height);
+                direction = new Vector2(0f, 1f);
+            }
+            else
+            {
+                direction = projected
+                    ? new Vector2(uv.X - 0.5f, 0.5f - uv.Y)
+                    : new Vector2(Vector3.Dot(to, camera.Right), -Vector3.Dot(to, camera.Up));
+                if (direction.LengthSquared() < 1e-5f) direction = new Vector2(0f, 1f);
+                direction = Vector2.Normalize(direction);
+                float halfW = MathF.Max(1f, width * 0.5f - marginX);
+                float halfH = MathF.Max(1f, (bottom - top) * 0.5f);
+                Vector2 safeCenter = new(width * 0.5f, (top + bottom) * 0.5f);
+                float tx = MathF.Abs(direction.X) > 1e-4f ? halfW / MathF.Abs(direction.X) : float.MaxValue;
+                float ty = MathF.Abs(direction.Y) > 1e-4f ? halfH / MathF.Abs(direction.Y) : float.MaxValue;
+                point = safeCenter + direction * MathF.Min(tx, ty);
+            }
+            point.X = MathX.Clamp(point.X, marginX, width - marginX);
+            point.Y = MathX.Clamp(point.Y, top, bottom);
+
+            string distanceText = $"{marker.Label}  {MathF.Round(distance):0}m";
+            float maximumWidth = MathF.Min(compact ? 176f : 230f, width - 18f);
+            string label = FitText(ui, FaceBold, font, distanceText, maximumWidth - 18f);
+            float boxWidth = MathF.Min(maximumWidth,
+                MathF.Max(92f, ui.MeasureText(FaceBold, font, label) + 18f));
+            float boxHeight = MathF.Max(25f, font + 8f);
+            float boxX = MathX.Clamp(point.X - boxWidth * 0.5f, 5f, width - boxWidth - 5f);
+            float baseBoxY = point.Y + (direction.Y > 0.35f ? -boxHeight - 17f : 15f);
+            baseBoxY = MathX.Clamp(baseBoxY, top - 4f, bottom - boxHeight + 4f);
+            float boxY = baseBoxY;
+            // Several objectives can sit beyond the same edge (all three Domination points in
+            // a compact quadrant, for example). Search both upward and downward from the natural
+            // label position; only searching down made every label clamp to the same bottom row.
+            for (int attempt = 0; attempt < 11; attempt++)
+            {
+                bool overlaps = occupied.Any(r => boxX < r.Right && boxX + boxWidth > r.Left
+                    && boxY < r.Bottom && boxY + boxHeight > r.Top);
+                if (!overlaps) break;
+                int row = (attempt + 2) / 2;
+                float sign = (attempt & 1) == 0 ? -1f : 1f;
+                boxY = MathX.Clamp(baseBoxY + sign * row * (boxHeight + 4f),
+                    top - 4f, bottom - boxHeight + 4f);
+            }
+            occupied.Add((boxX, boxY, boxX + boxWidth, boxY + boxHeight));
+
+            uint color = UiRenderer.Rgba(marker.Color * 1.35f, 0.96f);
+            uint edge = UiRenderer.Rgba(marker.Color * 0.9f, 0.82f);
+            Vector2 perp = new(-direction.Y, direction.X);
+            Vector2 tip = point + direction * 10f;
+            Vector2 baseCenter = point - direction * 5f;
+            Vector2 a = baseCenter + perp * 7f;
+            Vector2 b = baseCenter - perp * 7f;
+            ui.Line(tip, a, 3f, color);
+            ui.Line(a, b, 3f, color);
+            ui.Line(b, tip, 3f, color);
+            ui.Circle(point, 4.2f, color, 12);
+            ui.ChamferRect(boxX, boxY, boxWidth, boxHeight, 5f,
+                UiRenderer.Rgba(0.015f, 0.025f, 0.055f, 0.82f));
+            ui.Line(new Vector2(boxX + 5f, boxY), new Vector2(boxX + boxWidth - 5f, boxY),
+                2f, edge);
+            ui.TextOutline(FaceBold, font, boxX + boxWidth * 0.5f, boxY + 2f, label,
+                color, Shadow, 1.5f, TextAlign.Center);
+        }
+    }
+
+    private static List<ObjectiveMarker> ObjectiveMarkersFor(GameWorld world, Pawn pawn)
+    {
+        var result = new List<ObjectiveMarker>(6);
+        Team enemy = pawn.Team == Team.Red ? Team.Blue : Team.Red;
+        Vector3 red = GameTypes.TeamColor(Team.Red), blue = GameTypes.TeamColor(Team.Blue);
+        switch (world.Mode.Kind)
+        {
+            case GameModeKind.CaptureTheFlag:
+            {
+                if (!pawn.HasFlag && world.FlagPosition.TryGetValue(enemy, out Vector3 enemyFlag))
+                    result.Add(new ObjectiveMarker(enemyFlag,
+                        Loc.ObjectiveEnemyFlag(GameTypes.TeamName(enemy)), GameTypes.TeamColor(enemy)));
+                bool ownFlagAway = world.FlagPosition.TryGetValue(pawn.Team, out Vector3 ownFlag)
+                    && world.FlagHome.TryGetValue(pawn.Team, out Vector3 ownHome)
+                    && Vector3.DistanceSquared(ownFlag, ownHome) > 0.16f;
+                if (ownFlagAway)
+                    result.Add(new ObjectiveMarker(ownFlag, Loc.ObjectiveRecoverFlag,
+                        GameTypes.TeamColor(pawn.Team)));
+                if (pawn.HasFlag && world.FlagHome.TryGetValue(pawn.Team, out Vector3 home))
+                    result.Add(new ObjectiveMarker(home, Loc.ObjectiveReturnToBase,
+                        new Vector3(0.48f, 1f, 0.58f)));
+                break;
+            }
+            case GameModeKind.Domination:
+                for (int i = 0; i < world.Level.ControlPoints.Count; i++)
+                {
+                    ControlPoint point = world.Level.ControlPoints[i];
+                    Team owner = i < world.ControlPointOwners.Count
+                        ? world.ControlPointOwners[i] : Team.None;
+                    Vector3 color = owner == Team.Red ? red : owner == Team.Blue ? blue
+                        : new Vector3(0.92f, 0.82f, 0.38f);
+                    result.Add(new ObjectiveMarker(point.Position,
+                        Loc.ObjectiveCapture(point.Name), color));
+                }
+                break;
+            case GameModeKind.Onslaught:
+            case GameModeKind.Warfare:
+            {
+                int attack = world.Onslaught.NextObjectiveFor(pawn.Team, pawn.Position);
+                if (attack >= 0 && attack < world.Onslaught.Nodes.Count)
+                {
+                    PowerNode node = world.Onslaught.Nodes[attack];
+                    result.Add(new ObjectiveMarker(node.Position,
+                        Loc.ObjectiveAttack(node.Name), GameTypes.TeamColor(enemy)));
+                }
+                int defend = world.Onslaught.MostThreatenedFriendly(pawn.Team, pawn.Position);
+                if (defend >= 0 && defend < world.Onslaught.Nodes.Count && defend != attack)
+                {
+                    PowerNode node = world.Onslaught.Nodes[defend];
+                    result.Add(new ObjectiveMarker(node.Position,
+                        Loc.ObjectiveDefend(node.Name), GameTypes.TeamColor(pawn.Team)));
+                }
+                if (world.Mode.Kind == GameModeKind.Warfare)
+                    foreach (WarfareOrb orb in world.Warfare.Orbs)
+                    {
+                        Pawn carrier = orb.CarrierId >= 0 ? world.FindPawn(orb.CarrierId) : null;
+                        if (carrier == pawn) continue;
+                        Vector3 position = carrier?.Position ?? orb.Position;
+                        result.Add(new ObjectiveMarker(position,
+                            Loc.ObjectiveOrb(GameTypes.TeamName(orb.Team)),
+                            GameTypes.TeamColor(orb.Team)));
+                    }
+                break;
+            }
+            case GameModeKind.Assault:
+                if (world.Assault.CurrentObjective is { } objective)
+                {
+                    bool attacking = pawn.Team == world.Assault.Attackers;
+                    result.Add(new ObjectiveMarker(objective.Position,
+                        attacking ? Loc.ObjectiveAttack(objective.Name)
+                            : Loc.ObjectiveDefend(objective.Name),
+                        GameTypes.TeamColor(attacking ? world.Assault.Attackers
+                            : world.Assault.Defenders)));
+                }
+                break;
+            case GameModeKind.BombingRun:
+            {
+                Pawn carrier = world.BombingRun.Carrier >= 0
+                    ? world.FindPawn(world.BombingRun.Carrier) : null;
+                if (!pawn.HasBall)
+                    result.Add(new ObjectiveMarker(carrier?.Position ?? world.BombingRun.Position,
+                        Loc.ObjectiveBall, carrier != null ? GameTypes.TeamColor(carrier.Team)
+                            : new Vector3(0.95f, 0.82f, 0.36f)));
+                result.Add(new ObjectiveMarker(world.BombingRun.TargetGoal(pawn.Team),
+                    Loc.ObjectiveScoreGoal, GameTypes.TeamColor(enemy)));
+                result.Add(new ObjectiveMarker(world.BombingRun.OwnGoal(pawn.Team),
+                    Loc.ObjectiveDefendGoal, GameTypes.TeamColor(pawn.Team)));
+                break;
+            }
+        }
+        return result;
+    }
 
     private void DrawPlayerLabels(UiRenderer ui, GameWorld world, Pawn viewer, in Camera camera,
         int width, int height, float s)
@@ -516,39 +711,40 @@ public sealed class Hud
     }
 
     /// <summary>
-    /// Eleven original-style weapon positions. Cross-generation equivalents share a position,
-    /// so a full custom-map arsenal remains legible instead of shrinking two dozen cards into a
-    /// strip. Pressing the same numeric binding again cycles the usable weapons in that position.
+    /// Compact map-specific weapon positions. Unavailable weapons are absent rather than wasting
+    /// dark cards, so every arena can show its complete authored arsenal in at most eleven slots.
     /// </summary>
-    private void DrawWeaponInventory(UiRenderer ui, Pawn pawn, BindingProfile bindings,
+    private void DrawWeaponInventory(UiRenderer ui, GameWorld world, Pawn pawn, BindingProfile bindings,
         int width, int height, float s, Vector3 accent)
     {
         bool compact = CompactLayout(width, height);
         bool bottomRow = CompactBottomRow(width, height);
-        WeaponKind[][] groups = Weapons.HudGroups;
+        IReadOnlyList<WeaponKind[]> slots = world.WeaponSlots;
+        if (slots.Count == 0) return;
         float gap = compact ? 3f : 4f * s;
         float available = bottomRow
             ? width - (CompactSidePanelWidth(width, height) + 18f) * 2f
             : compact ? width - 16f
             : width - MathF.Min(width * 0.38f, 560f * s);
         float cardWidth = MathX.Clamp(
-            (available - gap * (groups.Length - 1)) / groups.Length,
+            (available - gap * (slots.Count - 1)) / slots.Count,
             bottomRow ? 36f : compact ? 48f : 58f, compact ? 70f : 84f * s);
         float cardHeight = bottomRow ? 74f : compact ? 64f : MathF.Max(70f, 70f * s);
-        float totalWidth = groups.Length * cardWidth + (groups.Length - 1) * gap;
+        float totalWidth = slots.Count * cardWidth + (slots.Count - 1) * gap;
         float startX = width * 0.5f - totalWidth * 0.5f;
         float y = bottomRow ? height - cardHeight - 10f
             : compact ? height - 151f : height - cardHeight - 10f * s;
         float font = LayoutFont(compact ? 22f : 18f * s);
 
-        for (int i = 0; i < groups.Length; i++)
+        for (int i = 0; i < slots.Count; i++)
         {
-            WeaponKind[] group = groups[i];
-            WeaponKind weapon = DisplayWeaponForGroup(pawn, group);
+            WeaponKind[] slot = slots[i];
+            WeaponKind weapon = DisplayWeaponForSlot(pawn, slot);
             WeaponDef def = Weapons.Get(weapon);
-            int ownedCount = group.Count(w => pawn.HasWeapon[(int)w]);
+            int ownedCount = slot.Count(candidate => pawn.HasWeapon[(int)candidate]);
             bool owned = ownedCount > 0;
-            bool selected = Weapons.HudGroupForWeapon(pawn.Weapon) == i;
+            bool selected = Array.IndexOf(slot, pawn.Weapon) >= 0
+                || Array.IndexOf(slot, pawn.PendingWeapon) >= 0;
             int ammo = def.Ammo == AmmoKind.None ? 999 : pawn.AmmoFor(weapon);
             bool usable = owned && (def.Ammo == AmmoKind.None || ammo > 0);
             float x = startX + i * (cardWidth + gap);
@@ -583,7 +779,7 @@ public sealed class Hud
 
             GameAction action = i < 9 ? GameAction.Weapon1 + i : GameAction.Weapon10;
             string key = BindingNames.CompactControl(bindings[action]);
-            if (i == 9 && !string.IsNullOrEmpty(key)) key += "×2";
+            if (i == 10 && !string.IsNullOrEmpty(key)) key += "×2";
             if (!string.IsNullOrEmpty(key))
             {
                 key = FitText(ui, FaceBold, font, key, cardWidth - 8f);
@@ -609,25 +805,22 @@ public sealed class Hud
                 UiRenderer.Rgba(ammoColor, owned ? 1f : 0.50f), TextAlign.Right);
 
             if (ownedCount > 1)
-            {
-                string alternatives = $"+{ownedCount - 1}";
-                ui.Text(FaceBold, font, x + 5f, y + cardHeight - font - 6f, alternatives,
-                    UiRenderer.Rgba(0.72f, 0.88f, 1f, 0.95f));
-            }
+                ui.Text(FaceBold, font, x + 5f, y + cardHeight - font - 6f,
+                    $"+{ownedCount - 1}", UiRenderer.Rgba(0.72f, 0.88f, 1f, 0.95f));
         }
     }
 
-    private static WeaponKind DisplayWeaponForGroup(Pawn pawn, WeaponKind[] group)
+    private static WeaponKind DisplayWeaponForSlot(Pawn pawn, WeaponKind[] slot)
     {
         WeaponKind current = pawn.PendingWeapon != WeaponKind.Count ? pawn.PendingWeapon : pawn.Weapon;
-        if (Array.IndexOf(group, current) >= 0) return current;
-        foreach (WeaponKind weapon in group)
+        if (Array.IndexOf(slot, current) >= 0) return current;
+        foreach (WeaponKind weapon in slot)
             if (pawn.HasWeapon[(int)weapon]
                 && (Weapons.Get(weapon).Ammo == AmmoKind.None || pawn.AmmoFor(weapon) > 0))
                 return weapon;
-        foreach (WeaponKind weapon in group)
+        foreach (WeaponKind weapon in slot)
             if (pawn.HasWeapon[(int)weapon]) return weapon;
-        return group[0];
+        return slot[0];
     }
 
     private void DrawPowerups(UiRenderer ui, Pawn pawn, int width, int height, float s)

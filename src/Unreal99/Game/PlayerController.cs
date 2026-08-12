@@ -148,7 +148,7 @@ public sealed class PlayerController : Controller
         }
 
         if (Device.Kind == DeviceKind.Gamepad) ReadGamepad(ref input, dt);
-        else ReadMouseAndKeyboard(ref input, dt);
+        else ReadMouseAndKeyboard(world, ref input, dt);
 
         ZoomBlend = MathX.Damp(ZoomBlend, Pawn.ZoomFov > 0f ? 1f : 0f, 14f, dt);
 
@@ -159,7 +159,7 @@ public sealed class PlayerController : Controller
 
     // ---------------------------------------------------------------- mouse + keyboard
 
-    private void ReadMouseAndKeyboard(ref PawnInput input, float dt)
+    private void ReadMouseAndKeyboard(GameWorld world, ref PawnInput input, float dt)
     {
         // --- look: mouse, plus optional keyboard turning on top ---
         float zoomScale = Pawn.ZoomFov > 0f ? Pawn.ZoomFov / Settings.Fov : 1f;
@@ -225,8 +225,7 @@ public sealed class PlayerController : Controller
             if (!_input.ActionPressed(Device, action)) continue;
             bool doubleTap = i == 9 && _lastDirectWeaponBinding == i
                 && _time - _lastDirectWeaponTap <= DirectWeaponDoubleTapSeconds;
-            int group = Weapons.HudGroupForBinding(i, doubleTap);
-            WeaponKind? selection = Weapons.NextInHudGroup(Pawn, group);
+            WeaponKind? selection = Weapons.WeaponForMapBinding(Pawn, world.WeaponSlots, i, doubleTap);
             if (selection.HasValue) input.WeaponSelect = (int)selection.Value;
             _lastDirectWeaponBinding = i;
             _lastDirectWeaponTap = _time;

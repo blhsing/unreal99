@@ -933,7 +933,13 @@ public static partial class Maps
         b.Solid(prime + new Vector3(-14f, -1.2f, -14f), prime + new Vector3(14f, 0f, 14f), MatId.Concrete, true, 0.6f);
         b.Solid(prime + new Vector3(-14f, 0f, -14f), prime + new Vector3(14f, 9f, -11f), MatId.TechPanelDark, true, 0.8f);
         b.Solid(prime + new Vector3(-14f, 0f, 11f), prime + new Vector3(14f, 9f, 14f), MatId.TechPanelDark, true, 0.8f);
-        b.Solid(prime + new Vector3(-14f, 9f, -14f), prime + new Vector3(14f, 10f, 14f), MatId.MetalGrate, true, 0.9f);
+        // Keep the jump-pad landing deck open. The former full roof sat directly across both
+        // ballistic arcs, so bots repeatedly jumped into its underside and fell back to the pad.
+        b.Solid(prime + new Vector3(-14f, 9f, -14f), prime + new Vector3(14f, 10f, -10f), MatId.MetalGrate, true, 0.9f);
+        b.Solid(prime + new Vector3(-14f, 9f, 10f), prime + new Vector3(14f, 10f, 14f), MatId.MetalGrate, true, 0.9f);
+        b.Solid(prime + new Vector3(-14f, 9f, -10f), prime + new Vector3(-11f, 10f, 10f), MatId.MetalGrate, true, 0.9f);
+        b.Solid(prime + new Vector3(-7f, 9f, -10f), prime + new Vector3(7f, 10f, 10f), MatId.MetalGrate, true, 0.9f);
+        b.Solid(prime + new Vector3(11f, 9f, -10f), prime + new Vector3(14f, 10f, 10f), MatId.MetalGrate, true, 0.9f);
         b.Weapon(prime + new Vector3(0f, 10.9f, 0f), WeaponKind.Avril);
         b.Locker(prime + new Vector3(0f, 0.4f, -8f),
             WeaponKind.ShockRifle, WeaponKind.LinkGun, WeaponKind.Stinger, WeaponKind.RocketLauncher);
@@ -941,7 +947,7 @@ public static partial class Maps
         b.Weapon(prime + new Vector3(6f, 1f, 0f), WeaponKind.Stinger);
         b.Spawn(prime + new Vector3(0f, 0.4f, 8f), 0f);
         for (int s = -1; s <= 1; s += 2)
-            b.AddJumpPad(prime + new Vector3(s * 9f, 0.2f, 0f), prime + new Vector3(s * 7f, 12f, 0f),
+            b.AddJumpPad(prime + new Vector3(s * 9f, 0.2f, 0f), prime + new Vector3(s * 4f, 12f, 0f),
                 new Vector3(0.5f, 0.85f, 1f));
 
         // --- the air node on high ground, and the Redeemer island it unlocks ---

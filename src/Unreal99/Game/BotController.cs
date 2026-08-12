@@ -179,6 +179,7 @@ public sealed class BotController : Controller
     public int DiagnosticPathCount => _path.Count;
     public int DiagnosticWaypointNode => _pathCursor < _path.Count ? _path[_pathCursor] : -1;
     public int DiagnosticNextWaypointNode => _pathCursor + 1 < _path.Count ? _path[_pathCursor + 1] : -1;
+    public bool DiagnosticObjectiveGoal => _objectiveGoal;
     public int DiagnosticActiveLiftBrush => _activeLiftBrushIndex;
     public Vector3 DiagnosticLiftSource => _activeLiftSource;
     public Vector3 DiagnosticLiftDestination => _activeLiftDestination;
@@ -294,9 +295,22 @@ public sealed class BotController : Controller
     private float _routeProgressSampleTimer;
     private float _routeRecoveryTimer;
     private int _routeRecoveryGoalNode = -1;
+    // A bot can pace across a corridor wider than the local oscillation detector's footprint and
+    // still never close on the flag/node it is meant to reach. Track objective distance separately
+    // so useful travel is measured against match progress, not the odometer.
+    private Vector3 _objectiveProgressDestination;
+    private float _objectiveProgressBestDistance = float.MaxValue;
+    private float _objectiveProgressNoGainTimer;
+    private Vector3 _lastRouteIntent;
+    private float _routeReversalWindow;
+    private int _routeReversals;
     private int _routeRecoveryReports;
     private float _threatTimer;
     private Vector3 _threatDirection;
+
+    private string DiagnosticActor => Pawn.PlayerIndex >= 0
+        ? $"玩家 {Pawn.PlayerIndex + 1} ({Pawn.Name})"
+        : $"電腦 {Pawn.Name}";
     private int _navDebugReports;
     private int _movementDebugReports;
     private int _pickupDebugReports;
@@ -437,6 +451,12 @@ public sealed class BotController : Controller
         _routeProgressSampleTimer = 0f;
         _routeRecoveryTimer = 0f;
         _routeRecoveryGoalNode = -1;
+        _objectiveProgressDestination = Pawn.Position;
+        _objectiveProgressBestDistance = float.MaxValue;
+        _objectiveProgressNoGainTimer = 0f;
+        _lastRouteIntent = Vector3.Zero;
+        _routeReversalWindow = 0f;
+        _routeReversals = 0;
         _routeRecoveryReports = 0;
         _reactionTimer = Skill < 0.85f ? ReactionTime * _rng.Range(0.85f, 1.15f) : 0f;
         _fireBurstTimer = 0f;
@@ -487,6 +507,21 @@ public sealed class BotController : Controller
 
         // Reflexive dodge when hurt badly.
         if (amount > 22f && _dodgeTimer <= 0f && _rng.Chance(DodgeChance)) _dodgeTimer = 0.01f;
+    }
+
+    /// <summary>
+    /// Deterministic behavioral-suite hook: remember a real enemy through the same target fields
+    /// perception normally fills. The next update still has to pass CanSee, aim and firing gates;
+    /// this only removes test-order dependence on which way a hull happened to face after driving.
+    /// </summary>
+    internal void RememberVisibleEnemyForTest(Pawn enemy, float worldTime)
+    {
+        if (enemy == null || !enemy.Alive) return;
+        _targetId = enemy.Id;
+        _lastKnownTargetPos = enemy.Position;
+        _lastSeenTargetTime = worldTime;
+        _targetTimer = 0.22f;
+        _reactionTimer = 0f;
     }
 
     public override PawnInput Update(GameWorld world, float dt)
@@ -584,18 +619,18 @@ public sealed class BotController : Controller
         // --- movement ---
         Vector2 move = ComputeMovement(world, target, targetVisible, dt, ref input);
         input.Move = move;
+        DetectRapidRouteReversal(world, dt, move);
+        DetectAndRecoverObjectiveNoProgress(world, dt, move);
 
         // --- firing ---
-        // A distant enemy does not outrank the generator you are standing next to. Only someone
-        // close enough to actually threaten you takes priority over the objective; without this
-        // an attacker under long-range harassment never once shoots the thing it came to break.
-        bool enemyPressing = targetVisible && target != null
-            && Vector3.Distance(pawn.Position, target.Position) < 18f;
+        // A visible opponent is an immediate combat problem at every range. The old objective
+        // exception made a bot stare through an enemy and keep shooting a node or generator
+        // whenever that enemy was more than 18 metres away. Objective fire remains the fallback
+        // as soon as there is no clear opponent.
         bool handledBombingRun = HandleBombingRunCarrierTactics(world, target, targetVisible,
             ref input, dt);
         if (!handledBombingRun && targetVisible && _reactionTimer <= 0f && target != null
-            && !_specialTraversalLock && !_jumpPadFlight
-            && (enemyPressing || !HasObjectiveToShoot(world)))
+            && !_specialTraversalLock && !_jumpPadFlight)
             DecideFire(world, target, ref input);
         else if (!handledBombingRun && !_specialTraversalLock && !_jumpPadFlight)
             ShootObjective(world, ref input, dt);
@@ -808,7 +843,7 @@ public sealed class BotController : Controller
 
         RouteProgressSample[] points = _routeProgressSamples.ToArray();
         float duration = points[^1].Time - points[0].Time;
-        if (duration < 3.6f) return;
+        if (duration < 2.4f) return;
 
         float path = 0f;
         int reversals = 0;
@@ -841,7 +876,17 @@ public sealed class BotController : Controller
         // Riding a launcher between distinct floors can return to the same X/Z footprint while
         // making real vertical progress. Count confinement in three dimensions so that route is
         // not mistaken for shaking in place.
-        if (path < 7f || net > 3.8f || spatialExtent > 7f || reversals < 2) return;
+        bool earlyRoutePacing = (_objectiveGoal || _state != BotState.Attack)
+            && duration >= 2.4f && path >= 4.5f && net <= 1.8f
+            && spatialExtent <= 4.8f && reversals >= 2;
+        bool sustainedOscillation = duration >= 3.6f && path >= 7f && net <= 3.8f
+            && spatialExtent <= 7f && reversals >= 2;
+        // A wider two-point shuttle is still a route failure. Catch it before the five-second
+        // harness window qualifies, but only outside Attack so normal combat strafing survives.
+        bool wideRoutePacing = _state != BotState.Attack && duration >= 3f && path >= 9f
+            && net <= 5.5f && horizontalExtent <= 14f && verticalExtent <= 3f
+            && reversals >= 2;
+        if (!earlyRoutePacing && !sustainedOscillation && !wideRoutePacing) return;
 
         PickupEntity rejectedItem = _itemGoal;
         int recovery = BeginRouteRecovery(world, rejectedItem);
@@ -906,7 +951,114 @@ public sealed class BotController : Controller
         _pathCursor = 0;
         _repathTimer = 0f;
         _routeProgressSamples.Clear();
+        _objectiveProgressBestDistance = float.MaxValue;
+        _objectiveProgressNoGainTimer = 0f;
+        _lastRouteIntent = Vector3.Zero;
+        _routeReversalWindow = 0f;
+        _routeReversals = 0;
         return recovery;
+    }
+
+    /// <summary>
+    /// Catches the visually worst form of a navigation loop immediately: route steering flipping
+    /// almost 180 degrees several times in a short interval. Distance-window recovery deliberately
+    /// waits longer and can therefore allow a conspicuous shake before it has enough samples.
+    /// </summary>
+    private void DetectRapidRouteReversal(GameWorld world, float dt, Vector2 move)
+    {
+        bool routeDriven = move != Vector2.Zero && _state != BotState.Attack
+            && !_jumpPadFlight && !_specialTraversalLock && _activeLiftBrushIndex < 0
+            && _edgeRecoveryTimer <= 0f;
+        if (!routeDriven)
+        {
+            _lastRouteIntent = Vector3.Zero;
+            _routeReversalWindow = 0f;
+            _routeReversals = 0;
+            return;
+        }
+
+        InputBasis(_aimYaw, out Vector3 forward, out Vector3 right);
+        Vector3 intent = MathX.SafeNormalize(forward * move.Y + right * move.X, Vector3.Zero);
+        if (intent == Vector3.Zero) return;
+
+        _routeReversalWindow += dt;
+        if (_routeReversalWindow > 1.6f)
+        {
+            _routeReversalWindow = 0f;
+            _routeReversals = 0;
+        }
+        if (_lastRouteIntent != Vector3.Zero && Vector3.Dot(_lastRouteIntent, intent) < -0.55f)
+            _routeReversals++;
+        _lastRouteIntent = intent;
+
+        if (_routeReversals < 2) return;
+
+        // Commit to one open side of the current route instead of immediately asking A* for the
+        // graph's farthest point. Replanning from the same blocked spot returns the same first
+        // edge and can turn the recovery itself into a rapid loop. The ordinary rolling detector
+        // remains behind this one and will blacklist/replan if the committed skirt also fails.
+        Vector3 lateral = new(-intent.Z, 0f, intent.X);
+        Vector3 eye = Pawn.Position + new Vector3(0f, Pawn.CurrentHeight * 0.5f, 0f);
+        bool leftClear = !world.Level.Collision.Raycast(eye, eye + lateral * 3.5f).Hit
+            && HasSafePath(world, lateral, 2.6f);
+        bool rightClear = !world.Level.Collision.Raycast(eye, eye - lateral * 3.5f).Hit
+            && HasSafePath(world, -lateral, 2.6f);
+        float side = leftClear == rightClear ? (_rng.Chance(0.5f) ? 1f : -1f)
+            : (leftClear ? 1f : -1f);
+        Vector3 escape = MathX.SafeNormalize(intent * 0.25f + lateral * side, lateral * side);
+        _edgeRecoveryTarget = Pawn.Position + escape * 4.5f;
+        _edgeRecoveryTimer = 1.25f;
+        if (Environment.GetEnvironmentVariable("UNREAL99_NAV_DEBUG") == "1"
+            && _movementDebugReports++ < 48)
+            Console.WriteLine($"快速反轉繞障: {DiagnosticActor} · 位置 {Pawn.Position} · "
+                + $"狀態 {_state} · 目標 {_goalNode} · 路徑游標 {_pathCursor}/{_path.Count}");
+        _lastRouteIntent = Vector3.Zero;
+        _routeReversalWindow = 0f;
+        _routeReversals = 0;
+    }
+
+    /// <summary>
+    /// Breaks objective-route pacing that still covers too much ground for the confined-footprint
+    /// oscillation detector. A route is useful only while it beats its closest distance to the
+    /// objective. Special links reset the clock because lifts, teleporters and jump pads can
+    /// legitimately move away from their destination before completing the authored transition.
+    /// </summary>
+    private void DetectAndRecoverObjectiveNoProgress(GameWorld world, float dt, Vector2 move)
+    {
+        if (!_objectiveGoal || !_hasGoalPosition || !_pathFound || move == Vector2.Zero
+            || _jumpPadFlight || _specialTraversalLock || _activeLiftBrushIndex >= 0)
+        {
+            _objectiveProgressBestDistance = float.MaxValue;
+            _objectiveProgressNoGainTimer = 0f;
+            return;
+        }
+
+        Vector3 destination = _goalPosition;
+        if (Vector3.DistanceSquared(destination, _objectiveProgressDestination) > 6f * 6f)
+        {
+            _objectiveProgressDestination = destination;
+            _objectiveProgressBestDistance = float.MaxValue;
+            _objectiveProgressNoGainTimer = 0f;
+        }
+
+        float distance = (destination - Pawn.Position).FlatXZ().Length();
+        if (distance <= _goalRadius + 0.5f || distance < _objectiveProgressBestDistance - 0.75f)
+        {
+            _objectiveProgressBestDistance = distance;
+            _objectiveProgressNoGainTimer = 0f;
+            return;
+        }
+
+        _objectiveProgressNoGainTimer += dt;
+        if (_objectiveProgressNoGainTimer < 3.5f) return;
+
+        if (Environment.GetEnvironmentVariable("UNREAL99_NAV_DEBUG") == "1"
+            && _movementDebugReports++ < 48)
+            Console.WriteLine($"目標無進展重劃: {DiagnosticActor} · 位置 {Pawn.Position} · "
+                + $"目標 {destination} · 最近 {_objectiveProgressBestDistance:0.0} · "
+                + $"目前 {distance:0.0} · 路徑游標 {_pathCursor}/{_path.Count}");
+
+        BeginRouteRecovery(world, _itemGoal);
     }
 
     // ---------------------------------------------------------------- perception
@@ -920,9 +1072,17 @@ public sealed class BotController : Controller
         float range = SightRange * (target.IsInvisible ? 0.22f : 1f);
         if (dist > range) return false;
 
-        // Wide field of view, but not omniscient — things directly behind are missed.
-        Vector3 toTarget = MathX.SafeNormalize(targetPoint - eye, Pawn.ViewDirection);
-        if (Vector3.Dot(toTarget, Pawn.ViewDirection) < -0.25f) return false;
+        // Wide field of view, but not omniscient — things directly behind are missed. A driver
+        // of a hull-mounted weapon sees along the vehicle model's +Z, while pawn yaw zero looks
+        // down -Z. Using the ordinary pawn direction here made fixed-gun vehicles blind in the
+        // same direction their cannons fired.
+        Vector3 viewDirection = Pawn.ViewDirection;
+        if (Pawn.InVehicle && world.FindVehicle(Pawn.VehicleId) is { Alive: true } vehicle
+            && Pawn.VehicleSeat >= 0 && Pawn.VehicleSeat < vehicle.Def.Seats.Length
+            && !vehicle.Def.Seats[Pawn.VehicleSeat].Turret)
+            viewDirection = MathX.DirFromYawPitch(vehicle.Yaw + MathX.Pi, Pawn.Pitch);
+        Vector3 toTarget = MathX.SafeNormalize(targetPoint - eye, viewDirection);
+        if (Vector3.Dot(toTarget, viewDirection) < -0.25f) return false;
 
         return world.Level.Collision.LineOfSight(eye, targetPoint);
     }
@@ -1413,7 +1573,9 @@ public sealed class BotController : Controller
 
         Vector3 dir = MathX.SafeNormalize(desired - Pawn.EyePosition, Pawn.ViewDirection);
         MathX.YawPitchFromDir(dir, out float wantYaw, out float wantPitch);
-        if (!useTargetAim && (_objectiveGoal || rearming))
+        // Route-following never benefits from staring almost straight into a lower waypoint. A
+        // modest downward view still shows descents without hiding the map and objective ahead.
+        if (!useTargetAim)
             wantPitch = MathF.Max(wantPitch, -0.65f);
 
         float speed = AimSpeed * (visible ? 1f : 0.5f);
@@ -1497,14 +1659,14 @@ public sealed class BotController : Controller
             _pathFound = found;
             if (found) _pathCursor = 0;
             else { _path.Clear(); _pathCursor = 0; }
-            if (Environment.GetEnvironmentVariable("UNREAL99_NAV_DEBUG") == "1" &&
-                Pawn.PlayerIndex >= 0 && _navDebugReports++ < 16)
+            if (Environment.GetEnvironmentVariable("UNREAL99_NAV_DEBUG") == "1"
+                && _navDebugReports++ < 16)
             {
                 Vector3 startPosition = start >= 0 ? nav.Nodes[start].Position : Pawn.Position;
                 Vector3 goalPosition = _goalNode >= 0 ? nav.Nodes[_goalNode].Position : Pawn.Position;
                 Vector3 firstPosition = _path.Count > 0 ? nav.Nodes[_path[0]].Position : Pawn.Position;
                 Vector3 lastPosition = _path.Count > 0 ? nav.Nodes[_path[^1]].Position : Pawn.Position;
-                Console.WriteLine($"電腦導航: 玩家 {Pawn.PlayerIndex + 1} · 起點 {startPosition} · " +
+                Console.WriteLine($"電腦導航: {DiagnosticActor} · 起點 {startPosition} · " +
                     $"目標 {goalPosition} · 路徑 {_path.Count} · 首點 {firstPosition} · " +
                     $"末點 {lastPosition} · 角色位置 {Pawn.Position}");
             }
@@ -2211,7 +2373,12 @@ public sealed class BotController : Controller
         _goalRadius = radius;
         _hasGoalPosition = true;
         _objectiveGoal = objective;
-        _goalTimer = MathF.Min(_goalTimer, refresh);
+        // The caller owns the lifetime of a precise goal. In particular, pickup routes compute a
+        // distance-based six-to-fourteen second commitment; clamping that against ChooseGoal's
+        // random 2.2–4.5 second seed silently expired a long locker run halfway there. Re-scoring
+        // from the new position could then choose a locker behind the bot and produce the saved
+        // game's conspicuous back-and-forth shuttle.
+        _goalTimer = refresh;
         return true;
     }
 
@@ -2440,13 +2607,14 @@ public sealed class BotController : Controller
         // Re-arm before setting out. A bot that walks a hundred metres to a node with an empty
         // pistol arrives as a free frag rather than a capture.
         bool noRangedAmmo = !HasUsableRangedWeapon(Pawn);
-        if ((noRangedAmmo || NeedsCombatResupply(Pawn)) && _objectiveRearmAttempts < 2
+        bool needsSupply = noRangedAmmo || NeedsCombatResupply(Pawn);
+        if (!needsSupply) _objectiveRearmAttempts = 0;
+        if (needsSupply && _objectiveRearmAttempts < 2
             && TryChoosePickupGoal(world, noRangedAmmo ? 100f : 45f, combatOnly: true))
         {
             _objectiveRearmAttempts++;
             return true;
         }
-        if (!noRangedAmmo) _objectiveRearmAttempts = 0;
 
         // Worth driving? Only for a real journey, and only if the ride is closer than the walk.
         float distance = Vector3.Distance(Pawn.Position, node.Position);
@@ -2545,13 +2713,14 @@ public sealed class BotController : Controller
             && TryBoardVehicle(world, nav, objective.Position)) return true;
 
         bool noRangedAmmo = !HasUsableRangedWeapon(Pawn);
-        if ((noRangedAmmo || NeedsCombatResupply(Pawn)) && _objectiveRearmAttempts < 2
+        bool needsSupply = noRangedAmmo || NeedsCombatResupply(Pawn);
+        if (!needsSupply) _objectiveRearmAttempts = 0;
+        if (needsSupply && _objectiveRearmAttempts < 2
             && TryChoosePickupGoal(world, noRangedAmmo ? 100f : 45f, combatOnly: true))
         {
             _objectiveRearmAttempts++;
             return true;
         }
-        if (!noRangedAmmo) _objectiveRearmAttempts = 0;
 
         if (!attacking)
         {
@@ -2905,6 +3074,14 @@ public sealed class BotController : Controller
             return;
         }
 
+        // Occupying a genuinely unarmed driver seat is transport work, not combat. Leave it
+        // alone here; crew in armed passenger seats continue fighting through the gunner branch.
+        if (def.Seats.Length == 0 || !def.Seats[0].Armed)
+        {
+            input.Fire = false;
+            input.AltFire = false;
+        }
+
         // --- driver ---
         // Hold distance by class. Artillery and heavy armour fight from range and lose if they
         // close; light attack vehicles have to be on top of things to do anything at all.
@@ -2919,7 +3096,12 @@ public sealed class BotController : Controller
             _ => 6f,
         };
 
-        Vector3 steeringTarget = VehicleSteeringTarget(world, v, destination, dt);
+        bool turret = def.Seats.Length > 0 && def.Seats[0].Turret;
+        // A fixed hull gun has to point the whole vehicle at a visible enemy. Steering solely at
+        // the distant objective made Mantas, Vipers and Scorpions drive past opponents while their
+        // firing gate waited for an unrelated navigation yaw to line up.
+        Vector3 steeringTarget = !turret && targetVisible && target != null
+            ? aimAt : VehicleSteeringTarget(world, v, destination, dt);
         Vector3 flat = (steeringTarget - v.Position).FlatXZ();
         float steeringDistance = flat.Length();
         float distance = (destination - v.Position).FlatXZ().Length();
@@ -2954,7 +3136,6 @@ public sealed class BotController : Controller
 
         // A hull-mounted weapon aims by steering, so it fires only when already pointed there;
         // a turret seat aims independently and can shoot across the arc.
-        bool turret = def.Seats.Length > 0 && def.Seats[0].Turret;
         if (turret)
         {
             Vector3 muzzle = v.SeatWorld(0);
@@ -2967,14 +3148,21 @@ public sealed class BotController : Controller
         {
             // Hull-mounted weapon: the yaw is the vehicle's, but the elevation still comes from
             // the driver's view, so a Manta can shoot at something above or below it.
-            input.Yaw = v.Yaw;
+            // Vehicle model yaw 0 faces +Z; pawn/camera yaw 0 faces -Z. The half-turn is the same
+            // convention conversion used by HandleVehicleFire. Without it CanSee looked behind
+            // every hull-mounted driver and never acquired the opponent straight ahead.
+            input.Yaw = MathX.WrapAngle(v.Yaw + MathX.Pi);
             input.Pitch = MathX.Damp(Pawn.Pitch,
                 MathF.Atan2(aimAt.Y - (v.Position.Y + 1f), MathF.Max(distance, 1f)), 6f, dt);
         }
 
         if (def.Seats.Length > 0 && def.Seats[0].Armed && !input.AltFire)
         {
-            bool aimed = turret || MathF.Abs(yawError) < 0.22f;
+            Vector3 weaponFlat = (aimAt - v.Position).FlatXZ();
+            float weaponYaw = weaponFlat.LengthSquared() > 0.001f
+                ? MathF.Atan2(weaponFlat.X, weaponFlat.Z) : v.Yaw;
+            float weaponYawError = MathX.WrapAngle(weaponYaw - v.Yaw);
+            bool aimed = turret || MathF.Abs(weaponYawError) < 0.22f;
             bool assaultObjectiveShot = Pawn.Team == world.Assault.Attackers
                 && assaultTarget is { Kind: ObjectiveKind.Destroy };
             bool clearAssaultObjectiveShot = true;
@@ -3001,6 +3189,7 @@ public sealed class BotController : Controller
             input.Fire = aimed && ((targetVisible && target != null && target.Team != Pawn.Team)
                 || objectiveInRange);
         }
+
 
         // --- obstacle recovery and bail-out conditions ---
         float frameTravel = Vector3.Distance(v.Position, _lastVehiclePosition);
@@ -3082,6 +3271,20 @@ public sealed class BotController : Controller
         // 6 m forever while waiting to get within a 5.4 m interaction radius.
         bool arrivedAtInfantryObjective = assaultTarget is { Kind: not ObjectiveKind.Destroy }
             && distance <= MathF.Max(assaultTarget.Radius + 2f, hold + 0.5f);
+        // Neutral Onslaught nodes are activated by a pawn touching the pad; vehicle weapons do
+        // nothing to them. An armed driver otherwise obeys its combat standoff and circles/fires
+        // forever just outside the touch radius. Dismount once the hull has delivered the pawn.
+        bool arrivedAtNeutralPowerNode = false;
+        if (world.NodeNetworkMode)
+        {
+            int nodeIndex = world.Onslaught.NearestWithin(destination, 5f);
+            if (nodeIndex >= 0)
+            {
+                PowerNode node = world.Onslaught.Nodes[nodeIndex];
+                arrivedAtNeutralPowerNode = !node.IsCore && node.Team == Team.None
+                    && distance <= MathF.Max(7f, hold + 0.5f);
+            }
+        }
         // At a destroy objective, stationary firing with a clear line is useful. Stationary and
         // unable to shoot is a blocked approach, even though the standoff controller has set
         // throttle to zero; bail out so the pawn can finish on foot instead of looking stuck.
@@ -3104,7 +3307,8 @@ public sealed class BotController : Controller
             input.Move.X = Pawn.Id % 2 == 0 ? 1f : -1f;
         }
         if ((wrecked || arrivedOnTransport || arrivedUnarmedTransport
-             || arrivedAtInfantryObjective || jammed) && _vehicleBoardTimer <= 0f)
+             || arrivedAtInfantryObjective || arrivedAtNeutralPowerNode || jammed)
+            && _vehicleBoardTimer <= 0f)
         {
             _vehicleBoardTimer = 0.8f;
             _vehicleStuckTimer = 0f;
@@ -3298,7 +3502,7 @@ public sealed class BotController : Controller
             if (choice.Item.Kind == PickupKind.WeaponPickup) DiagnosticWeaponPickupGoals++;
             else if (choice.Item.Kind == PickupKind.AmmoPickup) DiagnosticAmmoPickupGoals++;
             if (Environment.GetEnvironmentVariable("UNREAL99_BOT_DEBUG") == "1"
-                && Pawn.PlayerIndex >= 0 && _pickupDebugReports++ < 16)
+                && _pickupDebugReports++ < 16)
             {
                 string itemName = choice.Item.Kind switch
                 {
@@ -3306,14 +3510,14 @@ public sealed class BotController : Controller
                     PickupKind.AmmoPickup => $"{choice.Item.Ammo} ammo",
                     _ => choice.Item.Kind.ToString(),
                 };
-                Console.WriteLine($"電腦補給: 玩家 {Pawn.PlayerIndex + 1} · {itemName} · " +
+                Console.WriteLine($"電腦補給: {DiagnosticActor} · {itemName} · " +
                     $"物品 {choice.Item.Position} · 節點 {nav.Nodes[choice.GoalNode].Position} · " +
                     $"距離 {distance:0.0} · 期限 {refresh:0.0}s");
             }
             return true;
         }
         if (Environment.GetEnvironmentVariable("UNREAL99_BOT_DEBUG") == "1"
-            && Pawn.PlayerIndex >= 0 && _pickupDebugReports++ < 16)
+            && _pickupDebugReports++ < 16)
         {
             string candidates = string.Join(" | ", _pickupChoices.Take(8).Select(choice =>
             {
@@ -3325,7 +3529,7 @@ public sealed class BotController : Controller
                 };
                 return $"{name}@{choice.Item.Position}->#{choice.GoalNode}:{nav.Nodes[choice.GoalNode].Position}";
             }));
-            Console.WriteLine($"電腦補給失敗: 玩家 {Pawn.PlayerIndex + 1} · " +
+            Console.WriteLine($"電腦補給失敗: {DiagnosticActor} · " +
                 $"起點 #{start}:{nav.Nodes[start].Position} · 候選 {_pickupChoices.Count} · {candidates}");
         }
         return false;

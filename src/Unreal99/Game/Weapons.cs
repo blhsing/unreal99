@@ -2,6 +2,8 @@ using System.Numerics;
 using Silk.NET.OpenGL;
 using Unreal99.Core;
 using Unreal99.Rendering;
+using Unreal99.UI;
+using Unreal99.World;
 
 namespace Unreal99.Game;
 
@@ -761,13 +763,10 @@ public static class Weapons
         WeaponKind.SuperShockRifle, WeaponKind.BallLauncher,
     ];
 
-    /// <summary>
-    /// The eleven persistent HUD positions. Newer games replaced several UT99 weapons instead of
-    /// extending the number row, so equivalent weapons share the original arsenal position. This
-    /// keeps the bar readable even when a custom map makes the entire cross-generation arsenal
-    /// available at once.
-    /// </summary>
-    public static readonly WeaponKind[][] HudGroups =
+    public const int MaxHudSlots = 11;
+
+    /// <summary>Related weapons may share one numeric slot when an arena contains both versions.</summary>
+    private static readonly WeaponKind[][] HudFamilies =
     [
         [WeaponKind.ImpactHammer, WeaponKind.ShieldGun, WeaponKind.Translocator],
         [WeaponKind.Enforcer, WeaponKind.AssaultRifle],
@@ -783,65 +782,106 @@ public static class Weapons
     ];
 
     /// <summary>
-    /// Numeric bindings 1–9 address the first nine positions. Zero retains its familiar
-    /// superweapon selection on the first tap; a second tap within the controller's double-tap
-    /// window addresses the sniper position, giving eleven positions ten keys without adding a
-    /// sprawling second row.
+    /// Builds the compact numeric roster for one arena. Only weapons a player can actually obtain
+    /// in this level are present: the spawn loadout, loose pickups and locker contents, plus a
+    /// mode-owned weapon such as Bombing Run's ball launcher. CycleOrder supplies a stable weak-
+    /// to-strong ordering, but the numeric key for a weapon naturally changes with the arena's
+    /// shorter roster.
     /// </summary>
-    public static int HudGroupForBinding(int zeroBasedBinding, bool doubleTap)
+    public static WeaponKind[][] MapWeaponSlots(Level level, GameModeKind mode)
+    {
+        if (mode == GameModeKind.Instagib) return [[WeaponKind.ShockRifle]];
+
+        var available = new HashSet<WeaponKind>(StartingWeapons);
+        if (level != null)
+        {
+            foreach (PickupPlacement pickup in level.Pickups)
+            {
+                if (pickup.Kind == PickupKind.WeaponPickup && pickup.Weapon < WeaponKind.Count)
+                    available.Add(pickup.Weapon);
+                if (pickup.Kind != PickupKind.WeaponLocker) continue;
+                foreach (WeaponKind weapon in pickup.LockerWeapons ?? [])
+                    if (weapon < WeaponKind.Count) available.Add(weapon);
+            }
+        }
+        if (mode == GameModeKind.BombingRun) available.Add(WeaponKind.BallLauncher);
+
+        return HudFamilies.Select(family => family.Where(available.Contains).ToArray())
+            .Where(slot => slot.Length > 0).ToArray();
+    }
+
+    /// <summary>Keys 1–9 select slots 1–9; 0 selects slot 10 and double-0 selects slot 11.</summary>
+    public static int MapSlotForBinding(int zeroBasedBinding, bool doubleTap)
     {
         if (zeroBasedBinding < 0 || zeroBasedBinding > 9) return -1;
         if (zeroBasedBinding < 9) return zeroBasedBinding;
-        return doubleTap ? 9 : 10;
+        return doubleTap ? 10 : 9;
     }
 
-    public static int HudGroupForWeapon(WeaponKind weapon)
+    public static WeaponKind? WeaponForMapBinding(Pawn pawn, IReadOnlyList<WeaponKind[]> slots,
+        int zeroBasedBinding, bool doubleTap)
     {
-        for (int group = 0; group < HudGroups.Length; group++)
-            if (Array.IndexOf(HudGroups[group], weapon) >= 0) return group;
-        return -1;
-    }
-
-    /// <summary>Selects the next usable member of a HUD group, or the first when entering it.</summary>
-    public static WeaponKind? NextInHudGroup(Pawn pawn, int group)
-    {
-        if (group < 0 || group >= HudGroups.Length) return null;
-        WeaponKind[] candidates = HudGroups[group];
-        int current = Array.IndexOf(candidates,
-            pawn.PendingWeapon != WeaponKind.Count ? pawn.PendingWeapon : pawn.Weapon);
+        int slot = MapSlotForBinding(zeroBasedBinding, doubleTap);
+        if (slot < 0 || slot >= slots.Count) return null;
+        WeaponKind[] candidates = slots[slot];
+        WeaponKind current = pawn.PendingWeapon != WeaponKind.Count ? pawn.PendingWeapon : pawn.Weapon;
+        int currentIndex = Array.IndexOf(candidates, current);
         for (int step = 1; step <= candidates.Length; step++)
         {
-            int index = current < 0 ? step - 1 : (current + step) % candidates.Length;
+            int index = currentIndex < 0 ? step - 1 : (currentIndex + step) % candidates.Length;
             WeaponKind weapon = candidates[index];
             if (!pawn.HasWeapon[(int)weapon]) continue;
             WeaponDef def = Get(weapon);
-            if (def.Ammo != AmmoKind.None && pawn.AmmoFor(weapon) <= 0) continue;
-            return weapon;
+            if (def.Ammo == AmmoKind.None || pawn.AmmoFor(weapon) > 0) return weapon;
         }
         return null;
     }
 
     public static int RunHudGroupSelfTest()
     {
-        var seen = new HashSet<WeaponKind>();
-        int entries = 0;
-        foreach (WeaponKind[] group in HudGroups)
-            foreach (WeaponKind weapon in group) { seen.Add(weapon); entries++; }
+        bool pass = true;
+        int largest = 0;
+        for (int i = 0; i < (int)MapId.Count; i++)
+        {
+            MapId id = (MapId)i;
+            using Level level = Maps.Build(null, id);
+            GameModeKind mode = Maps.SupportsBombingRun(id) ? GameModeKind.BombingRun
+                : Maps.SupportsWarfare(id) ? GameModeKind.Warfare
+                : Maps.SupportsAssault(id) ? GameModeKind.Assault
+                : Maps.SupportsOnslaught(id) ? GameModeKind.Onslaught
+                : Maps.SupportsDomination(id) ? GameModeKind.Domination
+                : Maps.SupportsCtf(id) ? GameModeKind.CaptureTheFlag
+                : GameModeKind.Deathmatch;
+            WeaponKind[][] slots = MapWeaponSlots(level, mode);
+            largest = Math.Max(largest, slots.Length);
+            var expected = new HashSet<WeaponKind>(StartingWeapons);
+            foreach (PickupPlacement pickup in level.Pickups)
+            {
+                if (pickup.Kind == PickupKind.WeaponPickup && pickup.Weapon < WeaponKind.Count)
+                    expected.Add(pickup.Weapon);
+                if (pickup.Kind == PickupKind.WeaponLocker)
+                    foreach (WeaponKind weapon in pickup.LockerWeapons ?? []) expected.Add(weapon);
+            }
+            if (mode == GameModeKind.BombingRun) expected.Add(WeaponKind.BallLauncher);
+            WeaponKind[] flattened = slots.SelectMany(slot => slot).ToArray();
+            bool mapPass = slots.Length <= MaxHudSlots
+                && flattened.Distinct().Count() == flattened.Length
+                && expected.SetEquals(flattened);
+            if (!mapPass)
+                Console.WriteLine($"  武器槽失配 {(int)id}:{Maps.Name(id)} · " +
+                    $"地圖 {expected.Count} 把 · HUD {slots.Length} 把");
+            pass &= mapPass;
+        }
 
-        var pawn = new Pawn { Weapon = WeaponKind.Enforcer };
-        pawn.HasWeapon[(int)WeaponKind.ImpactHammer] = true;
-        pawn.HasWeapon[(int)WeaponKind.ShieldGun] = true;
-        WeaponKind? firstTap = NextInHudGroup(pawn, 0);
-        pawn.Weapon = WeaponKind.ImpactHammer;
-        WeaponKind? secondTap = NextInHudGroup(pawn, 0);
-        bool pass = HudGroups.Length == 11
-            && seen.Count == (int)WeaponKind.Count && entries == (int)WeaponKind.Count
-            && HudGroupForBinding(0, false) == 0
-            && HudGroupForBinding(8, true) == 8
-            && HudGroupForBinding(9, false) == 10
-            && HudGroupForBinding(9, true) == 9
-            && firstTap == WeaponKind.ImpactHammer && secondTap == WeaponKind.ShieldGun;
-        Console.WriteLine($"HUD 十一個武器槽與 0 鍵雙擊選擇: {(pass ? "通過" : "失敗")}");
+        var pawn = new Pawn();
+        for (int i = 0; i < (int)WeaponKind.Count; i++) pawn.HasWeapon[i] = true;
+        for (int i = 0; i < pawn.Ammo.Length; i++) pawn.Ammo[i] = 999;
+        WeaponKind[][] sample = CycleOrder.Take(11).Select(weapon => new[] { weapon }).ToArray();
+        pass &= WeaponForMapBinding(pawn, sample, 0, false) == sample[0][0]
+            && WeaponForMapBinding(pawn, sample, 9, false) == sample[9][0]
+            && WeaponForMapBinding(pawn, sample, 9, true) == sample[10][0];
+        Console.WriteLine($"逐地圖武器槽（最大 {largest}/{MaxHudSlots}，0 鍵雙擊第 11 槽）: " +
+                          $"{(pass ? "通過" : "失敗")}");
         return pass ? 0 : 1;
     }
 

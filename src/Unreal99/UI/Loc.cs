@@ -70,7 +70,7 @@ public static class Loc
     public const string MapGalleryHint = "選擇一座競技場以檢視並套用";
     public const string MapIntroduction = "競技場介紹";
     public const string MapSelected = "已選擇";
-    public const string MapGalleryControls = "滑鼠點選　　方向鍵瀏覽　　Enter 套用　　Esc 返回";
+    public const string MapGalleryControls = "滑鼠滾輪捲動　　方向鍵瀏覽　　Enter 套用　　Esc 返回";
 
     // ---------------------------------------------------------------- video settings
     public const string OptVideo = "畫面設定";
@@ -647,6 +647,16 @@ public static class Loc
     public static string FlagCarrierMarker(string team) => $"持有{team}旗幟";
     public static string DamageDealtNumber(int amount) => $"造成 {amount}";
     public static string DamageTakenNumber(int amount) => $"承受 {amount}";
+    public static string ObjectiveAttack(string name) => $"進攻 · {name}";
+    public static string ObjectiveDefend(string name) => $"防守 · {name}";
+    public static string ObjectiveCapture(string name) => $"佔領 · {name}";
+    public static string ObjectiveEnemyFlag(string team) => $"奪取{team}旗幟";
+    public const string ObjectiveRecoverFlag = "奪回我方旗幟";
+    public const string ObjectiveReturnToBase = "返回我方旗座";
+    public const string ObjectiveBall = "競賽球";
+    public const string ObjectiveScoreGoal = "進攻球門";
+    public const string ObjectiveDefendGoal = "防守球門";
+    public static string ObjectiveOrb(string team) => $"{team}能量球";
 
     public static string TimeRemaining(float seconds)
     {
