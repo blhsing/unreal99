@@ -852,6 +852,26 @@ public sealed class MeshBuilder
     /// rather than from a gameplay collision box: a tank's gun and a walker's legs stick well
     /// outside their collision extents, and framing on the box clips them out of the shot.
     /// </summary>
+    /// <summary>
+    /// Bounds of only the vertices lying in a slab of Z. A whole-model box is useless for placing
+    /// anything against a surface — a weapon's overall width is set by its widest point, which is
+    /// nowhere near the fore-end you want to put a hand on — so this measures the shape where it
+    /// actually matters. Returns an empty box if no vertex falls in the slab.
+    /// </summary>
+    public (Vector3 Min, Vector3 Max) BoundsInSlab(float minZ, float maxZ)
+    {
+        Vector3 lo = new(float.MaxValue), hi = new(float.MinValue);
+        bool any = false;
+        foreach (var v in _vertices)
+        {
+            if (v.Position.Z < minZ || v.Position.Z > maxZ) continue;
+            lo = Vector3.Min(lo, v.Position);
+            hi = Vector3.Max(hi, v.Position);
+            any = true;
+        }
+        return any ? (lo, hi) : (Vector3.Zero, Vector3.Zero);
+    }
+
     public (Vector3 Min, Vector3 Max) Bounds()
     {
         if (_vertices.Count == 0) return (Vector3.Zero, Vector3.Zero);

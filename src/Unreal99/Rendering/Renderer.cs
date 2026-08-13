@@ -579,6 +579,7 @@ public sealed class Renderer : IDisposable
             {
                 if ((dc.BoneCount > 0) != skinned) continue;
                 if (dc.FirstPerson) continue;                      // drawn in its own pass below
+                if ((dc.HiddenViewMask & (1 << viewIndex)) != 0) continue;   // e.g. the hull you sit in
                 if (!camera.Frustum.SphereVisible(dc.Center, dc.Radius)) continue;
                 DrawWorldItem(sh, scene, dc);
             }
@@ -610,6 +611,7 @@ public sealed class Renderer : IDisposable
                 {
                     if ((dc.BoneCount > 0) != skinned) continue;
                     if (dc.FirstPerson && dc.OwnerView != viewIndex) continue;
+                    if ((dc.HiddenViewMask & (1 << viewIndex)) != 0) continue;
                     if (!dc.FirstPerson && !camera.Frustum.SphereVisible(dc.Center, dc.Radius)) continue;
                     if (dc.Material.TwoSided) _gl.Disable(EnableCap.CullFace);
                     DrawWorldItem(sh, scene, dc);

@@ -3645,7 +3645,7 @@ public sealed class GameWorld
         SubmitOrbs(scene);
         SubmitBall(scene);
         SubmitHoverboards(scene);
-        SubmitVehicles(scene);
+        SubmitVehicles(scene, viewPawnIds);
         SubmitControlPoints(scene);
         SubmitPowerNodes(scene);
         SubmitObjectives(scene);
@@ -4189,18 +4189,18 @@ public sealed class GameWorld
         var o = Assault.CurrentObjective;
         if (o == null) return;
 
-        Vector3 pos = o.Position + new Vector3(0, 3.4f, 0);
+        Vector3 pos = o.Position + new Vector3(0, 2.7f, 0);
         float pulse = 0.75f + 0.25f * MathF.Sin(Time * 4f);
         Vector3 col = Vector3.Lerp(new Vector3(1f, 0.65f, 0.2f), new Vector3(1f, 0.95f, 0.6f), o.Progress);
 
-        Matrix4x4 xf = Matrix4x4.CreateScale(0.55f)
+        Matrix4x4 xf = Matrix4x4.CreateScale(0.72f)
             * Matrix4x4.CreateRotationY(Time * 1.4f)
             * Matrix4x4.CreateTranslation(pos);
-        foreach (var section in _pickupModels.FlagSections)
+        foreach (var section in _pickupModels.ObjectiveBeaconSections)
         {
             scene.Opaque.Add(new DrawCall
             {
-                Mesh = _pickupModels.Flag,
+                Mesh = _pickupModels.ObjectiveBeacon,
                 IndexOffset = section.IndexOffset,
                 IndexCount = section.IndexCount,
                 Material = Materials.Get(section.Material),
@@ -4219,7 +4219,7 @@ public sealed class GameWorld
     /// Draws each live vehicle. Team colour is applied to the hull tint rather than baked into
     /// the mesh, because a vehicle changes hands — the same Goliath can be red then blue.
     /// </summary>
-    private void SubmitVehicles(RenderScene scene)
+    private void SubmitVehicles(RenderScene scene, IReadOnlyList<int> viewPawnIds)
     {
         foreach (var v in Vehicles)
         {
@@ -4232,6 +4232,19 @@ public sealed class GameWorld
             if (v.Team != Team.None) tint = Vector3.Lerp(tint, GameTypes.TeamColor(v.Team), 0.55f);
             // The Nightshade fades out when it holds still; that is its whole defence.
             float alpha = 1f - v.CloakBlend * 0.82f;
+
+            // Nobody sitting inside a vehicle should be looking at its exterior. Aircraft made
+            // this obvious — a Raptor's nose runs two and a half metres out in front of the seat
+            // and sat squarely over the crosshair whenever the pilot pitched down to aim — but it
+            // is wrong on every hull, which is what the cockpit interior is for. Hidden per view,
+            // so a spectator or the other half of a split screen still sees the whole aircraft.
+            int hidden = 0;
+            for (int view = 0; view < viewPawnIds.Count; view++)
+            {
+                Pawn rider = FindPawn(viewPawnIds[view]);
+                if (rider is { Alive: true, InVehicle: true } && rider.VehicleId == v.Id)
+                    hidden |= 1 << view;
+            }
 
             var mesh = _vehicleModels.MeshFor(v.Kind);
             foreach (var section in _vehicleModels.SectionsFor(v.Kind))
@@ -4249,6 +4262,7 @@ public sealed class GameWorld
                     Radius = def.HalfExtents.Length() + 1f,
                     BoneBase = -1,
                     CastShadow = true,
+                    HiddenViewMask = hidden,
                 });
             }
 
@@ -4558,6 +4572,45 @@ public sealed class GameWorld
                 OwnerView = viewIndex,
                 FirstPerson = true,
             });
+        }
+
+        // The supporting hand. Two-handed weapons in the original are held, not floated: the left
+        // hand is on the fore-end and it is most of what sells the weight of a Flak Cannon. It
+        // rides the same view-model transform as the gun, so recoil, bob and the switch dip all
+        // carry it along — a hand that stayed put while the weapon kicked would be worse than none.
+        if (def.TwoHanded && _weaponModels.HandMesh != null && pawn.ZoomFov <= 0f)
+        {
+            Matrix4x4 handXf = Matrix4x4.CreateScale(_weaponModels.SupportScaleFor(pawn.Weapon))
+                             * Matrix4x4.CreateTranslation(_weaponModels.SupportGripFor(pawn.Weapon))
+                             * xf;
+            foreach (var section in _weaponModels.HandSections)
+            {
+                Material mat = Materials.Get(section.Material);
+                // Skin comes from tinting a neutral material, not from MatId.Flesh: that one is
+                // shared with the gore and carries a raw red albedo, so a forearm built out of it
+                // renders as something recently detached rather than as an arm.
+                var skin = new Vector4(0.82f, 0.63f, 0.50f, 1f);
+                scene.Opaque.Add(new DrawCall
+                {
+                    Mesh = _weaponModels.HandMesh,
+                    IndexOffset = section.IndexOffset,
+                    IndexCount = section.IndexCount,
+                    Material = mat,
+                    Transform = handXf,
+                    BoneBase = -1,
+                    Tint = skin,
+                    Emissive = mat.Emissive,
+                    Alpha = 1f,
+                    Center = camera.Position,
+                    Radius = 2f,
+                    CastShadow = false,
+                    RimStrength = 0.28f,
+                    RimColor = def.Tint * 0.4f,
+                    UvScale = mat.UvScale,
+                    OwnerView = viewIndex,
+                    FirstPerson = true,
+                });
+            }
         }
 
         if (pawn.FireBlend > 0.05f)

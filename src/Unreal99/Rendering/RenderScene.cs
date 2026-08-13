@@ -35,6 +35,17 @@ public struct DrawCall
     public Vector2 UvOffset;
     /// <summary>Views whose index differs are skipped; used for first-person weapon models.</summary>
     public int OwnerView;
+    /// <summary>
+    /// Bit per view index that this draw is skipped in; 0 means visible everywhere. The inverse of
+    /// <see cref="OwnerView"/>: a vehicle hull is drawn for everyone except the people sitting
+    /// inside it, who would otherwise be looking at the back of their own nose cone.
+    ///
+    /// A mask rather than a single index because the default must be "visible" — every draw call
+    /// in the game is built with an object initialiser, so any field left unset is 0, and a plain
+    /// index would silently mean "hide from view 0". It also lets two split-screen players share
+    /// one vehicle and both have it hidden.
+    /// </summary>
+    public int HiddenViewMask;
     public bool FirstPerson;
 }
 
@@ -161,6 +172,7 @@ public sealed class RenderScene
             UvScale = material.UvScale,
             UvOffset = Vector2.Zero,
             OwnerView = -1,
+            HiddenViewMask = 0,
             FirstPerson = false,
         };
 

@@ -125,6 +125,20 @@ public sealed class CharacterModel : IDisposable
 
     private readonly Quaternion[] _rotationScratch = new Quaternion[(int)Bone.Count];
 
+    /// <summary>
+    /// Builds the body without a GPU and reports its triangle count. Every other model in the
+    /// game has a density floor enforced by a headless test; the thing the player looks at most —
+    /// the other players — did not, and had quietly stayed at a fraction of a vehicle's budget.
+    /// </summary>
+    public static int TriangleCount()
+    {
+        var skeleton = Skeleton.BuildHumanoid();
+        var mb = new MeshBuilder { WorldUv = false, Material = (int)MatId.ArmorPlate };
+        BuildBodyInto(mb, skeleton);
+        var (_, indices, _) = mb.Build();
+        return indices.Length / 3;
+    }
+
     public CharacterModel(GL gl)
     {
         Skeleton = Skeleton.BuildHumanoid();
@@ -193,15 +207,23 @@ public sealed class CharacterModel : IDisposable
 
     // ---------------------------------------------------------------- geometry
 
-    private void BuildBody(MeshBuilder mb)
+    private void BuildBody(MeshBuilder mb) => BuildBodyInto(mb, Skeleton);
+
+    private static void BuildBodyInto(MeshBuilder mb, Skeleton skeleton)
     {
-        Vector3[] j = Skeleton.BindWorld;
+        Vector3[] j = skeleton.BindWorld;
 
         // --- pelvis and torso ---
         mb.Material = (int)MatId.ArmorPlate;
-        Limb(mb, j[(int)Bone.Hips] + new Vector3(0, -0.04f, 0), j[(int)Bone.Spine], 0.19f, 0.175f, 0.145f, 0.135f);
-        Limb(mb, j[(int)Bone.Spine], j[(int)Bone.Chest], 0.185f, 0.215f, 0.135f, 0.150f);
-        Limb(mb, j[(int)Bone.Chest], j[(int)Bone.Neck] + new Vector3(0, 0.02f, 0), 0.215f, 0.155f, 0.150f, 0.115f);
+        LimbRound(mb, j[(int)Bone.Hips] + new Vector3(0, -0.04f, 0), j[(int)Bone.Spine], 0.19f, 0.175f, 0.145f, 0.135f, 14, 3);
+        LimbRound(mb, j[(int)Bone.Spine], j[(int)Bone.Chest], 0.185f, 0.215f, 0.135f, 0.150f, 14, 4);
+        LimbRound(mb, j[(int)Bone.Chest], j[(int)Bone.Neck] + new Vector3(0, 0.02f, 0), 0.215f, 0.155f, 0.150f, 0.115f, 14, 3);
+        // Neck, and a belt at the waist.
+        LimbRound(mb, j[(int)Bone.Neck], j[(int)Bone.Head] + new Vector3(0, -0.05f, 0), 0.058f, 0.062f, 0.058f, 0.062f, 10, 2);
+        mb.Material = (int)MatId.Trim;
+        LimbRound(mb, j[(int)Bone.Hips] + new Vector3(0, 0.10f, 0), j[(int)Bone.Hips] + new Vector3(0, 0.17f, 0),
+            0.196f, 0.192f, 0.152f, 0.148f, 14, 1, 0f);
+        mb.AddBox(new Vector3(0f, 1.15f, -0.152f), new Vector3(0.052f, 0.046f, 0.026f));
 
         // Chest plate and back pack give the silhouette some tech bulk.
         mb.Material = (int)MatId.TechPanelDark;
@@ -213,9 +235,21 @@ public sealed class CharacterModel : IDisposable
         mb.AddBox(new Vector3(-0.115f, 1.30f, 0.145f), new Vector3(0.035f, 0.11f, 0.035f));
 
         // --- head ---
+        // A helmet dome with a jaw, ear cups and a crest. The head was two boxes, which at the
+        // range most of this game is played at is the difference between a soldier and a crash
+        // test dummy.
         mb.Material = (int)MatId.ArmorPlate;
-        mb.AddBox(new Vector3(0f, 1.735f, -0.005f), new Vector3(0.098f, 0.105f, 0.108f));
+        LimbRound(mb, new Vector3(0f, 1.665f, -0.005f), new Vector3(0f, 1.828f, -0.005f),
+            0.092f, 0.078f, 0.100f, 0.086f, 14, 4, 0.10f);
+        Pad(mb, new Vector3(0f, 1.828f, -0.005f), MathX.Up, 0.080f, 0.052f, 14);
         mb.AddBox(new Vector3(0f, 1.66f, 0f), new Vector3(0.072f, 0.045f, 0.078f));
+        foreach (float ex in new[] { -1f, 1f })
+        {
+            Pad(mb, new Vector3(ex * 0.094f, 1.742f, 0.012f), new Vector3(ex, 0f, 0f), 0.046f, 0.026f, 12);
+            mb.Material = (int)MatId.Trim;
+            Pad(mb, new Vector3(ex * 0.104f, 1.742f, 0.012f), new Vector3(ex, 0f, 0f), 0.026f, 0.014f, 10);
+            mb.Material = (int)MatId.ArmorPlate;
+        }
         // Visor: emissive slit, the strongest read at distance.
         mb.Material = (int)MatId.EnergyPanel;
         mb.AddBox(new Vector3(0f, 1.745f, -0.098f), new Vector3(0.082f, 0.033f, 0.025f));
@@ -234,14 +268,34 @@ public sealed class CharacterModel : IDisposable
             Bone hd = side == 0 ? Bone.HandL : Bone.HandR;
 
             mb.Material = (int)MatId.TechPanelDark;
-            mb.AddBox(j[(int)sh] + new Vector3(s * 0.06f, 0.035f, 0f), new Vector3(0.10f, 0.085f, 0.11f));
+            // Pauldron: a domed plate over the shoulder rather than a cube on the deltoid.
+            Pad(mb, j[(int)sh] + new Vector3(s * 0.07f, 0.045f, 0f), new Vector3(s * 0.55f, 0.83f, 0f), 0.115f, 0.075f, 14);
             mb.Material = (int)MatId.ArmorPlate;
-            Limb(mb, j[(int)ua], j[(int)la], 0.075f, 0.058f, 0.082f, 0.062f);
-            Limb(mb, j[(int)la], j[(int)hd], 0.058f, 0.048f, 0.062f, 0.052f);
-            mb.Material = (int)MatId.TechPanelDark;
-            mb.AddBox(j[(int)hd] + new Vector3(0, -0.04f, 0.01f), new Vector3(0.052f, 0.06f, 0.058f));
+            LimbRound(mb, j[(int)ua], j[(int)la], 0.075f, 0.058f, 0.082f, 0.062f, 12, 4);
+            LimbRound(mb, j[(int)la], j[(int)hd], 0.058f, 0.048f, 0.062f, 0.052f, 12, 4);
+            // Elbow cop.
             mb.Material = (int)MatId.Trim;
-            mb.AddBox(j[(int)la] + new Vector3(0, 0.01f, 0), new Vector3(0.062f, 0.028f, 0.068f));
+            Pad(mb, j[(int)la] + new Vector3(0f, 0.012f, 0.052f), MathX.Forward * -1f, 0.058f, 0.030f, 12);
+
+            // Hand: a palm with four stubby fingers and a thumb, so a fist reads as a fist.
+            mb.Material = (int)MatId.TechPanelDark;
+            Vector3 wrist = j[(int)hd];
+            LimbRound(mb, wrist + new Vector3(0f, 0.015f, 0f), wrist + new Vector3(0f, -0.062f, 0.012f),
+                0.036f, 0.040f, 0.050f, 0.056f, 10, 2);
+            for (int fgr = 0; fgr < 4; fgr++)
+            {
+                float o = MathX.Lerp(-0.030f, 0.030f, fgr / 3f);
+                Vector3 root = wrist + new Vector3(s * 0.006f, -0.062f, o);
+                LimbRound(mb, root, root + new Vector3(0f, -0.030f, 0.020f), 0.011f, 0.010f, 0.012f, 0.010f, 8, 1);
+                LimbRound(mb, root + new Vector3(0f, -0.030f, 0.020f), root + new Vector3(0f, -0.040f, 0.050f),
+                    0.010f, 0.009f, 0.010f, 0.009f, 8, 1);
+            }
+            LimbRound(mb, wrist + new Vector3(-s * 0.030f, -0.046f, -0.014f),
+                      wrist + new Vector3(-s * 0.038f, -0.070f, 0.030f), 0.013f, 0.011f, 0.013f, 0.011f, 8, 2);
+            // Wrist cuff.
+            mb.Material = (int)MatId.Trim;
+            LimbRound(mb, wrist + new Vector3(0f, 0.028f, 0f), wrist + new Vector3(0f, 0.006f, 0f),
+                0.052f, 0.050f, 0.058f, 0.056f, 10, 1, 0f);
         }
 
         // --- legs ---
@@ -252,12 +306,122 @@ public sealed class CharacterModel : IDisposable
             Bone ft = side == 0 ? Bone.FootL : Bone.FootR;
 
             mb.Material = (int)MatId.ArmorPlate;
-            Limb(mb, j[(int)th], j[(int)sn], 0.098f, 0.072f, 0.105f, 0.078f);
-            Limb(mb, j[(int)sn], j[(int)ft] + new Vector3(0, 0.03f, 0), 0.072f, 0.058f, 0.078f, 0.062f);
+            LimbRound(mb, j[(int)th], j[(int)sn], 0.098f, 0.072f, 0.105f, 0.078f, 14, 4);
+            LimbRound(mb, j[(int)sn], j[(int)ft] + new Vector3(0, 0.03f, 0), 0.072f, 0.058f, 0.078f, 0.062f, 12, 4);
+
+            // Boot: a sole, an upper and a toe cap, rather than one slab under the ankle.
             mb.Material = (int)MatId.TechPanelDark;
-            mb.AddBox(j[(int)ft] + new Vector3(0, -0.035f, -0.03f), new Vector3(0.062f, 0.05f, 0.115f));
+            Vector3 ankle = j[(int)ft];
+            LimbRound(mb, ankle + new Vector3(0f, 0.045f, -0.010f), ankle + new Vector3(0f, -0.020f, -0.030f),
+                0.062f, 0.066f, 0.070f, 0.086f, 12, 2);
+            mb.AddBox(ankle + new Vector3(0f, -0.048f, -0.040f), new Vector3(0.063f, 0.028f, 0.108f));
             mb.Material = (int)MatId.Trim;
-            mb.AddBox(j[(int)sn] + new Vector3(0, 0.015f, -0.02f), new Vector3(0.078f, 0.032f, 0.055f));
+            mb.AddBox(ankle + new Vector3(0f, -0.062f, -0.042f), new Vector3(0.068f, 0.018f, 0.114f));
+            Pad(mb, ankle + new Vector3(0f, -0.030f, -0.130f), MathX.Forward * -1f, 0.052f, 0.028f, 10);
+            // Knee cop.
+            Pad(mb, j[(int)sn] + new Vector3(0f, 0.020f, -0.070f), MathX.Forward * -1f, 0.070f, 0.036f, 12);
+            // Thigh band.
+            LimbRound(mb, j[(int)th] + new Vector3(0f, -0.075f, 0f), j[(int)th] + new Vector3(0f, -0.115f, 0f),
+                0.100f, 0.098f, 0.107f, 0.105f, 12, 1, 0f);
+        }
+    }
+
+    /// <summary>
+    /// A rounded, slightly barrelled limb between two joints. The four-sided
+    /// <see cref="Limb"/> below is what the whole body used to be built from, and a character made
+    /// of tapered boxes reads as a mannequin from any distance — every limb is a flat-sided prism
+    /// with hard vertical creases down it. This sweeps an ellipse instead, with a muscle bulge in
+    /// the middle, and is what every limb on the body now uses.
+    /// </summary>
+    private static void LimbRound(MeshBuilder mb, Vector3 a, Vector3 b,
+        float halfWidthA, float halfWidthB, float halfDepthA, float halfDepthB,
+        int sides = 12, int rings = 4, float bulge = 0.07f)
+    {
+        Vector3 axis = b - a;
+        float len = axis.Length();
+        if (len < 1e-4f) return;
+        axis /= len;
+        MathX.OrthoBasis(axis, out Vector3 right, out Vector3 fwd);
+
+        Span<Vector3> quad = stackalloc Vector3[4];
+        Vector3 Point(int ring, int side)
+        {
+            float t = ring / (float)rings;
+            float swell = 1f + MathF.Sin(t * MathX.Pi) * bulge;
+            float hw = MathX.Lerp(halfWidthA, halfWidthB, t) * swell;
+            float hd = MathX.Lerp(halfDepthA, halfDepthB, t) * swell;
+            float ang = side / (float)sides * MathX.TwoPi;
+            return a + axis * (len * t)
+                 + right * (MathF.Cos(ang) * hw)
+                 + fwd * (MathF.Sin(ang) * hd);
+        }
+
+        for (int ring = 0; ring < rings; ring++)
+            for (int side = 0; side < sides; side++)
+            {
+                int next = (side + 1) % sides;
+                quad[0] = Point(ring, side);
+                quad[1] = Point(ring, next);
+                quad[2] = Point(ring + 1, next);
+                quad[3] = Point(ring + 1, side);
+                mb.AddPolygon(quad);
+            }
+
+        // Domed caps rather than flat discs, so a shoulder or a hip is round where it meets the
+        // next limb instead of showing a rim.
+        for (int cap = 0; cap < 2; cap++)
+        {
+            int ring = cap == 0 ? 0 : rings;
+            Vector3 centre = a + axis * (len * (cap == 0 ? 0f : 1f))
+                           + axis * (cap == 0 ? -1f : 1f)
+                             * MathF.Min(cap == 0 ? halfWidthA : halfWidthB,
+                                         cap == 0 ? halfDepthA : halfDepthB) * 0.55f;
+            Span<Vector3> tri = stackalloc Vector3[3];
+            for (int side = 0; side < sides; side++)
+            {
+                int next = (side + 1) % sides;
+                tri[0] = centre;
+                tri[1] = Point(ring, cap == 0 ? next : side);
+                tri[2] = Point(ring, cap == 0 ? side : next);
+                mb.AddPolygon(tri);
+            }
+        }
+    }
+
+    /// <summary>A rounded armour plate: a shallow domed slab, used for pauldrons and pads.</summary>
+    private static void Pad(MeshBuilder mb, Vector3 centre, Vector3 axis, float radius, float depth,
+        int sides = 12)
+    {
+        axis = MathX.SafeNormalize(axis, MathX.Up);
+        MathX.OrthoBasis(axis, out Vector3 right, out Vector3 fwd);
+        Span<Vector3> quad = stackalloc Vector3[4];
+        const int Rings = 3;
+        Vector3 Point(int ring, int side)
+        {
+            float t = ring / (float)Rings;
+            float r = radius * MathF.Cos(t * MathX.HalfPi * 0.92f);
+            float h = depth * MathF.Sin(t * MathX.HalfPi * 0.92f);
+            float ang = side / (float)sides * MathX.TwoPi;
+            return centre + axis * h + right * (MathF.Cos(ang) * r) + fwd * (MathF.Sin(ang) * r);
+        }
+        for (int ring = 0; ring < Rings; ring++)
+            for (int side = 0; side < sides; side++)
+            {
+                int next = (side + 1) % sides;
+                quad[0] = Point(ring, side);
+                quad[1] = Point(ring, next);
+                quad[2] = Point(ring + 1, next);
+                quad[3] = Point(ring + 1, side);
+                mb.AddPolygon(quad);
+            }
+        Span<Vector3> tri = stackalloc Vector3[3];
+        for (int side = 0; side < sides; side++)
+        {
+            int next = (side + 1) % sides;
+            tri[0] = centre;
+            tri[1] = Point(0, next);
+            tri[2] = Point(0, side);
+            mb.AddPolygon(tri);
         }
     }
 

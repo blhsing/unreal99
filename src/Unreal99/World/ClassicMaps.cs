@@ -65,6 +65,35 @@ public static partial class Maps
         b.Decor(new Vector3(-StripHalfX + 11f, -17f, -TowerZ + 4f),
                 new Vector3(StripHalfX - 11f, -10f, TowerZ - 4f), MatId.Rock, 0.35f);
 
+        // The underside is a broken asteroid, not a chamfered slab. Ragged spurs hang off both
+        // flanks and taper away below, which is the profile the map is recognised by when you are
+        // falling past it — and every one of them is decoration well outside the playable deck.
+        var rockRng = new Rng(0x5FA1);
+        for (int i = 0; i < 46; i++)
+        {
+            float pz = rockRng.Range(-TowerZ - 16f, TowerZ + 16f);
+            float side = rockRng.Chance(0.5f) ? -1f : 1f;
+            float w = rockRng.Range(1.8f, 5.2f);
+            float drop = rockRng.Range(4f, 17f);
+            float lift = rockRng.Range(-3.6f, -0.6f);
+            float reach = rockRng.Range(0f, 4.5f);
+            b.Decor(new Vector3(side * (StripHalfX - w * 0.5f) - side * reach * 0.2f, lift - drop, pz - w),
+                    new Vector3(side * (StripHalfX + reach), lift, pz + w), MatId.Rock, 0.4f);
+            // A tapered point under the widest ones, so they end in a spur rather than a stump.
+            if (w < 3.4f) continue;
+            b.DecorBeam(new Vector3(side * (StripHalfX + reach * 0.4f), lift - drop, pz),
+                        new Vector3(side * (StripHalfX + reach * 0.9f), lift - drop - rockRng.Range(4f, 11f), pz),
+                        w * 0.42f, w * 0.42f, MatId.Rock, 0.4f);
+        }
+        // Keel ridge running the length of the underside.
+        for (int i = 0; i < 12; i++)
+        {
+            float pz = MathX.Lerp(-TowerZ - 12f, TowerZ + 12f, i / 11f);
+            float w = 4f + MathF.Sin(i * 1.7f) * 2.6f;
+            b.Decor(new Vector3(-w, -24f - MathF.Abs(MathF.Cos(i * 0.9f)) * 6f, pz - 7f),
+                    new Vector3(w, -14f, pz + 7f), MatId.Rock, 0.4f);
+        }
+
         for (int side = 0; side < 2; side++)
         {
             float sign = side == 0 ? -1f : 1f;
@@ -90,40 +119,40 @@ public static partial class Maps
                     new Vector3(TowerHalf + Wall, TowerTop, MathF.Max(outerFace, outerFace + Wall * sign)),
                     teamMat, true, 0.55f);
 
-            // The towers are the map. Ribbed pilasters up all four faces, banded string courses,
-            // a corbelled parapet and team banners hanging down the inner face — the original's
-            // silhouette is heavily articulated, and a smooth block reads as scenery.
+            // The towers are the map: ribbed pilasters up all four faces, banded string courses,
+            // a corbelled parapet and team banners hanging down the inner face.
+            //
+            // Every band here is emitted as four wall strips. The first attempt wrote them as
+            // filled boxes spanning the whole tower footprint, which is fine on a solid pier and
+            // catastrophic on a hollow tower: six horizontal slabs sliced straight through the
+            // flag room, and the inside of the tower read as a striped cage.
+            Vector3 towerMid = new(0f, 0f, z);
+
+            void Course(float y0, float y1, float outset, MatId mat, float uv, float skin = 0.7f)
+            {
+                float h = TowerHalf + Wall + outset;
+                b.Decor(towerMid + new Vector3(-h, y0, -h), towerMid + new Vector3(-h + skin, y1, h), mat, uv);
+                b.Decor(towerMid + new Vector3(h - skin, y0, -h), towerMid + new Vector3(h, y1, h), mat, uv);
+                b.Decor(towerMid + new Vector3(-h, y0, -h), towerMid + new Vector3(h, y1, -h + skin), mat, uv);
+                b.Decor(towerMid + new Vector3(-h, y0, h - skin), towerMid + new Vector3(h, y1, h), mat, uv);
+            }
+
+            // Pilaster ribs standing proud of each face.
             for (int i = 0; i <= 6; i++)
             {
-                float u = MathX.Lerp(-TowerHalf, TowerHalf, i / 6f);
-                foreach (int sx in new[] { -1, 1 })
-                    b.Decor(new Vector3(sx * (TowerHalf + Wall) - sx * 0.1f, DeckY, MathF.Min(innerFace, outerFace) + (u + TowerHalf) * 0f + u * 0f),
-                            new Vector3(sx * (TowerHalf + Wall) + sx * 0.5f, TowerTop, MathF.Max(innerFace, outerFace)), teamMat, 0.55f);
-                b.Decor(new Vector3(u - 0.42f, DeckY, MathF.Min(outerFace, outerFace + Wall * sign) - 0.5f),
-                        new Vector3(u + 0.42f, TowerTop, MathF.Max(outerFace, outerFace + Wall * sign) + 0.5f), MatId.Trim, 1.4f);
-                b.Decor(new Vector3(u - 0.42f, DeckY, MathF.Min(innerFace, innerFace - Wall * sign) - 0.5f),
-                        new Vector3(u + 0.42f, TowerTop * 0.42f, MathF.Max(innerFace, innerFace - Wall * sign) + 0.5f), MatId.Trim, 1.4f);
-            }
-            for (int i = 0; i <= 5; i++)
-            {
-                float v = MathX.Lerp(-TowerHalf, TowerHalf, i / 5f);
+                float u = MathX.Lerp(-TowerHalf + 1f, TowerHalf - 1f, i / 6f);
                 foreach (int sz in new[] { -1, 1 })
-                    b.Decor(new Vector3(-TowerHalf - Wall - 0.5f, DeckY, z + sz * TowerHalf + v * 0f),
-                            new Vector3(TowerHalf + Wall + 0.5f, TowerTop, z + sz * TowerHalf), MatId.Trim, 1.4f);
-                b.Decor(new Vector3(-TowerHalf - Wall - 0.5f, DeckY, z + v - 0.42f),
-                        new Vector3(-TowerHalf - Wall + 0.1f, TowerTop, z + v + 0.42f), MatId.Trim, 1.4f);
-                b.Decor(new Vector3(TowerHalf + Wall - 0.1f, DeckY, z + v - 0.42f),
-                        new Vector3(TowerHalf + Wall + 0.5f, TowerTop, z + v + 0.42f), MatId.Trim, 1.4f);
+                    b.Decor(new Vector3(u - 0.42f, DeckY, z + sz * (TowerHalf + Wall) - sz * 0.1f),
+                            new Vector3(u + 0.42f, TowerTop, z + sz * (TowerHalf + Wall) + sz * 0.5f), MatId.Trim, 1.4f);
+                foreach (int sx in new[] { -1, 1 })
+                    b.Decor(new Vector3(sx * (TowerHalf + Wall) - sx * 0.1f, DeckY, z + u - 0.42f),
+                            new Vector3(sx * (TowerHalf + Wall) + sx * 0.5f, TowerTop, z + u + 0.42f), MatId.Trim, 1.4f);
             }
-            // String courses at three heights and a corbelled cap.
+            // String courses at three heights, then a corbelled cap over the parapet.
             foreach (float bandY in new[] { TowerTop * 0.30f, TowerTop * 0.58f, TowerTop * 0.82f })
                 for (int step = 0; step < 2; step++)
-                {
-                    float o = 0.55f + step * 0.28f;
-                    float y0 = bandY + step * 0.34f;
-                    b.Decor(new Vector3(-TowerHalf - Wall - o, y0, z - TowerHalf - Wall - o),
-                            new Vector3(TowerHalf + Wall + o, y0 + 0.34f, z + TowerHalf + Wall + o), MatId.Trim, 1.5f);
-                }
+                    Course(bandY + step * 0.34f, bandY + step * 0.34f + 0.34f, 0.55f + step * 0.28f,
+                        MatId.Trim, 1.5f, 1.1f);
             for (int step = 0; step < 3; step++)
             {
                 float o = 0.4f + step * 0.45f;
@@ -144,6 +173,73 @@ public static partial class Maps
             foreach (float bx in new[] { -6.5f, 6.5f })
                 Banner(b, new Vector3(bx, TowerTop * 0.80f, innerFace - Wall * sign * 1.4f), 3.4f, 11f, 1, teamMat);
             b.AddLight(new Vector3(0f, TowerTop * 0.62f, innerFace - Wall * sign * 2f), teamColor * 1.4f, 26f, 4f);
+
+            // --- the silhouette from the official map ---
+            // A plain rectangular block is the one thing these towers are not. The original reads
+            // as a battered obelisk: the shaft steps inward as it rises, breaks out into a flared
+            // crown near the top with team-coloured panels hung off it on brackets, and finishes
+            // in a tall thin spire that is most of the map's skyline. All decoration — the solid
+            // shell underneath is untouched, so the routes through the towers are exactly as they
+            // were, which is what keeps the teleporters and the nav graph valid.
+            // Battered shaft: six courses stepping inward, each with a shadow reveal at its base.
+            for (int step = 0; step < 6; step++)
+            {
+                float t0 = step / 6f, t1 = (step + 1) / 6f;
+                float y0 = MathX.Lerp(DeckY, TowerTop, t0);
+                float y1 = MathX.Lerp(DeckY, TowerTop, t1);
+                float out0 = MathX.Lerp(2.6f, 0.15f, t0);
+                Course(y0, y1 - 0.5f, out0, teamMat, 0.6f);
+                Course(y1 - 0.5f, y1, out0 + 0.35f, MatId.Trim, 1.3f);
+            }
+
+            // Round ports punched down the face that looks along the map, as the original has.
+            for (int i = 0; i < 3; i++)
+            {
+                float py = MathX.Lerp(TowerTop * 0.30f, TowerTop * 0.74f, i / 2f);
+                float pz = innerFace - Wall * sign * 1.2f;
+                b.Torus(new Vector3(0f, py, pz), 2.1f, 0.34f, MatId.Trim, 20, 8);
+                b.Torus(new Vector3(0f, py, pz), 1.55f, 0.16f, MatId.Trim, 18, 6);
+                b.Decor(new Vector3(-1.5f, py - 1.5f, pz - 0.18f), new Vector3(1.5f, py + 1.5f, pz + 0.18f),
+                    MatId.EnergyPanel, 0.9f);
+                b.AddLight(new Vector3(0f, py, pz - sign * 1.5f), teamColor * 1.1f, 15f, 2.6f);
+            }
+
+            // Flared crown: three corbelled courses breaking out well past the shaft. Above the
+            // roof deck, so these can be solid without intruding on anything.
+            for (int step = 0; step < 3; step++)
+            {
+                float o = 1.6f + step * 1.5f;
+                float y0 = TowerTop + 3.6f + step * 1.5f;
+                b.Decor(towerMid + new Vector3(-TowerHalf - Wall - o, y0, -TowerHalf - Wall - o),
+                        towerMid + new Vector3(TowerHalf + Wall + o, y0 + 1.5f, TowerHalf + Wall + o),
+                        step == 1 ? MatId.Trim : teamMat, 1.2f);
+            }
+            // Team panels hung off the crown on angled brackets — the strongest colour on the map.
+            for (int face = 0; face < 4; face++)
+            {
+                float a = face * MathX.HalfPi;
+                Vector3 dir = new(MathF.Sin(a), 0f, MathF.Cos(a));
+                Vector3 tan = new(dir.Z, 0f, -dir.X);
+                Vector3 root = towerMid + new Vector3(0f, TowerTop + 4.4f, 0f) + dir * (TowerHalf + Wall + 1.4f);
+                Vector3 tip = towerMid + new Vector3(0f, TowerTop + 8.6f, 0f) + dir * (TowerHalf + Wall + 6.4f);
+                foreach (float e in new[] { -1f, 1f })
+                    b.DecorBeam(root + tan * (e * 4.6f), tip + tan * (e * 5.8f), 0.30f, 0.30f, MatId.Trim, 1.3f);
+                b.DecorBeam(root, tip, 5.0f, 0.16f, teamMat, 0.9f);
+                b.DecorBeam(root + new Vector3(0f, 0.5f, 0f), tip + new Vector3(0f, 0.5f, 0f), 3.4f, 0.10f,
+                    MatId.EnergyPanel, 0.9f);
+            }
+
+            // The spire: a tall tapered needle, the thing you navigate by from anywhere on the map.
+            for (int step = 0; step < 9; step++)
+            {
+                float t0 = step / 9f, t1 = (step + 1) / 9f;
+                float y0 = MathX.Lerp(TowerTop + 8.2f, TowerTop + 34f, t0);
+                float y1 = MathX.Lerp(TowerTop + 8.2f, TowerTop + 34f, t1);
+                float r0 = MathX.Lerp(5.2f, 0.30f, t0 * t0 * 0.55f + t0 * 0.45f);
+                b.Decor(towerMid + new Vector3(-r0, y0, -r0), towerMid + new Vector3(r0, y1, r0),
+                    step % 3 == 1 ? MatId.Trim : teamMat, 0.7f);
+            }
+            b.AddLight(towerMid + new Vector3(0f, TowerTop + 34f, 0f), teamColor * 1.6f, 30f, 5f, 1.5f, 0.35f);
 
             float f0 = MathF.Min(innerFace, innerFace - Wall * sign);
             float f1 = MathF.Max(innerFace, innerFace - Wall * sign);
@@ -294,6 +390,38 @@ public static partial class Maps
             b.AddJumpPad(new Vector3(i * 16f, 0.1f, 0f), new Vector3(i * 7.5f, BridgeY + 1.6f, 0f),
                 new Vector3(0.35f, 0.8f, 1f));
         }
+        // --- the two stepped pyramids out on the strip ---
+        // These are in the official map's silhouette and were the one thing left out of the first
+        // pass, because dropping solid geometry into a lane is what cost ONS-Dria every node
+        // capture earlier. Three things make them safe here. They are mirrored, because a single
+        // one on a CTF map is a balance bug rather than a landmark. They are stepped in 0.5 m
+        // rises — exactly what `--collisiontest` certifies as walkable without jumping — so each
+        // one is a route up, not a wall across. And at 6 m they pass under the bridge decks at
+        // 8.5 m and leave 14 m of open strip either side.
+        foreach (float pz in new[] { -34f, 34f })
+        {
+            const int Steps = 12;
+            const float BaseHalf = 8f, TopHalf = 1.2f, Rise = 0.5f;
+            for (int i = 0; i < Steps; i++)
+            {
+                float half = MathX.Lerp(BaseHalf, TopHalf, i / (float)Steps);
+                b.Solid(new Vector3(-half, i * Rise, pz - half),
+                        new Vector3(half, (i + 1) * Rise, pz + half),
+                        i % 3 == 2 ? MatId.Trim : MatId.Rock, true, 0.7f);
+            }
+            // Apex marker, and a lit face on the side that looks down the map.
+            float top = Steps * Rise;
+            b.Decor(new Vector3(-TopHalf * 0.7f, top, pz - TopHalf * 0.7f),
+                    new Vector3(TopHalf * 0.7f, top + 1.6f, pz + TopHalf * 0.7f), MatId.Trim, 1.2f);
+            b.Decor(new Vector3(-0.35f, top + 1.6f, pz - 0.35f),
+                    new Vector3(0.35f, top + 3.4f, pz + 0.35f), MatId.EnergyPanel, 0.9f);
+            b.AddLight(new Vector3(0f, top + 3.2f, pz), new Vector3(0.55f, 0.75f, 1f), 22f, 4f);
+            // Corner ribs down all four arrises, so it reads as built rather than piled.
+            foreach (var (sx, sz) in new[] { (-1f, -1f), (1f, -1f), (-1f, 1f), (1f, 1f) })
+                b.DecorBeam(new Vector3(sx * BaseHalf, 0.1f, pz + sz * BaseHalf),
+                            new Vector3(sx * TopHalf, top, pz + sz * TopHalf), 0.30f, 0.30f, MatId.Trim, 1.2f);
+        }
+
         // The middle holds exactly one thing: the big keg at the centre of the asteroid. No
         // weapons, no armour, no vials. Crossing it with nothing to pick up on the way, under
         // fire from two towers, is the entire map — an earlier pass had a Redeemer, a shield

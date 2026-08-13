@@ -34,6 +34,12 @@ param(
 )
 
 $ErrorActionPreference = 'Stop'
+# The game writes to stderr for things that are not failures — OpenAL in particular reports
+# device-init warnings on machines with no sound card or a contended one. Under PowerShell 7.3+
+# native stderr is promoted to a terminating error, which combined with 'Stop' above aborts the
+# whole 36-map suite on the first such line: one warning on map 1 and the other 35 never run.
+# Native exit codes are what this script actually checks, so opt that behaviour out.
+$PSNativeCommandUseErrorActionPreference = $false
 $repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
 $project = Join-Path $repoRoot 'src\Unreal99\Unreal99.csproj'
 $game = Join-Path $repoRoot 'src\Unreal99\bin\Release\net10.0\Unreal99.dll'
@@ -100,8 +106,17 @@ try {
         do {
             $attempt++
             if ($attempt -gt 1) { Start-Sleep -Seconds 3 }
+            # '2>&1' turns every stderr line the game writes into an ErrorRecord in this pipeline,
+            # and the script-wide 'Stop' preference makes the first one terminate the whole suite.
+            # The game writes to stderr for things that are not failures — OpenAL device-init
+            # warnings, driver chatter — so a single warning on an early map silently cost the
+            # remaining maps their run. Exit codes and the TRAVERSAL_RESULT line are what this
+            # script actually judges on, so stderr is demoted to output for the duration of the call.
+            $previousActionPreference = $ErrorActionPreference
+            $ErrorActionPreference = 'Continue'
             $output = @(& dotnet @arguments 2>&1 | Tee-Object -FilePath $log)
             $processExit = $LASTEXITCODE
+            $ErrorActionPreference = $previousActionPreference
             $resultLine = $output | Where-Object { "$_".StartsWith('TRAVERSAL_RESULT ') } |
                 Select-Object -Last 1
             $joinedOutput = $output -join "`n"

@@ -97,6 +97,13 @@ public sealed class WeaponDef
     public float FpScale = 0.82f;
     public Vector3 MuzzleLocal = new(0, 0, -0.6f);
     public bool SpinUp;
+    /// <summary>
+    /// Fired with both hands, so the first-person view draws a supporting left hand on the
+    /// fore-end. Only the sidearms and the one-handed specials go without: a Flak Cannon or a
+    /// Rocket Launcher floating in front of the camera on nothing is the single clearest tell
+    /// that a view model is a prop rather than something a person is holding.
+    /// </summary>
+    public bool TwoHanded = true;
 }
 
 public static class Weapons
@@ -107,7 +114,7 @@ public static class Weapons
     {
         All[(int)WeaponKind.ImpactHammer] = new WeaponDef
         {
-            Kind = WeaponKind.ImpactHammer,
+            Kind = WeaponKind.ImpactHammer, TwoHanded = false,
             Name = GameTypes.WeaponName(WeaponKind.ImpactHammer),
             Ammo = AmmoKind.None,
             MaxAmmo = 0,
@@ -133,7 +140,7 @@ public static class Weapons
 
         All[(int)WeaponKind.Enforcer] = new WeaponDef
         {
-            Kind = WeaponKind.Enforcer,
+            Kind = WeaponKind.Enforcer, TwoHanded = false,
             Name = GameTypes.WeaponName(WeaponKind.Enforcer),
             Ammo = AmmoKind.Bullets,
             MaxAmmo = 99, PickupAmmo = 25, StartingAmmo = 40,
@@ -232,7 +239,7 @@ public static class Weapons
 
         All[(int)WeaponKind.Ripper] = new WeaponDef
         {
-            Kind = WeaponKind.Ripper,
+            Kind = WeaponKind.Ripper, TwoHanded = false,
             Name = GameTypes.WeaponName(WeaponKind.Ripper),
             Ammo = AmmoKind.Blades,
             MaxAmmo = 100, PickupAmmo = 25,
@@ -394,7 +401,7 @@ public static class Weapons
         // raises a shield that eats incoming fire instead of shoving you around.
         All[(int)WeaponKind.ShieldGun] = new WeaponDef
         {
-            Kind = WeaponKind.ShieldGun,
+            Kind = WeaponKind.ShieldGun, TwoHanded = false,
             Name = GameTypes.WeaponName(WeaponKind.ShieldGun),
             Ammo = AmmoKind.None,
             MaxAmmo = 0,
@@ -638,7 +645,7 @@ public static class Weapons
         // them, which is the reason it is a weapon and not a movement key.
         All[(int)WeaponKind.Translocator] = new WeaponDef
         {
-            Kind = WeaponKind.Translocator,
+            Kind = WeaponKind.Translocator, TwoHanded = false,
             Name = GameTypes.WeaponName(WeaponKind.Translocator),
             Ammo = AmmoKind.TranslocatorCharge,
             MaxAmmo = 1, PickupAmmo = 1, StartingAmmo = 1,
@@ -714,7 +721,7 @@ public static class Weapons
         // a team-mate, and that is the whole weapon.
         All[(int)WeaponKind.BallLauncher] = new WeaponDef
         {
-            Kind = WeaponKind.BallLauncher,
+            Kind = WeaponKind.BallLauncher, TwoHanded = false,
             Name = GameTypes.WeaponName(WeaponKind.BallLauncher),
             Ammo = AmmoKind.None,
             MaxAmmo = 0,
@@ -763,7 +770,7 @@ public static class Weapons
         WeaponKind.SuperShockRifle, WeaponKind.BallLauncher,
     ];
 
-    public const int MaxHudSlots = 11;
+    public const int MaxHudSlots = 10;
 
     /// <summary>Related weapons may share one numeric slot when an arena contains both versions.</summary>
     private static readonly WeaponKind[][] HudFamilies =
@@ -777,8 +784,10 @@ public static class Weapons
         [WeaponKind.Minigun],
         [WeaponKind.FlakCannon, WeaponKind.GrenadeLauncher],
         [WeaponKind.RocketLauncher, WeaponKind.Avril],
-        [WeaponKind.SniperRifle, WeaponKind.LightningGun],
-        [WeaponKind.Redeemer, WeaponKind.IonPainter, WeaponKind.TargetPainter, WeaponKind.BallLauncher],
+        // Precision and limited-use objective/super weapons share key 0. A map can contain both,
+        // and repeated presses cycle the usable weapons in the family, so none is hidden.
+        [WeaponKind.SniperRifle, WeaponKind.LightningGun, WeaponKind.Redeemer,
+            WeaponKind.IonPainter, WeaponKind.TargetPainter, WeaponKind.BallLauncher],
     ];
 
     /// <summary>
@@ -810,18 +819,16 @@ public static class Weapons
             .Where(slot => slot.Length > 0).ToArray();
     }
 
-    /// <summary>Keys 1–9 select slots 1–9; 0 selects slot 10 and double-0 selects slot 11.</summary>
-    public static int MapSlotForBinding(int zeroBasedBinding, bool doubleTap)
+    /// <summary>Keys 1–9 select slots 1–9 and 0 selects slot 10.</summary>
+    public static int MapSlotForBinding(int zeroBasedBinding)
     {
-        if (zeroBasedBinding < 0 || zeroBasedBinding > 9) return -1;
-        if (zeroBasedBinding < 9) return zeroBasedBinding;
-        return doubleTap ? 10 : 9;
+        return zeroBasedBinding is >= 0 and < MaxHudSlots ? zeroBasedBinding : -1;
     }
 
     public static WeaponKind? WeaponForMapBinding(Pawn pawn, IReadOnlyList<WeaponKind[]> slots,
-        int zeroBasedBinding, bool doubleTap)
+        int zeroBasedBinding)
     {
-        int slot = MapSlotForBinding(zeroBasedBinding, doubleTap);
+        int slot = MapSlotForBinding(zeroBasedBinding);
         if (slot < 0 || slot >= slots.Count) return null;
         WeaponKind[] candidates = slots[slot];
         WeaponKind current = pawn.PendingWeapon != WeaponKind.Count ? pawn.PendingWeapon : pawn.Weapon;
@@ -841,6 +848,7 @@ public static class Weapons
     {
         bool pass = true;
         int largest = 0;
+        var largestMaps = new List<string>();
         for (int i = 0; i < (int)MapId.Count; i++)
         {
             MapId id = (MapId)i;
@@ -853,7 +861,12 @@ public static class Weapons
                 : Maps.SupportsCtf(id) ? GameModeKind.CaptureTheFlag
                 : GameModeKind.Deathmatch;
             WeaponKind[][] slots = MapWeaponSlots(level, mode);
-            largest = Math.Max(largest, slots.Length);
+            if (slots.Length > largest)
+            {
+                largest = slots.Length;
+                largestMaps.Clear();
+            }
+            if (slots.Length == largest) largestMaps.Add($"{(int)id}:{Maps.Name(id)}");
             var expected = new HashSet<WeaponKind>(StartingWeapons);
             foreach (PickupPlacement pickup in level.Pickups)
             {
@@ -876,12 +889,13 @@ public static class Weapons
         var pawn = new Pawn();
         for (int i = 0; i < (int)WeaponKind.Count; i++) pawn.HasWeapon[i] = true;
         for (int i = 0; i < pawn.Ammo.Length; i++) pawn.Ammo[i] = 999;
-        WeaponKind[][] sample = CycleOrder.Take(11).Select(weapon => new[] { weapon }).ToArray();
-        pass &= WeaponForMapBinding(pawn, sample, 0, false) == sample[0][0]
-            && WeaponForMapBinding(pawn, sample, 9, false) == sample[9][0]
-            && WeaponForMapBinding(pawn, sample, 9, true) == sample[10][0];
-        Console.WriteLine($"逐地圖武器槽（最大 {largest}/{MaxHudSlots}，0 鍵雙擊第 11 槽）: " +
+        WeaponKind[][] sample = CycleOrder.Take(MaxHudSlots).Select(weapon => new[] { weapon }).ToArray();
+        pass &= WeaponForMapBinding(pawn, sample, 0) == sample[0][0]
+            && WeaponForMapBinding(pawn, sample, 9) == sample[9][0]
+            && MapSlotForBinding(10) == -1;
+        Console.WriteLine($"逐地圖武器槽（最大 {largest}/{MaxHudSlots}，數字鍵 1～0）: " +
                           $"{(pass ? "通過" : "失敗")}");
+        Console.WriteLine($"最大武器槽地圖: {string.Join("、", largestMaps)}");
         return pass ? 0 : 1;
     }
 

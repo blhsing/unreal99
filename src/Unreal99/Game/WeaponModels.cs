@@ -55,6 +55,56 @@ public sealed class WeaponModels : IDisposable
         return indices.Length / 3;
     }
 
+    private Mesh _handMesh;
+    private MeshSection[] _handSections = [];
+
+    /// <summary>The supporting left hand, shared by every two-handed weapon.</summary>
+    public Mesh HandMesh => _handMesh;
+    public MeshSection[] HandSections => _handSections;
+
+    private readonly Vector3[] _supportGrip = new Vector3[(int)WeaponKind.Count];
+    private readonly float[] _supportScale = new float[(int)WeaponKind.Count];
+
+    /// <summary>
+    /// Uniform scale for the support hand on this weapon. The hand is modelled closing on a
+    /// barrel of one nominal girth; a Flak Cannon's fore-end is far fatter than a Sniper Rifle's,
+    /// and a fixed-size hand would either float off the slim ones or sink into the fat ones.
+    /// Scaling uniformly keeps the hand undistorted and reads as a hand on a bigger gun.
+    /// </summary>
+    public float SupportScaleFor(WeaponKind k) => _supportScale[(int)k];
+
+    /// <summary>
+    /// Where the supporting hand closes on this weapon, in model space. Measured off the built
+    /// mesh rather than hand-tuned per weapon, so a weapon added later gets a correctly placed
+    /// hand for free — and measured from the cross-section at the fore-end rather than from the
+    /// whole-model box, which on a Flak Cannon is set by the drum and buries the hand in the body.
+    /// </summary>
+    public Vector3 SupportGripFor(WeaponKind k) => _supportGrip[(int)k];
+
+    /// <summary>
+    /// Finds the fore-end and measures how thick the weapon is there, so the hand can be centred
+    /// on the barrel and sized to it. The hand's fingers close around its own origin, so the grip
+    /// point is the centre of the weapon's cross-section rather than a point on its surface.
+    /// </summary>
+    private static (Vector3 Grip, float Scale) MeasureSupportGrip(MeshBuilder mb,
+        in (Vector3 Min, Vector3 Max) bounds)
+    {
+        const float NominalGirth = 0.052f;   // what BuildSupportHand closes around
+
+        // Models are built from the grip at the origin reaching forward along -Z.
+        float reach = MathF.Min(-bounds.Min.Z, 1.2f);
+        float z = -reach * 0.60f;
+        var (lo, hi) = mb.BoundsInSlab(z - 0.05f, z + 0.05f);
+        if (hi.X <= lo.X) return (new Vector3(0f, 0f, z), 1f);
+
+        // Width only. Many weapons carry a scope or a drum well above the barrel, and including
+        // height would hang the hand in mid-air beside the sight rather than on the fore-end.
+        float girth = MathF.Max((hi.X - lo.X) * 0.5f, 0.026f);
+        float centreY = MathF.Min((lo.Y + hi.Y) * 0.5f, lo.Y + girth);
+        return (new Vector3((lo.X + hi.X) * 0.5f, centreY, z),
+                MathX.Clamp(girth / NominalGirth, 0.85f, 1.35f));
+    }
+
     public WeaponModels(GL gl)
     {
         for (int i = 0; i < (int)WeaponKind.Count; i++)
@@ -64,10 +114,122 @@ public sealed class WeaponModels : IDisposable
             mb.RecalculateTangents();
             _bounds[i] = mb.Bounds();
             _hulls[i] = mb.SupportCloud();
+            (_supportGrip[i], _supportScale[i]) = MeasureSupportGrip(mb, _bounds[i]);
             var (v, ind, s) = mb.Build();
             _meshes[i] = Mesh.CreateStatic<Vertex>(gl, v, ind, VertexLayouts.Static);
             _sections[i] = s;
         }
+
+        var hand = new MeshBuilder { WorldUv = false, Material = (int)MatId.ArmorPlate };
+        BuildSupportHand(hand);
+        hand.RecalculateTangents();
+        var (hv, hi2, hs) = hand.Build();
+        _handMesh = Mesh.CreateStatic<Vertex>(gl, hv, hi2, VertexLayouts.Static);
+        _handSections = hs;
+    }
+
+    /// <summary>Triangle count of the shared support hand, without a GPU.</summary>
+    public static int SupportHandTriangleCount()
+    {
+        var mb = new MeshBuilder { WorldUv = false, Material = (int)MatId.ArmorPlate };
+        BuildSupportHand(mb);
+        var (_, indices, _) = mb.Build();
+        return indices.Length / 3;
+    }
+
+    /// <summary>
+    /// The bare left forearm and hand that steadies a two-handed weapon, modelled about the
+    /// fore-end it closes on: the barrel runs along Z and the arm comes up from below.
+    ///
+    /// Built to match the original's first-person art, which is worth stating because the obvious
+    /// guess is wrong. The original does not show a gloved fist wrapped over the top of the gun.
+    /// It shows a bare forearm rising steeply out of the bottom of the screen to meet the weapon
+    /// from underneath, with the hand itself mostly hidden behind the body of the gun — the arm is
+    /// the part that does the work of making the weapon look held. So the forearm is the hero
+    /// element here, the fingers only clear the near side, and none of it is armoured.
+    ///
+    /// Placement is the caller's job — see <see cref="SupportGripFor"/> and
+    /// <see cref="SupportScaleFor"/> — so this one mesh serves the whole arsenal.
+    /// </summary>
+    private static void BuildSupportHand(MeshBuilder mb)
+    {
+        // Everything is laid out on one circle about the grip axis. That is the whole trick: the
+        // first attempt put the palm on its own path below the barrel and started the fingers on a
+        // wrap arc, so on any weapon thicker than the palm was deep the palm sank into the body
+        // and left four fingers apparently floating in front of the gun, attached to nothing.
+        // Sharing a radius means the finger roots are always buried in the palm, whatever the
+        // weapon underneath is doing.
+        const float GripR = 0.055f;       // centreline radius of palm and fingers alike
+        const float PalmAngle = 3.93f;    // ~225 degrees: under the fore-end, near side
+        const float BackZ = 0.062f;       // wrist end of the palm
+        const float FrontZ = -0.076f;     // knuckle end
+
+        static Vector3 OnGrip(float angle, float radius, float z)
+            => new(MathF.Cos(angle) * radius, MathF.Sin(angle) * radius, z);
+
+        mb.Material = (int)MatId.ArmorPlate;
+
+        // --- palm: a slab lying along the fore-end, tangent to the grip circle ---
+        Vector3 palmBack = OnGrip(PalmAngle, GripR, BackZ);
+        Vector3 palmFront = OnGrip(PalmAngle, GripR, FrontZ);
+        Span<MeshBuilder.LoftStation> palm =
+        [
+            new(palmBack + new Vector3(0f, 0f, 0.026f), new Vector2(0.030f, 0.020f), PalmAngle),
+            new(palmBack, new Vector2(0.038f, 0.024f), PalmAngle),
+            new(Vector3.Lerp(palmBack, palmFront, 0.5f), new Vector2(0.043f, 0.026f), PalmAngle),
+            new(palmFront, new Vector2(0.040f, 0.024f), PalmAngle),
+            new(palmFront - new Vector3(0f, 0f, 0.020f), new Vector2(0.030f, 0.019f), PalmAngle),
+        ];
+        mb.AddLoft(Sections.Superellipse(1f, 1f, 2.6f, 14), palm, capStart: true, capEnd: true);
+
+        // --- forearm, rising out of the bottom of the frame to meet the wrist ---
+        Vector3 wrist = palmBack + new Vector3(0f, 0f, 0.020f);
+        Span<MeshBuilder.LoftStation> arm =
+        [
+            new(wrist + new Vector3(-0.088f, -0.345f, 0.196f), new Vector2(0.060f, 0.058f)),
+            new(wrist + new Vector3(-0.066f, -0.246f, 0.142f), new Vector2(0.058f, 0.055f)),
+            new(wrist + new Vector3(-0.044f, -0.152f, 0.090f), new Vector2(0.052f, 0.049f)),
+            new(wrist + new Vector3(-0.022f, -0.070f, 0.042f), new Vector2(0.044f, 0.042f)),
+            new(wrist, new Vector2(0.036f, 0.030f)),
+        ];
+        mb.AddLoft(Sections.Superellipse(1f, 1f, 2.6f, 16), arm, capStart: true, capEnd: false);
+
+        // --- four fingers, rooted in the palm and closing up the near flank to the crown ---
+        // The reference shows them silhouetted over the barrel rather than tucked underneath, so
+        // they sweep the short way round — up the side facing the camera — and stop at the top.
+        float[] fingerZ = [0.040f, 0.008f, -0.024f, -0.056f];
+        float[] fingerLength = [0.86f, 1f, 0.95f, 0.78f];
+        for (int f = 0; f < 4; f++)
+        {
+            // Start inside the palm slab, not at its surface, so the root is never exposed.
+            float start = PalmAngle + 0.16f;
+            float sweep = -(2.30f * fingerLength[f] + 0.16f);
+            const int Segments = 4;
+            Span<MeshBuilder.LoftStation> finger = stackalloc MeshBuilder.LoftStation[Segments + 1];
+            for (int i = 0; i <= Segments; i++)
+            {
+                float t = i / (float)Segments;
+                float taper = MathX.Lerp(0.0150f, 0.0100f, t);
+                finger[i] = new MeshBuilder.LoftStation(
+                    OnGrip(start + sweep * t, GripR, fingerZ[f]), new Vector2(taper, taper));
+            }
+            mb.AddLoft(Sections.Circle(1f, 10), finger, capStart: true, capEnd: true);
+
+            // Knuckle at the middle joint, so a finger reads as jointed rather than as a bent tube.
+            mb.AddTorus(OnGrip(start + sweep * 0.5f, GripR, fingerZ[f]), 0.0132f, 0.0040f, 10, 6);
+        }
+
+        // --- thumb, rooted in the palm and lying forward along the near side ---
+        float thumbAngle = PalmAngle - 0.34f;
+        Span<MeshBuilder.LoftStation> thumb =
+        [
+            new(OnGrip(PalmAngle, GripR, BackZ + 0.008f), new Vector2(0.0170f, 0.0170f)),
+            new(OnGrip(thumbAngle, GripR + 0.004f, BackZ - 0.036f), new Vector2(0.0158f, 0.0158f)),
+            new(OnGrip(thumbAngle - 0.16f, GripR + 0.008f, BackZ - 0.082f), new Vector2(0.0134f, 0.0134f)),
+            new(OnGrip(thumbAngle - 0.26f, GripR + 0.010f, BackZ - 0.118f), new Vector2(0.0104f, 0.0104f)),
+        ];
+        mb.AddLoft(Sections.Circle(1f, 10), thumb, capStart: true, capEnd: true);
+        mb.AddTorus(OnGrip(thumbAngle, GripR + 0.004f, BackZ - 0.036f), 0.0148f, 0.0040f, 10, 6);
     }
 
     // ================================================================ shared parts
