@@ -8,10 +8,10 @@ public static class Loc
 {
     // ---------------------------------------------------------------- application
     public const string GameTitle = "虛幻競技場 99";
-    public const string GameVersion = "1.0.1";
-    public const string GameVersionLabel = "版本 1.0.1";
+    public const string GameVersion = "1.0.0";
+    public const string GameVersionLabel = "版本 1.0.0";
     public const string GameSubtitle = "重製版 · C#/.NET 引擎";
-    public const string WindowTitle = "虛幻競技場 99 — 重製版 · 1.0.1";
+    public const string WindowTitle = "虛幻競技場 99 — 重製版 · 1.0.0";
     public const string Loading = "載入中";
     public const string GeneratingWorld = "產生場景中";
     public const string GeneratingTextures = "產生材質中";

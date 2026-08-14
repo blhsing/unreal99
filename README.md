@@ -15,7 +15,7 @@
 - [執行](#執行)
   - [圖形化安裝程式](#圖形化安裝程式)
   - [命令列安裝](#命令列安裝)
-  - [1.0.1 發行下載](#101-發行下載)
+  - [1.0.0 發行下載](#100-發行下載)
   - [命令列參數](#命令列參數)
 - [競技場](#競技場)
 - [支配佔領](#支配佔領)
@@ -98,17 +98,17 @@ artifacts\installer\Unreal99Installer.exe --help
 命令列與圖形介面使用相同的複製、驗證、安裝紀錄與捷徑邏輯。`--source <路徑>` 可讓自訂打包流程
 指定包含 `Unreal99.exe` 的 payload 目錄。
 
-### 1.0.1 發行下載
+### 1.0.0 發行下載
 
-[GitHub Release v1.0.1](https://github.com/blhsing/unreal99/releases/tag/v1.0.1) 提供兩種 Windows x64
+[GitHub Release v1.0.0](https://github.com/blhsing/unreal99/releases/tag/v1.0.0) 提供兩種 Windows x64
 下載與 SHA-256 校驗檔：
 
-- `Unreal99-1.0.1-Setup-win-x64.zip`：圖形化／命令列安裝程式及其 1.0.1 payload。
-- `Unreal99-1.0.1-win-x64.zip`：免安裝的可攜式遊戲文件。
+- `Unreal99-1.0.0-Setup-win-x64.zip`：圖形化／命令列安裝程式及其 1.0.0 payload。
+- `Unreal99-1.0.0-win-x64.zip`：免安裝的可攜式遊戲文件。
 - `SHA256SUMS.txt`：上述兩個 ZIP 的完整性校驗值。
 
 執行 `build-installer.ps1` 會在 `artifacts/release/` 同步重建這三個發行文件。遊戲視窗標題以及載入、
-選單、對戰與結果畫面會持續顯示「版本 1.0.1」，因此全螢幕中也能確認目前執行的版本。
+選單、對戰與結果畫面會持續顯示「版本 1.0.0」，因此全螢幕中也能確認目前執行的版本。
 
 ### 命令列參數
 

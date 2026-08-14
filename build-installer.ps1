@@ -1,7 +1,7 @@
 param(
     [string]$OutputDirectory = (Join-Path $PSScriptRoot "artifacts\installer"),
     [string]$ReleaseDirectory = (Join-Path $PSScriptRoot "artifacts\release"),
-    [string]$Version = "1.0.1"
+    [string]$Version = "1.0.0"
 )
 
 $ErrorActionPreference = "Stop"
