@@ -3,7 +3,9 @@
 # Most arenas are framed by the automatic fly-by orbit, which sizes itself from the spawn
 # points. Several defeat it: a one-room donut, a 46m vertical shaft, three rooftops 40m
 # apart, a long ship and an island in a lava sea cannot all be framed by one orbit rule, so
-# those are aimed by hand with --flycam <radius> <height> <angleDeg> <lookAtHeight>.
+# those are aimed by hand with --flycam <radius> <height> <angleDeg> <lookAtHeight>. Vehicle
+# arenas use --vehicleflycam <angleDeg>, which centres the densest parked group before anyone
+# can drive away, so the actual vehicles remain legible in the gallery rather than tiny dots.
 #
 # Domination arenas are captured in Domination (--mode 5) rather than deathmatch, so the
 # control points appear in their held colours instead of neutral grey — a DOM map photographed
@@ -19,7 +21,7 @@
 # want after adding or restyling a single arena — a full run is roughly twenty minutes. A major
 # geometry or polygon-density pass requires omitting -Maps so every gallery image is refreshed.
 
-param([int[]]$Maps, [switch]$ConvertOnly)
+param([string[]]$Maps, [switch]$ConvertOnly)
 
 $ErrorActionPreference = 'Stop'
 $repo = Split-Path -Parent $PSScriptRoot
@@ -40,11 +42,13 @@ $last = $names.Count - 1
 
 # Arenas the automatic orbit cannot frame, with the camera authored by hand.
 $authored = @{
-     8 = '30 10 250 3'      # Phobos       — inside a habitat block, looking across it
+     3 = '30 14 45 3'      # Grinder      — above the arena rim, clear of the central platform underside
+     8 = '32 8 72 4'        # Phobos       — inside one habitat, looking past its reactor through the connector
+     9 = '42 24 0 7'        # Peak         — clear over the battlements, no foreground wall slab
     10 = '19 38 45 14'      # Liandri      — high in the shaft, looking down the glowing core
     11 = '78 64 90 42'      # Morpheus     — far enough out to hold all three rooftops
     12 = '40 24 30 6'       # HyperBlast   — along the ship's spine
-    15 = '46 24 90 18'      # Facing Worlds— down the split bridge at a tower's three openings
+    15 = '145 62 35 18'     # Facing Worlds— oblique wide shot holding both opposing towers
     16 = '58 36 45 4'       # Lava Giant   — above the island, both forts in frame
     # Heights here must stay under each arena's ceiling — 22 for Leadworks, 15 for Sesmar.
     # Overshooting puts the camera above the roof and photographs the ceiling from outside.
@@ -70,12 +74,12 @@ $authored = @{
     30 = '84 40 150 8'      # Serenity     — down the valley with the mine node in frame
     31 = '100 40 180 10'    # Avalanche    — from over the red base, straight down the mountain mouth
     32 = '78 34 210 8'      # Onyx Coast   — across the channel at the bridge node and the Necris base
-    33 = '74 32 215 8'      # Islander     — down the island spine, air-node mesa on the right
+    33 = '74 32 215 8'      # Islander     — fallback non-vehicle overview only
     # Both Bombing Run arenas are long and narrow, but shooting straight down the length hides
     # the one thing that makes them Bombing Run maps: the goal hoop. A three-quarter angle from
     # nearer one base puts a ring in frame with the midfield behind it.
-    34 = '58 26 150 4'      # Anubis       — over a courtyard at the hoop above its laser pit
-    35 = '66 30 145 6'      # Colossus     — across the rear base, hoop and jump pad in frame
+    34 = '45 34 180 6'      # Anubis       — full arena and red goal, clear of foreground slabs
+    35 = '48 36 180 7'      # Colossus     — symmetric lanes, ball and red goal all readable
 }
 
 # Domination arenas: shot in DOM so the control points show their held colours. The ONS and AS
@@ -88,8 +92,24 @@ $warFirst = 28
 # Bombing Run (--mode 9) is the only mode that spawns the ball at all.
 $brFirst  = 34
 
-# Which arenas to shoot this run. Everything by default.
-$targets = if ($Maps) { @($Maps | Where-Object { $_ -ge 0 -and $_ -le $last } | Sort-Object -Unique) }
+# Every arena that actually spawns vehicles. Angles are authored per arena so the parked group
+# reads against the map instead of being hidden by its own garage, tower or cliff.
+$vehicleCameras = @{
+    # value: angle, optionally followed by an explicit VehicleSpawn index
+    21 = '215 0'; 22 = '210 0'; 23 = '0 0'; 24 = '210 0'
+    25 = '160 0'; 27 = '90 0'
+    # Avalanche is viewed across its blue vehicle cluster so the base shelter roof
+    # cannot become a foreground slab that hides both the arena and its vehicles.
+    28 = '215 0'; 29 = '0 3'; 30 = '90 0'; 31 = '90 4'; 32 = '210 0'; 33 = '0 0'
+}
+
+# Which arenas to shoot this run. Accept both PowerShell arrays and the comma-delimited string
+# that `pwsh -File ... -Maps 15,21` supplies, so the documented examples behave identically.
+$requestedMaps = @($Maps | ForEach-Object { $_ -split ',' } | ForEach-Object {
+    $parsed = 0
+    if ([int]::TryParse($_.Trim(), [ref]$parsed)) { $parsed }
+})
+$targets = if ($requestedMaps) { @($requestedMaps | Where-Object { $_ -ge 0 -and $_ -le $last } | Sort-Object -Unique) }
            else       { 0..$last }
 if (-not $targets) { throw "No valid arena ids in -Maps (range is 0..$last)." }
 
@@ -102,16 +122,23 @@ if (-not $ConvertOnly) {
         # require a fresh non-empty file afterward, so the pipeline cannot silently publish a
         # stale image when another instance is still holding the single-instance mutex.
         if ([System.IO.File]::Exists($png)) { [System.IO.File]::Delete($png) }
-        $args = @('--windowed', '--nohud', '--demo', '--players', '1', '--bots', '6', '--map', $i)
+        $vehicleShot = $vehicleCameras.ContainsKey($i)
+        # Vehicle shots use an idle human and no bots: all production vehicles have spawned, but
+        # none can leave its pad before the shutter. Other objective modes retain the demo bots
+        # so their held objectives are photographed in team colours.
+        $args = @('--windowed', '--nohud', '--players', '1', '--map', $i)
+        if ($vehicleShot) { $args += @('--startmatch', '--nodemo', '--bots', '0') }
+        else              { $args += @('--demo', '--bots', '6') }
         # Let the bots hold points for a while before the shutter, or every point is still neutral.
         if     ($i -ge $brFirst)  { $args += @('--mode', 9) }
         elseif ($i -ge $warFirst) { $args += @('--mode', 8) }
         elseif ($i -ge $asFirst)  { $args += @('--mode', 7) }
         elseif ($i -ge $onsFirst) { $args += @('--mode', 6) }
         elseif ($i -ge $domFirst) { $args += @('--mode', 5) }
-        $frames = if ($i -ge $domFirst) { 1500 } else { 400 }
-        if ($authored.ContainsKey($i)) { $args += @('--flycam') + $authored[$i].Split(' ') + @('--autoshot', $frames, $png) }
-        else                          { $args += @('--flyby', '--autoshot', 460, $png) }
+        $frames = if ($vehicleShot) { 400 } elseif ($i -ge $domFirst) { 1500 } else { 400 }
+        if ($vehicleShot)                  { $args += @('--vehicleflycam') + $vehicleCameras[$i].Split(' ') + @('--autoshot', $frames, $png) }
+        elseif ($authored.ContainsKey($i)) { $args += @('--flycam') + $authored[$i].Split(' ') + @('--autoshot', $frames, $png) }
+        else                               { $args += @('--flyby', '--autoshot', 460, $png) }
         & dotnet run --project $proj -c Release --no-build -- @args | Select-Object -Last 1
         if (-not [System.IO.File]::Exists($png) -or (Get-Item -LiteralPath $png).Length -lt 1024) {
             throw "Arena $i did not produce a fresh screenshot. Close any running game instance and retry."

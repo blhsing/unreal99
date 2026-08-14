@@ -89,6 +89,15 @@ public sealed class App : IDisposable
     private readonly Dictionary<int, int> _autoShotLastShotsFired = new();
     private readonly Dictionary<int, TraversalMetrics> _traversalMetrics = new();
     private bool _traversalTest;
+    private bool _waterEscapeTest;
+    private bool _waterEscapeInjected;
+    private bool _waterEscapeObservedWet;
+    private bool _waterEscapeSucceeded;
+    private bool _waterEscapeBreathExpired;
+    private bool _waterEscapeWasWet;
+    private int _waterEscapeReentriesAfterEscape;
+    private float _waterEscapeElapsed;
+    private float _waterEscapeSuccessTime;
     private bool _autoStartMatch;
     private int _loadSlotAtBoot = -1;
     private int _forceWeapon = -1;
@@ -114,6 +123,8 @@ public sealed class App : IDisposable
     private int _weaponFootageFrame;
     private int _weaponFootageCaptured;
     private bool _flyManual;
+    private bool _flyVehicleOverview;
+    private int _flyVehicleAnchor;
     private float _flyRadius, _flyHeight, _flyAngleDeg, _flyLookY;
     private MenuScreen _bootMenuScreen = MenuScreen.Main;
     private readonly List<string> _pendingScreenshots = new();
@@ -150,6 +161,7 @@ public sealed class App : IDisposable
         public int MaxWindowReversals;
         public int OscillationEpisodes;
         public bool WasOscillating;
+        public float PotentialOscillation;
         public Vector3 WorstPosition;
         public string WorstState = "";
         public int WorstGoalNode = -1;
@@ -242,9 +254,11 @@ public sealed class App : IDisposable
                     break;
                 case "--traversaltest" when i + 2 < args.Length:
                     // A deterministic, accelerated behavioral gate: one Godlike demo player
-                    // against Newbie opponents, with unlimited scoring/time so the requested
-                    // number of active-play frames always runs. Map and mode remain explicit so
-                    // the suite can exercise every arena in its intended ruleset.
+                    // against Newbie opponents, with unlimited menu score/time limits. A mode
+                    // with its own finite round structure (notably Assault) may still conclude;
+                    // the capture path finalizes that completed match instead of hanging on its
+                    // results screen. Map and mode remain explicit so the suite exercises every
+                    // arena under its intended rules.
                     _traversalTest = true;
                     _windowed = true;
                     _demoMode = true;
@@ -266,6 +280,11 @@ public sealed class App : IDisposable
                         "captures", "domination", "time", "respawn", "quality", "participantteams",
                         "botskilloverrides"]);
                     i += 2;
+                    break;
+                case "--waterescapetest":
+                    // Layered on --traversaltest: force the demo pawn onto Olden's moat floor
+                    // and require it to reach genuinely dry land before the run ends.
+                    _waterEscapeTest = true;
                     break;
                 case "--benchmark" when i + 2 < args.Length:
                     // Same deterministic demo match as the traversal gate, but at the quality a
@@ -409,6 +428,19 @@ public sealed class App : IDisposable
                     float.TryParse(args[i + 4], out _flyLookY);
                     i += 4;
                     break;
+                case "--vehicleflycam" when i + 1 < args.Length:
+                    // Documentation framing centred on the densest parked-vehicle group. This
+                    // keeps the arena recognizable while making the vehicles large enough to
+                    // read in the 960px gallery image.
+                    _flyby = true;
+                    _flyVehicleOverview = true;
+                    float.TryParse(args[i + 1], out _flyAngleDeg);
+                    // An optional spawn index selects a different parked cluster when the
+                    // automatically densest group lives under a roof or behind a structure.
+                    _flyVehicleAnchor = i + 2 < args.Length
+                        && int.TryParse(args[i + 2], out int vehicleAnchor) ? vehicleAnchor : -1;
+                    i += _flyVehicleAnchor >= 0 ? 2 : 1;
+                    break;
                 case "--inputtest":
                     _inputTest = true;
                     _windowed = true;
@@ -531,6 +563,13 @@ public sealed class App : IDisposable
                     _demoMode = true;
                     _autoStartMatch = true;
                     break;
+                case "--nodemo":
+                    // Capture/diagnostic sessions sometimes need a guaranteed idle local player
+                    // even when demo mode was enabled in persisted user settings.
+                    _demoMode = false;
+                    _menu.DemoMode = false;
+                    _cliOverrides.Add("demo");
+                    break;
                 case "--players" when i + 1 < args.Length:
                     _menu.LocalPlayers = MathX.Clamp(int.TryParse(args[i + 1], out int p) ? p : 1, 1, 4);
                     _cliOverrides.Add("players");
@@ -604,6 +643,19 @@ public sealed class App : IDisposable
                     i++;
                     break;
             }
+        }
+
+        if (_waterEscapeTest)
+        {
+            if (!_cliOverrides.Contains("map")) _menu.Map = MapId.Olden;
+            if (!_cliOverrides.Contains("mode"))
+                _menu.ModeKind = _menu.Map == MapId.Frigate
+                    ? GameModeKind.Assault : GameModeKind.Domination;
+            _menu.BotCount = 0;
+            // LoadUserSettings runs after argument parsing. Mark these defaults as command-line
+            // owned too, otherwise the last interactively selected map silently replaces Olden
+            // and the documented forced-water command tests the wrong arena.
+            _cliOverrides.UnionWith(["map", "mode", "bots"]);
         }
     }
 
@@ -1079,6 +1131,12 @@ public sealed class App : IDisposable
     private void SpawnFromSave(SaveGame save)
     {
         int localPlayers = MathX.Clamp(save.LocalPlayers, 1, 4);
+        // The restored world is authoritative. Keep diagnostics, HUD labels and any subsequent
+        // settings save aligned with it instead of retaining whichever setup-menu map happened
+        // to be selected before --loadslot was used.
+        _menu.Map = (MapId)MathX.Clamp(save.MapId, 0, (int)MapId.Count - 1);
+        _menu.ModeKind = (GameModeKind)MathX.Clamp(save.ModeKind, 0,
+            Enum.GetValues<GameModeKind>().Length - 1);
         ConfigureMatchDevices(localPlayers);
 
         SaveStore.Restore(save, _world, _level, MakePlayerController,
@@ -1512,6 +1570,7 @@ public sealed class App : IDisposable
             p0.PendingWeapon = WeaponKind.Count;
         }
         if (_menuTestPoint.HasValue) UpdateMenuPointerTest();
+        UpdateWaterEscapeSelfTest(dt);
         UpdateAutoShotMovement(dt);
         UpdateSettingsPersistence(dt);
         // The save's preview must come from a frame the world drew on its own; taking it here,
@@ -2434,7 +2493,56 @@ public sealed class App : IDisposable
             float radius = MathF.Min(MathX.Clamp(spread * 0.75f, 12f, 60f), MathF.Max(bound, 10f));
             float angle = _time * 0.18f;
             Vector3 target = centre;
-            if (_flyManual)
+            if (_flyVehicleOverview && _level.VehicleSpawns.Count > 0)
+            {
+                const float ClusterRadius = 38f;
+                int anchor = MathX.Clamp(_flyVehicleAnchor, 0, _level.VehicleSpawns.Count - 1);
+                int bestNeighbours = -1;
+                for (int v = 0; _flyVehicleAnchor < 0 && v < _level.VehicleSpawns.Count; v++)
+                {
+                    int neighbours = 0;
+                    Vector3 candidate = _level.VehicleSpawns[v].Position;
+                    for (int other = 0; other < _level.VehicleSpawns.Count; other++)
+                    {
+                        Vector3 delta = _level.VehicleSpawns[other].Position - candidate;
+                        if (new Vector2(delta.X, delta.Z).LengthSquared()
+                            <= ClusterRadius * ClusterRadius) neighbours++;
+                    }
+                    if (neighbours > bestNeighbours)
+                    {
+                        anchor = v;
+                        bestNeighbours = neighbours;
+                    }
+                }
+
+                Vector3 anchorPosition = _level.VehicleSpawns[anchor].Position;
+                Vector3 vehicleCentre = Vector3.Zero;
+                int clusterCount = 0;
+                foreach (VehicleSpawn spawn in _level.VehicleSpawns)
+                {
+                    Vector3 delta = spawn.Position - anchorPosition;
+                    if (new Vector2(delta.X, delta.Z).LengthSquared()
+                        > ClusterRadius * ClusterRadius) continue;
+                    vehicleCentre += spawn.Position;
+                    clusterCount++;
+                }
+                vehicleCentre /= Math.Max(1, clusterCount);
+
+                float clusterSpread = 0f;
+                foreach (VehicleSpawn spawn in _level.VehicleSpawns)
+                {
+                    Vector3 delta = spawn.Position - vehicleCentre;
+                    float horizontal = new Vector2(delta.X, delta.Z).Length();
+                    if (horizontal <= ClusterRadius) clusterSpread = MathF.Max(clusterSpread, horizontal);
+                }
+
+                centre = vehicleCentre;
+                target = vehicleCentre + new Vector3(0f, 1.4f, 0f);
+                radius = MathX.Clamp(22f + clusterSpread * 0.55f, 22f, 43f);
+                height = vehicleCentre.Y + MathX.Clamp(radius * 0.45f, 10f, 22f);
+                angle = _flyAngleDeg * MathX.Deg2Rad;
+            }
+            else if (_flyManual)
             {
                 centre = new Vector3(_level.Center.X, 0f, _level.Center.Z);
                 target = new Vector3(_level.Center.X, _flyLookY, _level.Center.Z);
@@ -2951,8 +3059,15 @@ public sealed class App : IDisposable
     private Vector3 _vehicleTestPrevious;
     private float _vehicleTestPath;
     private float _vehicleTestStartYaw;
+    private float _vehicleTestPreviousYaw;
+    private float _vehicleTestYawTravel;
+    private Vector3 _vehicleTestStartPosition;
+    private Vector3 _vehicleTestGoal;
     private readonly float[] _vehicleTestDistances = new float[(int)VehicleKind.Count];
     private readonly float[] _vehicleTestTurns = new float[(int)VehicleKind.Count];
+    private readonly float[] _vehicleTestDisplacements = new float[(int)VehicleKind.Count];
+    private readonly float[] _vehicleTestGoalGains = new float[(int)VehicleKind.Count];
+    private readonly float[] _vehicleTestYawDistances = new float[(int)VehicleKind.Count];
     private readonly bool[] _vehicleTestBoarded = new bool[(int)VehicleKind.Count];
     private readonly bool[] _vehicleTestFired = new bool[(int)VehicleKind.Count];
     private readonly bool[] _vehicleTestBotFired = new bool[(int)VehicleKind.Count];
@@ -2989,14 +3104,6 @@ public sealed class App : IDisposable
 
         if (_vehicleTestKind < 0 || _vehicleTestPhaseFrame >= PlayerFireFrames)
         {
-            if (_vehicleTestKind >= 0 && _vehicleUnderTest != null)
-            {
-                int finished = _vehicleTestKind;
-                _vehicleTestDistances[finished] = _vehicleTestPath;
-                _vehicleTestTurns[finished] = MathF.Abs(MathX.WrapAngle(
-                    _vehicleUnderTest.Yaw - _vehicleTestStartYaw));
-            }
-
             _vehicleTestKind++;
             if (_vehicleTestKind >= (int)VehicleKind.Count)
             {
@@ -3006,13 +3113,23 @@ public sealed class App : IDisposable
                 {
                     VehicleDef def = VehicleDef.Get((VehicleKind)k);
                     bool armed = def.Seats.Any(seat => seat.Armed);
+                    float physicalPathLimit = def.MaxSpeed * (DriveFrames / 60f) * 1.10f + 3f;
                     bool ok = _vehicleTestBoarded[k] && _vehicleTestDistances[k] > 3f
+                        && _vehicleTestDistances[k] <= physicalPathLimit
+                        && _vehicleTestDisplacements[k] > 3f
+                        && _vehicleTestGoalGains[k] > 2f
                         && _vehicleTestTurns[k] > 0.12f
+                        // A curving nav route can legitimately exceed one full turn. More than
+                        // two and a half complete rotations inside this three-second drive is a
+                        // spin; the net/gain requirements above separately reject circles.
+                        && _vehicleTestYawDistances[k] < MathF.Tau * 2.5f
                         && (!armed || (_vehicleTestBotFired[k] && _vehicleTestFired[k]));
                     if (ok) passed++;
                     Console.WriteLine($"VEHICLE_AI_CASE {def.Name} {(ok ? "PASS" : "FAIL")} " +
                         $"motion={def.Motion} boarded={_vehicleTestBoarded[k]} " +
-                        $"path={_vehicleTestDistances[k]:F2} turn={_vehicleTestTurns[k]:F3} " +
+                        $"path={_vehicleTestDistances[k]:F2}/{physicalPathLimit:F2} " +
+                        $"net={_vehicleTestDisplacements[k]:F2} gain={_vehicleTestGoalGains[k]:F2} " +
+                        $"turn={_vehicleTestTurns[k]:F3} yawPath={_vehicleTestYawDistances[k]:F3} " +
                         $"botFire={(!armed ? "N/A" : _vehicleTestBotFired[k])} " +
                         $"playerFire={(!armed ? "N/A" : _vehicleTestFired[k])}");
                 }
@@ -3039,12 +3156,16 @@ public sealed class App : IDisposable
 
             VehicleKind kind = (VehicleKind)_vehicleTestKind;
             VehicleDef definition = VehicleDef.Get(kind);
-            float y = definition.Motion == VehicleMotion.Air
-                ? 14f : definition.HalfExtents.Y + 0.25f;
+            float y = definition.Motion == VehicleMotion.Air ? 14f : 4f;
             // Torlan's first red objective is roughly 74 m from this clear base apron. That lies
             // beyond even Leviathan/SPMA's 55 m artillery hold, so heavy vehicles must approach
             // and turn before deploying instead of correctly parking at frame zero.
             Vector3 start = new(-108f, y, 0f);
+            if (definition.Motion != VehicleMotion.Air)
+            {
+                float floor = _world.Level.Collision.FloorHeight(start + MathX.Up * 30f, 100f);
+                if (!float.IsNaN(floor)) start.Y = floor + definition.HalfExtents.Y + 0.05f;
+            }
             var vehicle = new Vehicle { Id = _world.NextVehicleId++, SpawnTeam = Team.Red };
             vehicle.Configure(kind, start, 0f);
             vehicle.SpawnTeam = Team.Red;
@@ -3081,8 +3202,14 @@ public sealed class App : IDisposable
             _vehicleTestDriver.Health = 100f;
             _vehicleUnderTest = vehicle;
             _vehicleTestPrevious = vehicle.Position;
+            _vehicleTestStartPosition = vehicle.Position;
             _vehicleTestStartYaw = vehicle.Yaw;
+            _vehicleTestPreviousYaw = vehicle.Yaw;
+            _vehicleTestYawTravel = 0f;
             _vehicleTestPath = 0f;
+            int objective = _world.Onslaught.NextObjectiveFor(Team.Red, start);
+            _vehicleTestGoal = objective >= 0
+                ? _world.Onslaught.Nodes[objective].Position : _world.Level.Center;
             _vehicleTestKindFrame = 0;
             _vehicleTestPhaseFrame = -DriveFrames - BotFireFrames;
             return;
@@ -3090,10 +3217,13 @@ public sealed class App : IDisposable
 
         _vehicleTestKindFrame++;
         _vehicleTestPhaseFrame++;
-        if (_vehicleUnderTest != null)
+        if (_vehicleUnderTest != null && _vehicleTestPhaseFrame <= -BotFireFrames)
         {
             _vehicleTestPath += Vector3.Distance(_vehicleUnderTest.Position, _vehicleTestPrevious);
+            _vehicleTestYawTravel += MathF.Abs(MathX.WrapAngle(
+                _vehicleUnderTest.Yaw - _vehicleTestPreviousYaw));
             _vehicleTestPrevious = _vehicleUnderTest.Position;
+            _vehicleTestPreviousYaw = _vehicleUnderTest.Yaw;
         }
 
         // Finish each case in a genuinely armed seat. First the Godlike BotController has to
@@ -3102,6 +3232,16 @@ public sealed class App : IDisposable
         // a working vehicle weapon.
         if (_vehicleTestPhaseFrame == -BotFireFrames && _vehicleUnderTest != null)
         {
+            int finished = _vehicleTestKind;
+            _vehicleTestDistances[finished] = _vehicleTestPath;
+            _vehicleTestTurns[finished] = MathF.Abs(MathX.WrapAngle(
+                _vehicleUnderTest.Yaw - _vehicleTestStartYaw));
+            _vehicleTestDisplacements[finished] = Vector3.Distance(
+                _vehicleUnderTest.Position, _vehicleTestStartPosition);
+            _vehicleTestGoalGains[finished] = Vector3.Distance(
+                _vehicleTestStartPosition, _vehicleTestGoal) - Vector3.Distance(
+                _vehicleUnderTest.Position, _vehicleTestGoal);
+            _vehicleTestYawDistances[finished] = _vehicleTestYawTravel;
             Pawn pawn = _players[0].Pawn;
             for (int seat = 0; seat < _vehicleUnderTest.Occupants.Length; seat++)
                 if (_vehicleUnderTest.Occupants[seat] == pawn.Id) _vehicleUnderTest.Occupants[seat] = -1;
@@ -3463,6 +3603,61 @@ public sealed class App : IDisposable
     }
 
     /// <summary>
+    /// Proves Olden's pool exit under production physics and production bot input. A normal
+    /// traversal run can stay dry by luck; this test instead starts the demo pawn on the moat
+    /// floor, gives it a deliberately short breath reserve, and observes the transition from
+    /// water to dry ground.
+    /// </summary>
+    private void UpdateWaterEscapeSelfTest(float dt)
+    {
+        if (!_waterEscapeTest || _state != AppState.Playing || _world == null
+            || _world.ResumeCountdown > 0f || _world.Mode.State == MatchState.Warmup
+            || _viewPawnIds.Count == 0) return;
+
+        Pawn pawn = _world.FindPawn(_viewPawnIds[0]);
+        if (pawn == null) return;
+        if (!_waterEscapeInjected)
+        {
+            // Both injection sites are on flat flooded floor, clear of the authored exit. Olden
+            // must find one of its four moat slopes; Frigate must follow the long flooded route
+            // around the hull to its bilge ramp rather than turning toward the closer quay wall.
+            pawn.Position = _menu.Map == MapId.Frigate
+                ? new Vector3(-10f, -1.42f, 3f)
+                : new Vector3(10f, -5.32f, 9f);
+            pawn.Velocity = Vector3.Zero;
+            pawn.OnGround = false;
+            pawn.LastGroundPosition = pawn.Position;
+            pawn.Breath = _menu.Map == MapId.Frigate ? 18f : 8f;
+            pawn.Health = pawn.MaxHealth;
+            _waterEscapeInjected = true;
+            Console.WriteLine($"WATER_ESCAPE injected={pawn.Position}");
+            return;
+        }
+
+        _waterEscapeElapsed += dt;
+        _waterEscapeObservedWet |= pawn.InWater;
+        _waterEscapeBreathExpired |= pawn.Breath <= 0f;
+        if (_waterEscapeSucceeded && pawn.InWater && !_waterEscapeWasWet)
+        {
+            _waterEscapeReentriesAfterEscape++;
+            Console.WriteLine($"WATER_ESCAPE reentry={_waterEscapeReentriesAfterEscape} "
+                + $"position={pawn.Position} seconds={_waterEscapeElapsed:0.00}");
+        }
+        _waterEscapeWasWet = pawn.InWater;
+        if (_waterEscapeObservedWet && pawn.Alive && !pawn.InWater && pawn.OnGround
+            && pawn.Position.Y >= -3.10f && !_waterEscapeBreathExpired)
+        {
+            if (!_waterEscapeSucceeded)
+            {
+                _waterEscapeSuccessTime = _waterEscapeElapsed;
+                Console.WriteLine($"WATER_ESCAPE dry={pawn.Position} seconds={_waterEscapeElapsed:0.00} "
+                    + $"breath={pawn.Breath:0.00}");
+            }
+            _waterEscapeSucceeded = true;
+        }
+    }
+
+    /// <summary>
     /// Detects the failure that raw distance cannot: repeatedly traversing the same short line
     /// in opposite directions. A qualifying six-second window must have substantial movement,
     /// little end-to-end progress, a confined footprint, and several sharp reversals. Requiring
@@ -3484,6 +3679,7 @@ public sealed class App : IDisposable
         {
             metrics.Samples.Clear();
             metrics.CurrentOscillation = 0f;
+            metrics.PotentialOscillation = 0f;
             metrics.WasOscillating = false;
         }
         metrics.CurrentSteepDown = pawn.Pitch < -1.05f
@@ -3539,18 +3735,42 @@ public sealed class App : IDisposable
         bool activeLiftRoute = (_world.ControllerFor(pawn) as PlayerController)?.AutoPilot
             ?.DiagnosticActiveLiftBrush >= 0;
         BotController diagnosticBot = (_world.ControllerFor(pawn) as PlayerController)?.AutoPilot;
-        bool confinedOscillation = duration >= 5f && spatialExtent <= 6.5f && reversals >= 3;
+        // Combat strafing intentionally crosses the same short line and reverses as an enemy
+        // moves. It is not route pacing. Production navigation also exposes when it has already
+        // caught a route reversal and committed to an escape; clear the rolling window at that
+        // boundary so the escape turn itself cannot extend the failed route into a false episode.
+        if (diagnosticBot?.DiagnosticRouteRecoveryActive == true)
+        {
+            metrics.Samples.Clear();
+            metrics.CurrentOscillation = 0f;
+            metrics.PotentialOscillation = 0f;
+            metrics.WasOscillating = false;
+            return;
+        }
+        bool routeState = diagnosticBot?.DiagnosticState != BotState.Attack;
+        // The production watcher gets the first 2.4 seconds to correct a nascent two-point
+        // route reversal. A single qualifying 200 ms sample is not itself a sustained gameplay
+        // failure; the old gate nevertheless failed a whole run after just 0.4 seconds. Require
+        // consecutive evidence for the tightened early clause, while the five-second confined
+        // clause below still catches every long-lived loop independently.
+        bool confinedOscillation = routeState && duration >= 5f
+            && spatialExtent <= 6.5f && reversals >= 3;
         // Objective pacing is often a longer two-point shuttle: it can span most of a corridor,
         // so the old 6.5 m footprint silently accepted exactly the back-and-forth a player sees.
         // Keep the broader threshold scoped to an objective route to avoid classifying ordinary
         // combat strafing as a navigation failure.
-        bool objectivePacing = diagnosticBot?.DiagnosticObjectiveGoal == true
+        bool objectivePacing = routeState && diagnosticBot?.DiagnosticObjectiveGoal == true
             && ((duration >= 2.4f && path >= 4.5f && net <= 1.8f
                     && spatialExtent <= 4.8f && verticalExtent <= 3f && reversals >= 2)
                 || (duration >= 5f && horizontalExtent <= 14f && verticalExtent <= 3f && reversals >= 2
                     && path >= spatialExtent * 1.65f && net <= 3.5f));
         bool oscillating = !activeLiftRoute && path >= 4.5f
             && ((confinedOscillation && net <= 3.5f) || objectivePacing);
+        bool provisionalOscillation = oscillating && !confinedOscillation;
+        metrics.PotentialOscillation = provisionalOscillation
+            ? metrics.PotentialOscillation + sampleStep : 0f;
+        if (provisionalOscillation && metrics.PotentialOscillation < 1.0f)
+            oscillating = false;
 
         if (oscillating)
         {
@@ -3795,8 +4015,19 @@ public sealed class App : IDisposable
         }
 
         if (_autoShotFrames < 0) return;
-        if (_traversalTest && (_state != AppState.Playing || _world == null ||
-            _world.ResumeCountdown > 0f || _world.Mode.State == MatchState.Warmup)) return;
+        if (_traversalTest)
+        {
+            // During staged boot a GameWorld exists before its Mode has been loaded. Check the
+            // app state first so the automated capture never dereferences that half-built world.
+            if (_state is not (AppState.Playing or AppState.Results)) return;
+            if (_world == null || _world.Mode == null || _world.ResumeCountdown > 0f
+                || _world.Mode.State == MatchState.Warmup) return;
+            // Assault can legitimately finish both rounds before a long traversal budget. The
+            // old Playing-only guard then waited forever on Results. A completed match is already
+            // stronger mode-progress evidence, so finalize it on this frame.
+            if (_state == AppState.Results) _autoShotFrames = 1;
+            else if (_state != AppState.Playing) return;
+        }
         _autoShotFrames--;
         if (_autoShotFrames != 0) return;
 
@@ -3808,7 +4039,8 @@ public sealed class App : IDisposable
                           $"繪製呼叫 {_renderer?.DrawCallCount ?? 0} · 三角形 {_renderer?.TriangleCount ?? 0}");
         if (_world != null)
         {
-            Console.WriteLine($"環境陣亡: 深淵 {_world.VoidDeaths} · 摔落 {_world.FallDeaths} · 熔岩 {_world.LavaDeaths}");
+            Console.WriteLine($"環境陣亡: 深淵 {_world.VoidDeaths} · 摔落 {_world.FallDeaths} · " +
+                              $"熔岩 {_world.LavaDeaths} · 溺水 {_world.DrowningDeaths}");
             foreach (string detail in _world.EnvironmentalDeathDetails) Console.WriteLine($"環境陣亡明細: {detail}");
             if (Environment.GetEnvironmentVariable("UNREAL99_BOT_DEBUG") == "1")
                 WriteBotDiagnostics();
@@ -3979,28 +4211,45 @@ public sealed class App : IDisposable
             float mainSkill = mainBot?.Skill ?? -1f;
             float maxOpponentSkill = _world.Pawns.Where(p => p.PlayerIndex < 0)
                 .Select(p => (_world.ControllerFor(p) as BotController)?.Skill ?? 1f)
-                .DefaultIfEmpty(1f).Max();
+                .DefaultIfEmpty(_waterEscapeTest ? 0f : 1f).Max();
 
             var failures = new List<string>();
             if (mainSkill < 0.999f) failures.Add($"main-skill={mainSkill:0.000}");
             if (maxOpponentSkill > 0.036f) failures.Add($"opponent-skill={maxOpponentSkill:0.000}");
-            if (travel < minimumTravel) failures.Add($"travel<{minimumTravel:0.0}");
-            if (metrics.VisitedCells.Count < minimumCells) failures.Add($"cells<{minimumCells}");
-            if (longestStall > 8f) failures.Add("stall>8s");
+            if (!_waterEscapeTest && travel < minimumTravel) failures.Add($"travel<{minimumTravel:0.0}");
+            if (!_waterEscapeTest && metrics.VisitedCells.Count < minimumCells)
+                failures.Add($"cells<{minimumCells}");
+            if (!_waterEscapeTest && longestStall > 8f) failures.Add("stall>8s");
             // Reaching the detector at all already means at least five seconds of rapid
             // reversals with little net displacement. Do not hide a visibly bad episode behind
             // an additional grace period; the production bot should recover before this window.
-            if (metrics.OscillationEpisodes > 0) failures.Add("oscillation-episode");
-            if (metrics.LongestSteepDown > 3f) failures.Add("steep-down>3s");
+            if (!_waterEscapeTest && metrics.OscillationEpisodes > 0)
+                failures.Add("oscillation-episode");
+            if (!_waterEscapeTest && metrics.LongestSteepDown > 3f)
+                failures.Add("steep-down>3s");
+            Pawn invalidAccuracy = _world.Pawns.FirstOrDefault(p => p.ShotsHit > p.ShotsFired);
+            if (invalidAccuracy != null)
+                failures.Add($"accuracy>100%:{invalidAccuracy.Name}");
             // A traversal bot is expected to use the authored routes, not sacrifice itself to
             // escape a disconnected perch. Treat all environmental deaths as map/navigation
             // regressions so a green headline cannot conceal a lethal drop or missed jump pad.
             if (_world.VoidDeaths > 0) failures.Add("void-death");
             if (_world.FallDeaths > 0) failures.Add("fall-death");
             if (_world.LavaDeaths > 0) failures.Add("lava-death");
+            if (_world.DrowningDeaths > 0) failures.Add("drowning-death");
+            if (!_waterEscapeTest && _world.RepeatedJumpPadLaunches > 0)
+                failures.Add("repeated-jump-pad-launch");
+            if (_waterEscapeTest)
+            {
+                if (!_waterEscapeObservedWet) failures.Add("water-entry-not-observed");
+                if (!_waterEscapeSucceeded) failures.Add("water-exit-not-reached");
+                if (_waterEscapeBreathExpired) failures.Add("water-exit-after-breath-expired");
+                if (_waterEscapeReentriesAfterEscape > 0)
+                    failures.Add($"water-reentries={_waterEscapeReentriesAfterEscape}");
+            }
             int controlPointCount = _world.Level.ControlPoints.Count;
             int controlPointsCaptured = _world.ControlPointCaptures.Count(c => c > 0);
-            if (_world.Mode.Kind == GameModeKind.Domination)
+            if (!_waterEscapeTest && _world.Mode.Kind == GameModeKind.Domination)
             {
                 if (controlPointsCaptured < controlPointCount)
                     failures.Add($"control-points<{controlPointCount}");
@@ -4025,7 +4274,7 @@ public sealed class App : IDisposable
                 // deathmatch that happened to have two hoops in it.
                 if (_world.BallPickups <= 0) failures.Add("ball-pickups=0");
             }
-            if (_world.Mode.Kind == GameModeKind.Assault)
+            if (!_waterEscapeTest && _world.Mode.Kind == GameModeKind.Assault)
             {
                 if (_world.AssaultObjectiveCompletions <= 0) failures.Add("assault-objectives=0");
                 // Validate each opening role independently. A nearby team-owned or neutral pad
@@ -4093,9 +4342,23 @@ public sealed class App : IDisposable
                 MaxOpponentSkill = MathF.Round(maxOpponentSkill, 3),
                 WeaponPickupGoals = mainBot?.DiagnosticWeaponPickupGoals ?? 0,
                 AmmoPickupGoals = mainBot?.DiagnosticAmmoPickupGoals ?? 0,
+                ShotsFired = pawn.ShotsFired,
+                ShotsHit = pawn.ShotsHit,
+                AccuracyPercent = MathF.Round(pawn.Accuracy * 100f, 1),
+                MaxAccuracyPercent = MathF.Round(_world.Pawns.DefaultIfEmpty().Max(p =>
+                    p?.Accuracy ?? 0f) * 100f, 1),
                 VoidDeaths = _world.VoidDeaths,
                 FallDeaths = _world.FallDeaths,
                 LavaDeaths = _world.LavaDeaths,
+                DrowningDeaths = _world.DrowningDeaths,
+                JumpPadLaunches = _world.JumpPadLaunches,
+                RepeatedJumpPadLaunches = _world.RepeatedJumpPadLaunches,
+                WaterEscapeTest = _waterEscapeTest,
+                WaterEntryObserved = _waterEscapeObservedWet,
+                WaterEscapeSucceeded = _waterEscapeSucceeded,
+                WaterEscapeElapsedSeconds = MathF.Round(_waterEscapeSuccessTime, 2),
+                WaterEscapeBreathExpired = _waterEscapeBreathExpired,
+                WaterReentriesAfterEscape = _waterEscapeReentriesAfterEscape,
                 ControlPointsCaptured = controlPointsCaptured,
                 ControlPointCount = controlPointCount,
                 ControlPointCaptures = _world.ControlPointCaptures.ToArray(),

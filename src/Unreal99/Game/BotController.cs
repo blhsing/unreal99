@@ -180,6 +180,14 @@ public sealed class BotController : Controller
     public int DiagnosticWaypointNode => _pathCursor < _path.Count ? _path[_pathCursor] : -1;
     public int DiagnosticNextWaypointNode => _pathCursor + 1 < _path.Count ? _path[_pathCursor + 1] : -1;
     public bool DiagnosticObjectiveGoal => _objectiveGoal;
+    /// <summary>
+    /// True while production navigation has already detected a reversal loop and committed to a
+    /// recovery route. The traversal harness uses this to judge whether recovery happened before
+    /// a bad episode became sustained, rather than counting the detector's own escape turn as a
+    /// fresh failure.
+    /// </summary>
+    public bool DiagnosticRouteRecoveryActive => _routeRecoveryTimer > 0f
+        || _edgeRecoveryTimer > 0f || _skirtTimer > 0f;
     public int DiagnosticActiveLiftBrush => _activeLiftBrushIndex;
     public Vector3 DiagnosticLiftSource => _activeLiftSource;
     public Vector3 DiagnosticLiftDestination => _activeLiftDestination;
@@ -190,6 +198,8 @@ public sealed class BotController : Controller
     private readonly Rng _rng;
     private readonly List<int> _path = new(64);
     private readonly List<int> _navScratch = new(32);
+    private readonly List<int> _collisionScratch = new(32);
+    private readonly List<int> _waterNodeScratch = new(96);
     private readonly List<(PickupEntity Item, int GoalNode, float Score)> _pickupChoices = new(64);
     private readonly Queue<RouteProgressSample> _routeProgressSamples = new();
 
@@ -203,6 +213,12 @@ public sealed class BotController : Controller
     private int _dominationPatrolStep;
     /// <summary>Shared by every objective mode: how many times this bot has broken off to re-arm.</summary>
     private int _objectiveRearmAttempts;
+    /// <summary>
+    /// Assault permits one deliberate supply stop for each newly unlocked objective. Keeping
+    /// this separate from the transient "do I need ammo now?" answer prevents a bot from using
+    /// some ammunition, deciding it is low again, and shopping for most of a timed attack.
+    /// </summary>
+    private int _assaultRearmedObjective = -1;
     private int _onslaughtPatrolStep;
     private int _assaultPatrolStep;
     /// <summary>Which vehicle this bot has decided to fetch, so it does not change its mind every tick.</summary>
@@ -316,6 +332,12 @@ public sealed class BotController : Controller
     private int _pickupDebugReports;
     private bool _jumpPadFlight;
     private float _jumpPadFlightTimer;
+    // A jump pad is a deliberate one-way route, not a patrol toy. Remember the last physical
+    // launcher this pawn used so an optional pickup or random route cannot send it straight back
+    // through the same launch/return cycle. Objective routes remain eligible: some arenas really
+    // do put their flag, node, or Assault target above a required pad.
+    private Vector3 _lastJumpPadPosition;
+    private float _jumpPadReuseTimer;
     private float _airbornePeakY;
     private bool _hasSafeGroundPosition;
     private Vector3 _safeGroundPosition;
@@ -327,6 +349,23 @@ public sealed class BotController : Controller
     private float _activeLiftTimer;
     private bool _activeLiftCommitted;
     private bool _specialTraversalLock;
+    /// <summary>
+    /// Water is navigable, but ordinary objective/combat steering does not know that vertical
+    /// movement is mandatory there. Keep a dedicated route to a dry node so a bot that falls
+    /// into a pool surfaces and takes an authored exit instead of fighting underwater until its
+    /// breath runs out.
+    /// </summary>
+    private readonly List<int> _waterEscapePath = new(32);
+    private int _waterEscapeCursor;
+    private float _waterEscapeRepathTimer;
+    private bool _waterEscapeActive;
+    private float _waterEscapeNoPathTimer;
+    private float _waterEscapeOriginY;
+    private float _waterEscapeBestWaypointDistance = float.MaxValue;
+    private float _waterEscapeNoProgressTimer;
+    private int _waterEscapeProgressCursor = -1;
+    private float _waterAvoidTimer;
+    private Vector3 _lastWaterExitPosition;
 
     /// <summary>Kept so a saved match can rebuild this bot as the same opponent, not a new one.</summary>
     public uint Seed { get; }
@@ -415,6 +454,7 @@ public sealed class BotController : Controller
         _ctfRearmAttempts = 0;
         _dominationPatrolStep = 0;
         _objectiveRearmAttempts = 0;
+        _assaultRearmedObjective = -1;
         _onslaughtPatrolStep = 0;
         _assaultPatrolStep = 0;
         _vehicleTargetId = -1;
@@ -466,6 +506,8 @@ public sealed class BotController : Controller
         _translocatorCooldown = 0f;
         _jumpPadFlight = false;
         _jumpPadFlightTimer = 0f;
+        _lastJumpPadPosition = Vector3.Zero;
+        _jumpPadReuseTimer = 0f;
         _airbornePeakY = Pawn.Position.Y;
         _hasSafeGroundPosition = false;
         _edgeRecoveryTimer = 0f;
@@ -476,6 +518,17 @@ public sealed class BotController : Controller
         _activeLiftTimer = 0f;
         _activeLiftCommitted = false;
         _specialTraversalLock = false;
+        _waterEscapePath.Clear();
+        _waterEscapeCursor = 0;
+        _waterEscapeActive = false;
+        _waterEscapeNoPathTimer = 0f;
+        _waterEscapeOriginY = Pawn.Position.Y;
+        _waterEscapeRepathTimer = 0f;
+        _waterEscapeBestWaypointDistance = float.MaxValue;
+        _waterEscapeNoProgressTimer = 0f;
+        _waterEscapeProgressCursor = -1;
+        _waterAvoidTimer = 0f;
+        _lastWaterExitPosition = Pawn.Position;
         _movementDebugReports = 0;
         _pickupDebugReports = 0;
     }
@@ -526,11 +579,18 @@ public sealed class BotController : Controller
 
     public override PawnInput Update(GameWorld world, float dt)
     {
-        var input = new PawnInput { WeaponSelect = -1, Yaw = Pawn.Yaw, Pitch = Pawn.Pitch };
+        var input = new PawnInput
+        {
+            WeaponSelect = -1,
+            Yaw = Pawn.Yaw,
+            Pitch = Pawn.Pitch,
+            AvoidJumpPads = true,
+        };
         var pawn = Pawn;
         if (!pawn.Alive) return input;
 
         TickTimers(dt);
+        _waterAvoidTimer = MathF.Max(0f, _waterAvoidTimer - dt);
 
         if (Pawn.OnGround) _airbornePeakY = Pawn.Position.Y;
         else _airbornePeakY = MathF.Max(_airbornePeakY, Pawn.Position.Y);
@@ -540,6 +600,11 @@ public sealed class BotController : Controller
         // its last floor and there is no real landing beneath it, complete the attempted ledge
         // recovery at the last verified safe point rather than letting it repeat a void death.
         if (RecoverFromFatalFall(world)) return input;
+
+        // Drowning outranks every match objective and every opponent. Swimming uses the same
+        // movement keys as walking plus Jump for vertical thrust, so handle it before target
+        // selection, weapon choice and firing can pull the bot back toward the pool floor.
+        if (TryEscapeWater(world, ref input, dt)) return input;
 
         if (_targetTimer <= 0f)
         {
@@ -629,7 +694,14 @@ public sealed class BotController : Controller
         // as soon as there is no clear opponent.
         bool handledBombingRun = HandleBombingRunCarrierTactics(world, target, targetVisible,
             ref input, dt);
-        if (!handledBombingRun && targetVisible && _reactionTimer <= 0f && target != null
+        bool priorityObjectiveShot = HasClearObjectiveShot(world);
+        // A timed structure objective does not become optional because a defender crosses the
+        // bot's view. If the objective is in weapon range, keep damaging it; defenders are still
+        // handled normally while approaching or whenever no clear objective shot is available.
+        if (!handledBombingRun && priorityObjectiveShot
+            && !_specialTraversalLock && !_jumpPadFlight)
+            ShootObjective(world, ref input, dt);
+        else if (!handledBombingRun && targetVisible && _reactionTimer <= 0f && target != null
             && !_specialTraversalLock && !_jumpPadFlight)
             DecideFire(world, target, ref input);
         else if (!handledBombingRun && !_specialTraversalLock && !_jumpPadFlight)
@@ -720,6 +792,7 @@ public sealed class BotController : Controller
         }
 
         bool want = pawn.CanRideHoverboard && !threatened && _boardBanTimer <= 0f
+            && _waterAvoidTimer <= 0f
             && (carryingOrb || toGoal > 45f);
 
         if (want == pawn.OnHoverboard || _boardToggleTimer > 0f) return;
@@ -799,6 +872,7 @@ public sealed class BotController : Controller
         else _firePauseTimer -= dt;
         _jumpTimer -= dt;
         _translocatorCooldown = MathF.Max(0f, _translocatorCooldown - dt);
+        _jumpPadReuseTimer = MathF.Max(0f, _jumpPadReuseTimer - dt);
         _threatTimer = MathF.Max(0f, _threatTimer - dt);
         _blockedItemTimer = MathF.Max(0f, _blockedItemTimer - dt);
         if (_blockedItemTimer <= 0f) _blockedItem = null;
@@ -876,10 +950,11 @@ public sealed class BotController : Controller
         // Riding a launcher between distinct floors can return to the same X/Z footprint while
         // making real vertical progress. Count confinement in three dimensions so that route is
         // not mistaken for shaking in place.
-        bool earlyRoutePacing = (_objectiveGoal || _state != BotState.Attack)
+        bool earlyRoutePacing = _state != BotState.Attack
             && duration >= 2.4f && path >= 4.5f && net <= 1.8f
             && spatialExtent <= 4.8f && reversals >= 2;
-        bool sustainedOscillation = duration >= 3.6f && path >= 7f && net <= 3.8f
+        bool sustainedOscillation = _state != BotState.Attack
+            && duration >= 3.6f && path >= 7f && net <= 3.8f
             && spatialExtent <= 7f && reversals >= 2;
         // A wider two-point shuttle is still a route failure. Catch it before the five-second
         // harness window qualifies, but only outside Attack so normal combat strafing survives.
@@ -1404,6 +1479,182 @@ public sealed class BotController : Controller
         input.Pitch = MathX.Damp(Pawn.Pitch, pitch, 14f, dt);
     }
 
+    /// <summary>
+    /// Surfaces and follows the shortest available navigation route to a node whose pawn capsule
+    /// is outside water. Maps still need real ramps or stairs out of their pools; this controller
+    /// makes bots use those exits and provides a direct nearest-dry fallback for legacy maps.
+    /// </summary>
+    private bool TryEscapeWater(GameWorld world, ref PawnInput input, float dt)
+    {
+        if (Pawn.InWater && !_waterEscapeActive)
+        {
+            _waterEscapeActive = true;
+            _waterEscapeOriginY = Pawn.Position.Y;
+            _waterEscapeBestWaypointDistance = float.MaxValue;
+            _waterEscapeNoProgressTimer = 0f;
+            _waterEscapeProgressCursor = -1;
+        }
+        // Hoverboards are land vehicles. Leaving one deployed after an accidental water entry
+        // preserves its high horizontal momentum and can carry the swimmer straight past an
+        // exit or back over the bank on the next frame. Stow it before applying swim controls.
+        if (Pawn.InWater && Pawn.OnHoverboard) input.Hoverboard = true;
+        if (!_waterEscapeActive)
+        {
+            _waterEscapePath.Clear();
+            _waterEscapeCursor = 0;
+            _waterEscapeRepathTimer = 0f;
+            _waterEscapeNoPathTimer = 0f;
+            _waterEscapeBestWaypointDistance = float.MaxValue;
+            _waterEscapeNoProgressTimer = 0f;
+            _waterEscapeProgressCursor = -1;
+            return false;
+        }
+
+        // Buoyancy plus Jump can briefly put the capsule above the water volume while the pawn
+        // is still in the middle of the pool. Do not hand control back to combat/objective code
+        // at the surface: that was the Frigate spin. Escape ends only on grounded dry floor.
+        if (!Pawn.InWater && Pawn.OnGround)
+        {
+            _waterEscapeActive = false;
+            // Once this life has proved the pool is a trap, do not let a later item/objective
+            // replan undo the escape. Every affected arena provides a dry alternative; death and
+            // OnSpawned reset the controller if a later life begins elsewhere.
+            _waterAvoidTimer = float.PositiveInfinity;
+            _lastWaterExitPosition = Pawn.Position;
+            _waterEscapePath.Clear();
+            _waterEscapeCursor = 0;
+            _waterEscapeRepathTimer = 0f;
+            _waterEscapeNoPathTimer = 0f;
+            _waterEscapeBestWaypointDistance = float.MaxValue;
+            _waterEscapeNoProgressTimer = 0f;
+            _waterEscapeProgressCursor = -1;
+            return false;
+        }
+
+        NavGraph nav = world.Level.Nav;
+        _waterEscapeRepathTimer -= dt;
+        // Commit to the selected exit. Rebuilding the breadth-first route every 0.8 seconds
+        // allowed two similarly near ramps to alternate as the pawn crossed the pool, visibly
+        // sending swimmers back and forth. Replan only when no route exists or genuine lack of
+        // waypoint progress proves the committed route is blocked.
+        bool needsPath = _waterEscapePath.Count == 0
+            || _waterEscapeCursor >= _waterEscapePath.Count;
+        if (needsPath && _waterEscapeRepathTimer <= 0f)
+        {
+            _waterEscapeRepathTimer = 0.8f;
+            _waterEscapePath.Clear();
+            _waterEscapeCursor = 0;
+            _waterEscapeBestWaypointDistance = float.MaxValue;
+            _waterEscapeNoProgressTimer = 0f;
+            _waterEscapeProgressCursor = -1;
+            // The generic nearest node can be on a dry deck directly above the swimmer. Olden's
+            // central island is only 2.4 m above the basin, so that snap seeded a perfectly valid
+            // dry-land path whose first segment ran through the island wall. Seed from the actual
+            // water floor/ramp component instead.
+            _waterNodeScratch.Clear();
+            nav.QueryRadius(Pawn.Position, 18f, _waterNodeScratch);
+            int start = -1;
+            float nearest = float.MaxValue;
+            Vector3 waterHalf = new(Physics.PawnRadius, Physics.PawnHeight * 0.5f,
+                Physics.PawnRadius);
+            foreach (int nodeIndex in _waterNodeScratch)
+            {
+                Vector3 feet = nav.Nodes[nodeIndex].Position;
+                Vector3 center = feet + MathX.Up * waterHalf.Y;
+                BrushKind volume = world.Level.Collision.VolumeAt(center - waterHalf,
+                    center + waterHalf, _collisionScratch);
+                if (volume != BrushKind.Water) continue;
+                float distance = Vector3.DistanceSquared(feet, Pawn.Position)
+                    + MathF.Abs(feet.Y - Pawn.Position.Y) * 6f;
+                if (distance < nearest) { nearest = distance; start = nodeIndex; }
+            }
+            if (start >= 0)
+            {
+                bool DryNode(int nodeIndex)
+                {
+                    Vector3 feet = nav.Nodes[nodeIndex].Position;
+                    // A node just outside an axis-aligned water volume can sit on the same basin
+                    // floor and report "not water" merely because its capsule crosses the volume
+                    // boundary. That is a harbour wall, not an exit. Require meaningful ascent;
+                    // real ramps will contribute progressively higher reachable nodes.
+                    // Compare with the basin height at entry, not the pawn's current height. On
+                    // the last metre of a slope the old moving threshold rejected the same dry
+                    // destination it had been following, cleared the path, and stopped swimming.
+                    if (feet.Y < _waterEscapeOriginY + 0.75f) return false;
+                    Vector3 center = feet + MathX.Up * waterHalf.Y;
+                    return world.Level.Collision.VolumeAt(center - waterHalf, center + waterHalf,
+                        _collisionScratch) != BrushKind.Water;
+                }
+                if (nav.FindPathToNearestReachable(start, _waterEscapePath, DryNode))
+                    _waterEscapeNoPathTimer = 0f;
+            }
+        }
+
+        const float reach = 0.9f;
+        while (_waterEscapeCursor < _waterEscapePath.Count
+            && (nav.Nodes[_waterEscapePath[_waterEscapeCursor]].Position - Pawn.Position)
+                .FlatXZ().LengthSquared() <= reach * reach)
+        {
+            _waterEscapeCursor++;
+            _waterEscapeBestWaypointDistance = float.MaxValue;
+            _waterEscapeNoProgressTimer = 0f;
+            _waterEscapeProgressCursor = _waterEscapeCursor;
+        }
+
+        bool hasPath = _waterEscapeCursor < _waterEscapePath.Count;
+        Vector3 target = hasPath
+            ? nav.Nodes[_waterEscapePath[_waterEscapeCursor]].Position
+            : Pawn.Position;
+        Vector3 flat = (target - Pawn.Position).FlatXZ();
+        if (hasPath)
+        {
+            float waypointDistance = flat.Length();
+            if (_waterEscapeProgressCursor != _waterEscapeCursor
+                || waypointDistance < _waterEscapeBestWaypointDistance - 0.18f)
+            {
+                _waterEscapeProgressCursor = _waterEscapeCursor;
+                _waterEscapeBestWaypointDistance = waypointDistance;
+                _waterEscapeNoProgressTimer = 0f;
+            }
+            else _waterEscapeNoProgressTimer += dt;
+
+            if (_waterEscapeNoProgressTimer > 2.4f)
+            {
+                _waterEscapePath.Clear();
+                _waterEscapeCursor = 0;
+                _waterEscapeRepathTimer = 0f;
+                _waterEscapeBestWaypointDistance = float.MaxValue;
+                _waterEscapeNoProgressTimer = 0f;
+                _waterEscapeProgressCursor = -1;
+                input.Move = Vector2.Zero;
+                input.Jump = true;
+                input.Fire = false;
+                input.AltFire = false;
+                return true;
+            }
+        }
+        if (flat.LengthSquared() > 0.04f)
+        {
+            MathX.YawPitchFromDir(MathX.SafeNormalize(flat, Pawn.ForwardFlat),
+                out float yaw, out _);
+            input.Yaw = Pawn.Yaw + MathX.WrapAngle(yaw - Pawn.Yaw)
+                * (1f - MathF.Exp(-10f * dt));
+            input.Move = new Vector2(0f, 1f);
+        }
+        input.Pitch = MathX.Damp(Pawn.Pitch, 0f, 10f, dt);
+        // Jump is swim-up here. It is useful while following a verified route, but holding it
+        // after pathfinding failed produces the conspicuous wall-jumping loop from Frigate.
+        input.Jump = hasPath;
+        if (!hasPath)
+        {
+            _waterEscapeNoPathTimer += dt;
+            input.Move = Vector2.Zero;
+        }
+        input.Fire = false;
+        input.AltFire = false;
+        return true;
+    }
+
     private static int OwnedProjectileCount(GameWorld world, int ownerId, ProjectileKind kind)
     {
         int count = 0;
@@ -1495,6 +1746,8 @@ public sealed class BotController : Controller
     private void UpdateAim(GameWorld world, Pawn target, bool visible, float dt)
     {
         Vector3 desired;
+        bool objectiveAim = TryGetClearAssaultObjectiveAim(world, out Vector3 assaultAim,
+            out _, rejectUnsafeSplash: true);
         // Once every ranged weapon is dry, looking at an enemy no longer serves combat and can
         // hide the bot's actual re-arm intent. Face the pickup route instead so aim and movement
         // agree until a usable weapon has been collected.
@@ -1506,10 +1759,18 @@ public sealed class BotController : Controller
         bool targetOffObjectiveLevel = _objectiveGoal && target != null
             && MathF.Abs((target.Position.Y + target.CurrentHeight * 0.5f)
                 - (Pawn.Position.Y + Pawn.CurrentHeight * 0.5f)) > 5f;
-        bool useTargetAim = !rearming && !targetOffObjectiveLevel && target != null
+        bool useTargetAim = !objectiveAim && !rearming && !targetOffObjectiveLevel && target != null
             && (visible || world.Time - _lastSeenTargetTime < 1.6f);
 
-        if (useTargetAim)
+        if (objectiveAim)
+        {
+            // A destroy objective in reach is the thing the attacker must shoot. Tracking a
+            // defender on the floor above made the Glacier bot look into—and fire into—the low
+            // station ceiling while standing two metres from the gate panel.
+            desired = assaultAim;
+            _aimPoint = desired;
+        }
+        else if (useTargetAim)
         {
             Vector3 aimAt = visible
                 ? target.Position + new Vector3(0, target.CurrentHeight * 0.62f, 0)
@@ -1544,7 +1805,13 @@ public sealed class BotController : Controller
                     {
                         // Lower skill tiers deliberately apply only part of the physically exact
                         // lead. Godlike uses the complete speed/direction/gravity projection.
-                        aimAt = Vector3.Lerp(aimAt, prediction.AimPoint, LeadAccuracy);
+                        Vector3 predicted = Vector3.Lerp(aimAt, prediction.AimPoint, LeadAccuracy);
+                        // The current target point is visible, but its projected future point may
+                        // be behind a pillar or above a low ceiling. Leading into solid geometry
+                        // wastes the whole burst, so fall back to the visible body position until
+                        // the predicted intercept itself has a clear line.
+                        if (world.Level.Collision.LineOfSight(Pawn.EyePosition, predicted))
+                            aimAt = predicted;
                     }
                 }
             }
@@ -1578,7 +1845,7 @@ public sealed class BotController : Controller
         if (!useTargetAim)
             wantPitch = MathF.Max(wantPitch, -0.65f);
 
-        float speed = AimSpeed * (visible ? 1f : 0.5f);
+        float speed = AimSpeed * (visible || objectiveAim ? 1f : 0.5f);
         _aimYaw = MathX.WrapAngle(_aimYaw + MathX.WrapAngle(wantYaw - _aimYaw)
             * MathX.Saturate(speed * dt));
         _aimPitch = MathX.Clamp(MathX.Lerp(_aimPitch, wantPitch, MathX.Saturate(speed * dt)), -1.4f, 1.4f);
@@ -1591,7 +1858,23 @@ public sealed class BotController : Controller
     {
         var nav = world.Level.Nav;
         _specialTraversalLock = false;
+        bool jumpPadRouteIntent = false;
         if (nav.NodeCount == 0) return Vector2.Zero;
+
+        // Pawn.Move applies a pad after the controller has produced this frame's input. Observe
+        // the authored launch impulse on the following tick even when the route did not request
+        // it (for example a combat strafe across the trigger). This is what makes the same-pad
+        // cooldown cover accidental launches as well as planned ones.
+        if (!_jumpPadFlight && TryDetectPhysicalJumpPadLaunch(world, out JumpPad launchedPad))
+        {
+            BeginJumpPadFlight(world, launchedPad);
+            if (_path.Count > 0 && _pathCursor < _path.Count
+                && TryRouteJumpPad(world, nav, _path[_pathCursor],
+                    nav.Nodes[_path[_pathCursor]].Position, out JumpPad routePad)
+                && Vector3.DistanceSquared(routePad.Position, launchedPad.Position) < 2f * 2f
+                && _pathCursor + 1 < _path.Count)
+                _pathCursor++;
+        }
 
         // A jump pad already solved the ballistic trajectory. Air-strafing—especially the
         // aggressive strafing used at maximum skill—changes that velocity enough to miss a roof.
@@ -1640,14 +1923,50 @@ public sealed class BotController : Controller
         {
             _repathTimer = _rng.Range(0.7f, 1.3f);
             int start = nav.FindNearest(Pawn.Position);
+            bool AvoidRecentWater(int nodeIndex)
+            {
+                if (_waterAvoidTimer <= 0f || nodeIndex == start) return true;
+                Vector3 feet = nav.Nodes[nodeIndex].Position;
+                Vector3 half = new(Physics.PawnRadius, Physics.PawnHeight * 0.5f,
+                    Physics.PawnRadius);
+                Vector3 center = feet + MathX.Up * half.Y;
+                return world.Level.Collision.VolumeAt(center - half, center + half,
+                    _collisionScratch) != BrushKind.Water;
+            }
+            bool AvoidWaterCrossing(int fromNode, int toNode)
+            {
+                if (_waterAvoidTimer <= 0f) return true;
+                // A jump-pad edge may arc over, or through, a pool even when both endpoint
+                // capsules are dry. After a rescue, use the dry walkable alternative instead.
+                if ((nav.Nodes[fromNode].Flags & NavFlags.JumpPad) != 0) return false;
+                return !SegmentCrossesWater(world, nav.Nodes[fromNode].Position,
+                    nav.Nodes[toNode].Position);
+            }
+            Func<int, bool> routeFilter = _waterAvoidTimer > 0f ? AvoidRecentWater : null;
+            Func<int, int, bool> transitionFilter = _waterAvoidTimer > 0f
+                ? AvoidWaterCrossing : null;
             bool found = start >= 0 && (_objectiveGoal
-                ? nav.FindPathToward(start, _goalNode, _path)
-                : nav.FindPath(start, _goalNode, _path));
+                ? nav.FindPathToward(start, _goalNode, _path, canVisit: routeFilter,
+                    canTraverse: transitionFilter)
+                : nav.FindPath(start, _goalNode, _path, canVisit: routeFilter,
+                    canTraverse: transitionFilter));
+            // A target whose only available route immediately dives into the pool must wait;
+            // keep moving on dry land until the post-rescue cooldown expires instead of undoing
+            // the escape on the following objective tick.
+            if (!found && _waterAvoidTimer > 0f)
+            {
+                int dryFallback = nav.FindNearest(_lastWaterExitPosition);
+                if (dryFallback >= 0 && start >= 0)
+                    found = nav.FindPath(start, dryFallback, _path, canVisit: routeFilter,
+                        canTraverse: transitionFilter);
+            }
             // Random pickups and visible enemies can live on a disconnected navigation island.
             // Do not burn the whole goal timeout at zero input: traverse a distant reachable
             // point, then choose a fresh goal from there. Precise positions must be cleared or
             // the bot would steer back toward the unreachable item after finishing this path.
-            if (!found && start >= 0 && nav.FindPathToFarthestReachable(start, _path))
+            if (!found && start >= 0
+                && nav.FindPathToFarthestReachable(start, _path, canVisit: routeFilter,
+                    canTraverse: transitionFilter))
             {
                 found = true;
                 _goalNode = _path[^1];
@@ -1685,9 +2004,59 @@ public sealed class BotController : Controller
             // A special nav edge starts at the grid node nearest the pad, which can still be
             // outside the pad's trigger. Do not advance to the far-side node and steer into the
             // gap until the pawn has actually entered the physical launcher.
-            if ((nav.Nodes[waypointIndex].Flags & NavFlags.JumpPad) != 0
-                && TryNearestJumpPad(world, node, out JumpPad pad))
+            if (TryRouteJumpPad(world, nav, waypointIndex, node, out JumpPad pad))
             {
+                // Optional elevated weapons and random roam nodes are not a clear reason to take
+                // a one-way launcher. They created Olden's repeated bounce even though every
+                // control point is reachable on foot. Keep pads available to players and to an
+                // actual objective route, but make bot shopping/patrol choose dry ground.
+                if (!_objectiveGoal)
+                {
+                    if (_itemGoal != null)
+                    {
+                        _blockedItem = _itemGoal;
+                        _blockedItemTimer = MathF.Max(_blockedItemTimer, 30f);
+                    }
+                    _goalNode = -1;
+                    _goalTimer = 0f;
+                    _hasGoalPosition = false;
+                    _itemGoal = null;
+                    _pathFound = false;
+                    _path.Clear();
+                    _pathCursor = 0;
+                    _repathTimer = 0f;
+                    return Vector2.Zero;
+                }
+                bool recentlyUsed = _jumpPadReuseTimer > 0f
+                    && Vector3.DistanceSquared(pad.Position, _lastJumpPadPosition) < 2f * 2f;
+                if (recentlyUsed)
+                {
+                    // The previous launch did not satisfy this optional goal. Retrying the same
+                    // ballistic route is the visible Olden bounce loop, so take the item off the
+                    // menu long enough for a different tactical decision and replan immediately.
+                    if (_itemGoal != null)
+                    {
+                        _blockedItem = _itemGoal;
+                        _blockedItemTimer = MathF.Max(_blockedItemTimer, 30f);
+                    }
+                    else if (_hasGoalPosition)
+                    {
+                        _blockedGoalPosition = _goalPosition;
+                        _blockedGoalTimer = MathF.Max(_blockedGoalTimer, 8.5f);
+                    }
+                    _goalNode = -1;
+                    _goalTimer = 0f;
+                    _hasGoalPosition = false;
+                    _itemGoal = null;
+                    _pathFound = false;
+                    _path.Clear();
+                    _pathCursor = 0;
+                    _repathTimer = 0f;
+                    return Vector2.Zero;
+                }
+
+                jumpPadRouteIntent = true;
+                input.AvoidJumpPads = false;
                 float padDistance = (pad.Position - Pawn.Position).FlatXZ().Length();
                 // Proximity plus airborne state is not proof that the physical pad fired: a
                 // normal jump beside its narrower trigger used to enter permanent flight mode
@@ -1696,19 +2065,10 @@ public sealed class BotController : Controller
                 bool launched = !Pawn.OnGround && padDistance < 2.2f
                     && Pawn.Position.Y < pad.Position.Y + 3.2f
                     && Vector3.DistanceSquared(Pawn.Velocity, pad.LaunchVelocity) < 2.25f;
-                if (launched && _pathCursor + 1 < _path.Count)
+                if (launched)
                 {
-                    _jumpPadFlight = true;
-                    float horizontalSpeed = MathF.Max(pad.LaunchVelocity.Horizontal(), 0.01f);
-                    float horizontalDistance = (pad.Destination - pad.Position).FlatXZ().Length();
-                    float gravity = Physics.Gravity * world.Level.GravityScale;
-                    float expectedFlight = horizontalDistance > 0.1f
-                        ? horizontalDistance / horizontalSpeed
-                        : pad.LaunchVelocity.Y * 2f / MathF.Max(gravity, 0.01f);
-                    // Preserve the authored ballistic arc, but not forever: a combat impulse can
-                    // knock a pawn off-course and a permanent flight state disables all recovery.
-                    _jumpPadFlightTimer = MathF.Max(0.8f, expectedFlight + 0.65f);
-                    _pathCursor++;
+                    BeginJumpPadFlight(world, pad);
+                    if (_pathCursor + 1 < _path.Count) _pathCursor++;
                     return Vector2.Zero;
                 }
                 else
@@ -2045,6 +2405,12 @@ public sealed class BotController : Controller
 
         if (steer == Vector3.Zero) return Vector2.Zero;
 
+        // A combat strafe or an unavoidable coarse grid edge can still point through the small
+        // physical trigger even after A* chose a route around it. Unless this route explicitly
+        // uses the pad's authored airborne edge, bend around the trigger before Pawn.Move sees it.
+        if (!jumpPadRouteIntent && Pawn.OnGround)
+            steer = SteerAroundUnusedJumpPads(world, steer);
+
         // Convert world steering into local move axes using the yaw that Pawn.Move will apply
         // this frame. Using Pawn.ForwardFlat here refers to the previous frame; when aim turns
         // toward a visible enemy, Pawn.Move updates yaw before interpreting these axes and would
@@ -2054,6 +2420,33 @@ public sealed class BotController : Controller
         float forwardAmount = Vector3.Dot(dir, inputForward);
         float rightAmount = Vector3.Dot(dir, inputRight);
         return new Vector2(rightAmount, forwardAmount) * MovementScale;
+    }
+
+    private Vector3 SteerAroundUnusedJumpPads(GameWorld world, Vector3 desired)
+    {
+        Vector3 direction = MathX.SafeNormalize(desired.FlatXZ(), Vector3.Zero);
+        if (direction == Vector3.Zero) return desired;
+        const float ProbeDistance = 4f;
+        Vector3 end = Pawn.Position + direction * ProbeDistance;
+        foreach (JumpPad pad in world.Level.JumpPads)
+        {
+            if (MathF.Abs(Pawn.Position.Y - pad.Position.Y) > 1.5f) continue;
+            Vector3 toPad = (pad.Position - Pawn.Position).FlatXZ();
+            float along = MathX.Clamp(Vector3.Dot(toPad, direction), 0f, ProbeDistance);
+            Vector3 closest = Pawn.Position + direction * along;
+            float clearance = MathF.Max(pad.HalfExtents.X, pad.HalfExtents.Z)
+                + Physics.PawnRadius + 0.45f;
+            if ((pad.Position - closest).FlatXZ().LengthSquared() >= clearance * clearance)
+                continue;
+
+            Vector3 left = new(-direction.Z, 0f, direction.X);
+            float side = Vector3.Dot(toPad, left);
+            float sign = MathF.Abs(side) > 0.08f
+                ? -MathF.Sign(side)
+                : (((Pawn.Id + _goalNode) & 1) == 0 ? 1f : -1f);
+            return MathX.SafeNormalize(direction * 0.35f + left * sign, direction);
+        }
+        return direction;
     }
 
     private static void InputBasis(float yaw, out Vector3 forward, out Vector3 right)
@@ -2076,6 +2469,87 @@ public sealed class BotController : Controller
             found = true;
         }
         return found;
+    }
+
+    private bool TryDetectPhysicalJumpPadLaunch(GameWorld world, out JumpPad launched)
+    {
+        launched = default;
+        if (Pawn.OnGround) return false;
+        float best = 2.6f * 2.6f;
+        bool found = false;
+        foreach (JumpPad pad in world.Level.JumpPads)
+        {
+            float distance = Vector3.DistanceSquared(Pawn.Position, pad.Position);
+            if (distance >= best
+                || Vector3.DistanceSquared(Pawn.Velocity, pad.LaunchVelocity) >= 2.25f) continue;
+            best = distance;
+            launched = pad;
+            found = true;
+        }
+        return found;
+    }
+
+    private void BeginJumpPadFlight(GameWorld world, JumpPad pad)
+    {
+        _jumpPadFlight = true;
+        _lastJumpPadPosition = pad.Position;
+        _jumpPadReuseTimer = 18f;
+        float horizontalSpeed = MathF.Max(pad.LaunchVelocity.Horizontal(), 0.01f);
+        float horizontalDistance = (pad.Destination - pad.Position).FlatXZ().Length();
+        float gravity = Physics.Gravity * world.Level.GravityScale;
+        float expectedFlight = horizontalDistance > 0.1f
+            ? horizontalDistance / horizontalSpeed
+            : pad.LaunchVelocity.Y * 2f / MathF.Max(gravity, 0.01f);
+        // Preserve the authored ballistic arc, but not forever: a combat impulse can knock a
+        // pawn off-course and a permanent flight state disables every other recovery mechanism.
+        _jumpPadFlightTimer = MathF.Max(0.8f, expectedFlight + 0.65f);
+    }
+
+    /// <summary>
+    /// A node can be both normal floor and the source of a pad link. The flag alone does not say
+    /// which edge A* selected, so require the following path node to be the authored landing and
+    /// require the packed graph edge between them to be the special jump edge.
+    /// </summary>
+    private bool PathUsesJumpPad(NavGraph nav, int waypointIndex, JumpPad pad)
+    {
+        if (_pathCursor + 1 >= _path.Count) return false;
+        int nextIndex = _path[_pathCursor + 1];
+        if (Vector3.DistanceSquared(nav.Nodes[waypointIndex].Position, pad.Position) > 4.5f * 4.5f
+            || Vector3.DistanceSquared(nav.Nodes[nextIndex].Position, pad.Destination) > 4.5f * 4.5f)
+            return false;
+        NavNode source = nav.Nodes[waypointIndex];
+        for (int edgeIndex = 0; edgeIndex < source.EdgeCount; edgeIndex++)
+        {
+            NavEdge edge = nav.Edges[source.FirstEdge + edgeIndex];
+            if (edge.To == nextIndex && edge.Jump) return true;
+        }
+        return false;
+    }
+
+    private bool TryRouteJumpPad(GameWorld world, NavGraph nav, int waypointIndex,
+        Vector3 waypoint, out JumpPad pad)
+    {
+        // Normal case: the packed path contains source then landing.
+        if ((nav.Nodes[waypointIndex].Flags & NavFlags.JumpPad) != 0
+            && TryNearestJumpPad(world, waypoint, out pad)
+            && PathUsesJumpPad(nav, waypointIndex, pad)) return true;
+
+        // A* omits its starting node. If the pawn is already beside a pad, the first path node
+        // can therefore be the landing. Confirm both physical proximity and the exact packed
+        // source-to-landing jump edge before treating that omission as permission to launch.
+        if (!TryNearestJumpPad(world, Pawn.Position, out pad)
+            || Vector3.DistanceSquared(Pawn.Position, pad.Position) > 4.5f * 4.5f
+            || Vector3.DistanceSquared(waypoint, pad.Destination) > 4.5f * 4.5f)
+            return false;
+        int sourceIndex = nav.FindNearest(pad.Position, 6f);
+        if (sourceIndex < 0) return false;
+        NavNode source = nav.Nodes[sourceIndex];
+        for (int edgeIndex = 0; edgeIndex < source.EdgeCount; edgeIndex++)
+        {
+            NavEdge edge = nav.Edges[source.FirstEdge + edgeIndex];
+            if (edge.To == waypointIndex && edge.Jump) return true;
+        }
+        return false;
     }
 
     private static bool TryNearestTeleporter(GameWorld world, Vector3 navPosition,
@@ -2434,10 +2908,14 @@ public sealed class BotController : Controller
 
         if (candidates.Count == 0) return false;
 
-        // Stable slot assignment is what actually spreads a squad. The old implementation only
-        // used the slot to decide who defended, then every attacker independently chose the same
-        // nearest point despite the documentation claiming otherwise.
-        int assigned = candidates[teamBotSlot % candidates.Count];
+        // Stable slot assignment spreads a squad, but rotate that assignment over time as well.
+        // A team with fewer AI drivers than remaining neutral/enemy points otherwise has no slot
+        // assigned to the last point at all: Leadworks' Bridge stayed neutral for an entire run
+        // while the same two bots repeatedly retook Tower and Storage. Goal selection already
+        // happens on a short cadence, so a deliberately slow phase preserves commitment while
+        // guaranteeing every candidate enters the rotation.
+        int assignmentPhase = (int)(world.Time / 12f);
+        int assigned = candidates[(teamBotSlot + assignmentPhase) % candidates.Count];
 
         if (defend) return TryChooseDominationPatrolGoal(nav, points[assigned].Position);
 
@@ -2710,15 +3188,17 @@ public sealed class BotController : Controller
         // Convoy supplies vehicles to both sides specifically for these two journeys.
         float boardDistance = attacking ? 22f : 30f;
         if (objectiveDistance > boardDistance
-            && TryBoardVehicle(world, nav, objective.Position)) return true;
+            && TryBoardVehicle(world, nav, objective.Position, maxJourneyFactor: 1.65f)) return true;
 
         bool noRangedAmmo = !HasUsableRangedWeapon(Pawn);
         bool needsSupply = noRangedAmmo || NeedsCombatResupply(Pawn);
-        if (!needsSupply) _objectiveRearmAttempts = 0;
-        if (needsSupply && _objectiveRearmAttempts < 2
+        // A timed Assault push cannot repeatedly return to a locker during one objective. One
+        // opening stop is enough to acquire a real weapon; after that, completing the breach is
+        // more valuable than topping up a partially used magazine.
+        if (needsSupply && _assaultRearmedObjective != state.Current
             && TryChoosePickupGoal(world, noRangedAmmo ? 100f : 45f, combatOnly: true))
         {
-            _objectiveRearmAttempts++;
+            _assaultRearmedObjective = state.Current;
             return true;
         }
 
@@ -2763,16 +3243,17 @@ public sealed class BotController : Controller
     /// Whether this bot currently has a mode objective worth shooting at all. Used to decide
     /// whether a far-off enemy is worth turning away for.
     /// </summary>
-    private bool HasObjectiveToShoot(GameWorld world)
+    private bool HasClearObjectiveShot(GameWorld world)
     {
         if (Pawn.Team == Team.None) return false;
+        Vector3 aimAt;
+        float reach;
         switch (world.Mode.Kind)
         {
             case GameModeKind.Assault:
             {
-                var o = world.Assault.CurrentObjective;
-                return o is { Kind: ObjectiveKind.Destroy } && Pawn.Team == world.Assault.Attackers
-                    && Vector3.Distance(Pawn.Position, o.Position) < 40f;
+                return TryGetClearAssaultObjectiveAim(world, out _, out _,
+                    rejectUnsafeSplash: true);
             }
             case GameModeKind.Onslaught:
             case GameModeKind.Warfare:
@@ -2783,11 +3264,24 @@ public sealed class BotController : Controller
                 if (!node.IsCore && node.Team == Team.None) return false;
                 // Shooting an orb-shielded node accomplishes nothing but giving away your position.
                 if (node.OrbShield != Team.None && node.OrbShield != Pawn.Team) return false;
-                return Vector3.Distance(Pawn.Position, node.Position) < 55f;
+                aimAt = node.Position + MathX.Up * 2.4f;
+                reach = ObjectiveReach(Pawn, 55f);
+                break;
             }
             default:
                 return false;
         }
+
+        FireDef fire = ObjectiveFire(Pawn);
+        if (fire.AmmoCost > 0 && Pawn.AmmoFor(Pawn.Weapon) < fire.AmmoCost) return false;
+        Vector3 eye = Pawn.EyePosition;
+        Vector3 delta = aimAt - eye;
+        float distance = delta.Length();
+        if (distance < 0.2f || distance > reach) return false;
+        if (fire.SplashRadius > 0f && distance < fire.SplashRadius + 2f) return false;
+        Vector3 direction = delta / distance;
+        return !world.Level.Collision.Raycast(eye,
+            eye + direction * MathF.Max(0.1f, distance - 1.6f)).Hit;
     }
 
     private void ShootObjective(GameWorld world, ref PawnInput input, float dt)
@@ -2801,12 +3295,8 @@ public sealed class BotController : Controller
         {
             case GameModeKind.Assault:
             {
-                var objective = world.Assault.CurrentObjective;
-                if (objective == null || objective.Kind != ObjectiveKind.Destroy) return;
-                if (Pawn.Team != world.Assault.Attackers) return;
-                aimAt = objective.Position + MathX.Up * 1.5f;
-                // Never further than the equipped weapon can actually reach: a hammer swung at a
-                // generator forty metres away accomplishes nothing but looking foolish.
+                if (!TryGetClearAssaultObjectiveAim(world, out aimAt, out _,
+                        rejectUnsafeSplash: false)) return;
                 reach = ObjectiveReach(Pawn, 40f);
                 break;
             }
@@ -2854,7 +3344,8 @@ public sealed class BotController : Controller
         Vector3 dir = delta / distance;
         // Do not shoot through the map: the line has to be clear or the shot is wasted, and on
         // Assault a rocket into the bulkhead in front of you is worse than wasted.
-        var blocked = world.Level.Collision.Raycast(eye, eye + dir * (distance - 1.6f));
+        var blocked = world.Level.Collision.Raycast(eye,
+            eye + dir * MathF.Max(0.05f, distance - 0.12f));
         if (blocked.Hit) return;
 
         MathX.YawPitchFromDir(dir, out float yaw, out float pitch);
@@ -2884,6 +3375,41 @@ public sealed class BotController : Controller
 
     private static FireDef ObjectiveFire(Pawn pawn)
         => UseAltAgainstObjectives(pawn) ? pawn.WeaponDef.Alt : pawn.WeaponDef.Primary;
+
+    /// <summary>
+    /// Supplies one shared, verified aim point for Assault movement, aim priority and firing.
+    /// Keeping these three users on the same line prevents the controller from deciding a panel
+    /// is shootable with one ray, looking somewhere else, and then spending ammo on that view.
+    /// </summary>
+    private bool TryGetClearAssaultObjectiveAim(GameWorld world, out Vector3 aimAt,
+        out float distance, bool rejectUnsafeSplash)
+    {
+        aimAt = Vector3.Zero;
+        distance = 0f;
+        AssaultObjective objective = world.Assault.CurrentObjective;
+        if (world.Mode.Kind != GameModeKind.Assault
+            || objective is not { Kind: ObjectiveKind.Destroy }
+            || Pawn.Team != world.Assault.Attackers) return false;
+
+        aimAt = objective.Position + MathX.Up * 1.5f;
+        Vector3 origin = Pawn.EyePosition;
+        Vector3 delta = aimAt - origin;
+        distance = delta.Length();
+        float reach = ObjectiveReach(Pawn, 40f);
+        if (distance < 0.2f || distance > reach) return false;
+        FireDef fire = ObjectiveFire(Pawn);
+        if (fire.AmmoCost > 0 && Pawn.AmmoFor(Pawn.Weapon) < fire.AmmoCost) return false;
+        if (rejectUnsafeSplash && fire.SplashRadius > 0f
+            && distance < fire.SplashRadius + 2f) return false;
+
+        // The objective has a real hit sphere even though its marker mesh is decorative. Permit
+        // collision at that sphere's near surface, but reject any ceiling/wall before it.
+        float radius = MathF.Max(objective.Radius * 0.6f, 1.9f);
+        float clearDistance = MathF.Max(0.05f, distance - radius - 0.08f);
+        Vector3 direction = delta / distance;
+        return !world.Level.Collision.Raycast(origin,
+            origin + direction * clearDistance).Hit;
+    }
 
     /// <summary>
     /// How far this weapon can usefully engage a structure. <see cref="FireDef.Range"/> only
@@ -2924,7 +3450,8 @@ public sealed class BotController : Controller
     /// closer than the destination — a bot that walks eighty metres to a Manta in order to save
     /// a hundred has gained nothing and has spent the whole trip defenceless.
     /// </summary>
-    private bool TryBoardVehicle(GameWorld world, NavGraph nav, Vector3 destination)
+    private bool TryBoardVehicle(GameWorld world, NavGraph nav, Vector3 destination,
+        float maxJourneyFactor = 1.25f)
     {
         if (Pawn.InVehicle || world.Vehicles.Count == 0) return false;
         // Boarding drops the orb. A carrier walking past a Manta must keep walking.
@@ -2959,7 +3486,7 @@ public sealed class BotController : Controller
             if (walk > 45f) continue;
             // It has to actually shorten the journey: a vehicle behind us is a detour.
             float remaining = Vector3.Distance(v.Position, destination);
-            if (walk + remaining > toDestination * 1.25f) continue;
+            if (walk + remaining > toDestination * maxJourneyFactor) continue;
             if (walk < bestScore) { bestScore = walk; best = v; }
         }
         if (best == null) return false;
@@ -3025,8 +3552,28 @@ public sealed class BotController : Controller
         while (_vehiclePathCursor < _vehiclePath.Count)
         {
             Vector3 waypoint = world.Level.Nav.Nodes[_vehiclePath[_vehiclePathCursor]].Position;
-            if ((waypoint - vehicle.Position).FlatXZ().LengthSquared() > reach * reach) return waypoint;
+            if ((waypoint - vehicle.Position).FlatXZ().LengthSquared() > reach * reach) break;
             _vehiclePathCursor++;
+        }
+        if (_vehiclePathCursor < _vehiclePath.Count)
+        {
+            // The infantry graph is sampled every two metres. Steering a fast vehicle at the
+            // first node outside its hull asks it to turn inside a radius it physically cannot
+            // make; hover craft then orbit that node at full steering lock. Aim several nodes
+            // ahead, while retaining the cursor so walls and completed nodes are still respected.
+            // Use at least the vehicle's full-speed turning radius. A target inside that circle
+            // is geometrically impossible to intercept without orbiting it; that was the exact
+            // full-steering-lock spin seen on Mantas, Vipers and hoverboards.
+            float lookAhead = MathX.Clamp(vehicle.Def.MaxSpeed
+                / MathF.Max(vehicle.Def.TurnRate, 0.1f) * 1.25f, reach, 24f);
+            int targetCursor = _vehiclePathCursor;
+            for (int i = _vehiclePathCursor; i < _vehiclePath.Count; i++)
+            {
+                targetCursor = i;
+                Vector3 candidate = world.Level.Nav.Nodes[_vehiclePath[i]].Position;
+                if ((candidate - vehicle.Position).FlatXZ().Length() >= lookAhead) break;
+            }
+            return world.Level.Nav.Nodes[_vehiclePath[targetCursor]].Position;
         }
         return destination;
     }
@@ -3097,14 +3644,25 @@ public sealed class BotController : Controller
         };
 
         bool turret = def.Seats.Length > 0 && def.Seats[0].Turret;
-        // A fixed hull gun has to point the whole vehicle at a visible enemy. Steering solely at
-        // the distant objective made Mantas, Vipers and Scorpions drive past opponents while their
-        // firing gate waited for an unrelated navigation yaw to line up.
-        Vector3 steeringTarget = !turret && targetVisible && target != null
+        float distance = (destination - v.Position).FlatXZ().Length();
+        bool hasModeRoute = world.Mode.Kind is GameModeKind.Assault
+            or GameModeKind.Onslaught or GameModeKind.Warfare;
+        // Fixed guns do need the hull to aim, but seeing an enemy must not replace a long mode
+        // route. That old policy made every moving opponent a new steering destination and left
+        // objective vehicles turning in circles. Deliver the vehicle to its objective first;
+        // once it reaches its class standoff, it can pivot and fight normally.
+        Vector3 weaponFlat = target != null ? (aimAt - v.Position).FlatXZ() : Vector3.Zero;
+        float enemyDistance = weaponFlat.Length();
+        float enemyYawError = enemyDistance > 0.01f
+            ? MathF.Abs(MathX.WrapAngle(MathF.Atan2(weaponFlat.X, weaponFlat.Z) - v.Yaw))
+            : 0f;
+        bool closeAlignedTarget = enemyDistance <= 18f && enemyYawError <= 0.35f;
+        bool hullCombatSteering = !turret && targetVisible && target != null
+            && (!hasModeRoute || distance <= hold + 3f || closeAlignedTarget);
+        Vector3 steeringTarget = hullCombatSteering
             ? aimAt : VehicleSteeringTarget(world, v, destination, dt);
         Vector3 flat = (steeringTarget - v.Position).FlatXZ();
         float steeringDistance = flat.Length();
-        float distance = (destination - v.Position).FlatXZ().Length();
 
         // Deployable artillery is worthless mobile and devastating parked, so deploy on arrival.
         if (def.CanDeploy && distance <= hold * 1.2f && v.Deploy <= 0f && !v.Deploying)
@@ -3158,23 +3716,26 @@ public sealed class BotController : Controller
 
         if (def.Seats.Length > 0 && def.Seats[0].Armed && !input.AltFire)
         {
-            Vector3 weaponFlat = (aimAt - v.Position).FlatXZ();
+            weaponFlat = (aimAt - v.Position).FlatXZ();
             float weaponYaw = weaponFlat.LengthSquared() > 0.001f
                 ? MathF.Atan2(weaponFlat.X, weaponFlat.Z) : v.Yaw;
             float weaponYawError = MathX.WrapAngle(weaponYaw - v.Yaw);
             bool aimed = turret || MathF.Abs(weaponYawError) < 0.22f;
             bool assaultObjectiveShot = Pawn.Team == world.Assault.Attackers
                 && assaultTarget is { Kind: ObjectiveKind.Destroy };
-            bool clearAssaultObjectiveShot = true;
-            if (assaultObjectiveShot)
+            // The camera can see over a cockpit rim or through a gap that the actual weapon
+            // muzzle cannot use. Validate every bot vehicle shot from the physical firing seat;
+            // this prevents Mantas on Frigate from repeatedly firing into the deck beneath them.
+            bool clearWeaponShot = true;
+            if ((targetVisible && target != null) || assaultObjectiveShot)
             {
-                Vector3 muzzle = v.SeatWorld(0);
+                Vector3 muzzle = v.SeatWorld(0) + MathX.Up * 0.4f;
                 Vector3 shot = aimAt - muzzle;
                 float shotDistance = shot.Length();
                 if (shotDistance > 1.8f)
                 {
                     Vector3 direction = shot / shotDistance;
-                    clearAssaultObjectiveShot = !world.Level.Collision.Raycast(muzzle,
+                    clearWeaponShot = !world.Level.Collision.Raycast(muzzle,
                         muzzle + direction * (shotDistance - 1.6f)).Hit;
                 }
             }
@@ -3182,11 +3743,12 @@ public sealed class BotController : Controller
             // generator from outside its defenders' range is what the heavy vehicles are for.
             bool objectiveInRange = distance < hold * 1.6f && world.Mode.Kind switch
             {
-                GameModeKind.Assault => assaultObjectiveShot && clearAssaultObjectiveShot,
+                GameModeKind.Assault => assaultObjectiveShot && clearWeaponShot,
                 GameModeKind.Onslaught or GameModeKind.Warfare => true,
                 _ => false,
             };
-            input.Fire = aimed && ((targetVisible && target != null && target.Team != Pawn.Team)
+            input.Fire = aimed && clearWeaponShot
+                && ((targetVisible && target != null && target.Team != Pawn.Team)
                 || objectiveInRange);
         }
 
@@ -3210,7 +3772,7 @@ public sealed class BotController : Controller
         // has stopped closing is either wedged, orbiting, or driving a route that does not
         // actually reach the goal, and in every one of those cases the bot is better off on
         // foot. Chasing a visible enemy is exempt: that destination moves by design.
-        bool chasingTarget = targetVisible && target != null;
+        bool chasingTarget = hullCombatSteering && !hasModeRoute;
         // A goal that advances — the next node in the chain, the next objective — legitimately
         // puts the bot further away than it has ever been. Start the measurement over instead
         // of reading that jump as a failure to close.
@@ -3750,7 +4312,12 @@ public sealed class BotController : Controller
             float waypointDistance = waypointDirection.Length();
             if (waypointDistance > 0.35f
                 && Vector3.Dot(dir, waypointDirection / waypointDistance) > 0.88f)
-                return;
+            {
+                if (_waterAvoidTimer <= 0f
+                    || !SegmentCrossesWater(world, Pawn.Position,
+                        world.Level.Nav.Nodes[_path[_pathCursor]].Position))
+                    return;
+            }
         }
 
         float stoppingProbe = MathX.Clamp(1.45f + Pawn.Velocity.Horizontal() * 0.16f, 1.45f, 3.6f);
@@ -3789,7 +4356,38 @@ public sealed class BotController : Controller
     {
         // Start well above the pawn's feet so an uphill ramp is not mistaken for empty space.
         Vector3 probe = Pawn.Position + direction * distance;
-        return HasGroundAt(world, probe, 4.25f);
+        Vector3 rayStart = probe + new Vector3(0f, 2.4f, 0f);
+        var hit = world.Level.Collision.Raycast(rayStart,
+            rayStart - new Vector3(0f, 6.65f, 0f));
+        if (!hit.Hit || hit.Kind == BrushKind.Lava) return false;
+        return _waterAvoidTimer <= 0f || !IsWaterAtFeet(world, hit.Point + MathX.Up * 0.05f);
+    }
+
+    private bool SegmentCrossesWater(GameWorld world, Vector3 from, Vector3 to)
+    {
+        float distance = Vector3.Distance(from, to);
+        int samples = Math.Max(1, (int)MathF.Ceiling(distance / 0.55f));
+        for (int sample = 1; sample <= samples; sample++)
+        {
+            Vector3 feet = Vector3.Lerp(from, to, sample / (float)samples);
+            // Coarse graph endpoints can both sit at bank height while the straight chord
+            // between them passes over the pool. Sampling the interpolated Y would call that
+            // dry air. Drop onto the real supporting floor at every sample; a causeway hits its
+            // solid deck, while an unsafe chord hits the submerged basin floor.
+            Vector3 top = feet + MathX.Up * 2.4f;
+            var support = world.Level.Collision.Raycast(top, top - MathX.Up * 9f);
+            if (!support.Hit || IsWaterAtFeet(world, support.Point + MathX.Up * 0.05f)) return true;
+        }
+        return false;
+    }
+
+    private bool IsWaterAtFeet(GameWorld world, Vector3 feet)
+    {
+        Vector3 half = new(Physics.PawnRadius, Physics.PawnHeight * 0.5f,
+            Physics.PawnRadius);
+        Vector3 center = feet + MathX.Up * half.Y;
+        return world.Level.Collision.VolumeAt(center - half, center + half,
+            _collisionScratch) == BrushKind.Water;
     }
 
     private static bool HasGroundAt(GameWorld world, Vector3 point, float maximumDrop)

@@ -55,6 +55,10 @@ public sealed class Menu
     private float _galleryGridTop;
     private float _galleryGridBottom;
     private float _galleryScrollStep = 120f;
+    // Card drawing and pointer hit-testing must use exactly the same clip rule. At maximum
+    // scroll, floating-point rounding can put the last row a fraction of a pixel beyond the
+    // nominal viewport even though it is visibly flush with the edge.
+    private const float GalleryClipEpsilon = 0.75f;
     private bool _pointerActive;
     /// <summary>
     /// True while the mouse owns selection. Unlike pointer visibility this survives a stationary
@@ -346,7 +350,8 @@ public sealed class Menu
         {
             ItemRect r = _itemRects[i];
             if (Screen == MenuScreen.MapGallery
-                && (r.Y < _galleryGridTop || r.Y + r.Height > _galleryGridBottom)) continue;
+                && !GalleryCardInsideViewport(r.Y, r.Height,
+                    _galleryGridTop, _galleryGridBottom)) continue;
             if (position.X < r.X || position.X > r.X + r.Width) continue;
             if (position.Y < r.Y || position.Y > r.Y + r.Height) continue;
             if (r.Index < 0 || r.Index >= _items.Count) continue;
@@ -355,6 +360,45 @@ public sealed class Menu
             return r.Index;
         }
         return -1;
+    }
+
+    private static bool GalleryCardInsideViewport(float y, float height, float top, float bottom)
+        => y >= top - GalleryClipEpsilon && y + height <= bottom + GalleryClipEpsilon;
+
+    /// <summary>
+    /// Headless regression for the final gallery row: a card rendered a tiny fraction past the
+    /// mathematical lower edge must still activate, while a genuinely clipped card must not.
+    /// </summary>
+    public static int RunGalleryPointerSelfTest()
+    {
+        bool activated = false;
+        var menu = new Menu
+        {
+            Screen = MenuScreen.MapGallery,
+            _galleryGridTop = 200f,
+            _galleryGridBottom = 890.4f,
+        };
+        menu._items.Add(new MenuItem
+        {
+            Label = "bottom-row",
+            Kind = MenuItemKind.Action,
+            OnActivate = () => activated = true,
+        });
+        menu._itemRects.Add(new ItemRect(0, 300f, 701.0001f, 300f, 189.4001f,
+            0f, 0f, 0f));
+        menu.HandleMouse(new Vector2(450f, 780f), moved: true,
+            leftClick: true, rightClick: false, wheel: 0f);
+
+        bool clippedActivated = false;
+        menu._items[0].OnActivate = () => clippedActivated = true;
+        menu._itemRects[0] = new ItemRect(0, 300f, 703f, 300f, 190f, 0f, 0f, 0f);
+        menu.HandleMouse(new Vector2(450f, 780f), moved: true,
+            leftClick: true, rightClick: false, wheel: 0f);
+
+        bool passed = activated && !clippedActivated;
+        Console.WriteLine($"GALLERY_POINTER {(passed ? "PASS" : "FAIL")} "
+            + $"bottomRowActivated={activated} clippedRejected={!clippedActivated}");
+        return passed ? 0 : 1;
     }
 
     private static bool Contains(in ItemRect rect, Vector2 position)
@@ -1258,7 +1302,7 @@ public sealed class Menu
             float y = gridTop + row * rowStep - _scroll;
             // UiRenderer has no scissor stack. Draw only complete cards inside the viewport so
             // thumbnails never spill into the title or the highlighted-map introduction.
-            if (y < gridTop - 0.5f || y + cardH > gridBottom + 0.5f) continue;
+            if (!GalleryCardInsideViewport(y, cardH, gridTop, gridBottom)) continue;
             bool selected = i == SelectedIndex;
             bool enabled = _items[i].Enabled();
 

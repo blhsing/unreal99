@@ -326,7 +326,8 @@ public static class SaveStore
                 new Vector3(ps.ColorR, ps.ColorG, ps.ColorB));
 
             // AddPawn respawns at a spawn point; everything below puts the pawn back where it was.
-            pawn.Position = new Vector3(ps.X, ps.Y, ps.Z);
+            Vector3 savedPosition = new(ps.X, ps.Y, ps.Z);
+            pawn.Position = SanitizeSavedPawnPosition(level, savedPosition);
             pawn.Velocity = new Vector3(ps.VX, ps.VY, ps.VZ);
             pawn.Yaw = ps.Yaw;
             pawn.Pitch = ps.Pitch;
@@ -348,7 +349,10 @@ public static class SaveStore
             pawn.Captures = ps.Captures; pawn.DominationScore = ps.DominationScore;
             pawn.FlagCarrierKills = ps.FlagCarrierKills;
             pawn.Streak = ps.Streak;
-            pawn.ShotsFired = ps.ShotsFired; pawn.ShotsHit = ps.ShotsHit;
+            pawn.ShotsFired = Math.Max(0, ps.ShotsFired);
+            // Builds before attack-level accuracy could save one hit per flak shard, producing
+            // impossible values above 100%. Preserve the history without preserving corruption.
+            pawn.ShotsHit = Math.Clamp(ps.ShotsHit, 0, pawn.ShotsFired);
             pawn.HasFlag = ps.HasFlag;
             pawn.CarriedFlag = (Team)ps.CarriedFlag;
 
@@ -454,5 +458,36 @@ public static class SaveStore
         }
         mode.LivesLeft.Clear();
         foreach (var l in save.Lives) mode.LivesLeft[l.PawnId] = l.Remaining;
+    }
+
+    /// <summary>
+    /// Old builds could save a pawn while its feet were already below a generated floor or just
+    /// inside a wall. Restoring that coordinate verbatim leaves the collision solver unable to
+    /// choose a useful outward direction, which looks like rapid back-and-forth motion. Prefer a
+    /// nearby navigation node with a real capsule-sized clearance whenever the saved capsule is
+    /// embedded; valid mid-air and swimming saves remain untouched.
+    /// </summary>
+    private static Vector3 SanitizeSavedPawnPosition(Level level, Vector3 saved)
+    {
+        Vector3 half = new(Physics.PawnRadius, Physics.PawnHeight * 0.5f,
+            Physics.PawnRadius);
+        Vector3 center = saved + MathX.Up * half.Y;
+        var scratch = new List<int>(32);
+        if (!level.Collision.BoxOverlapsSolid(center - half, center + half, scratch)) return saved;
+
+        var candidates = new List<int>(64);
+        level.Nav.QueryRadius(saved, 18f, candidates);
+        int best = -1;
+        float bestDistance = float.MaxValue;
+        foreach (int nodeIndex in candidates)
+        {
+            Vector3 feet = level.Nav.Nodes[nodeIndex].Position;
+            center = feet + MathX.Up * half.Y;
+            if (level.Collision.BoxOverlapsSolid(center - half, center + half, scratch)) continue;
+            float distance = Vector3.DistanceSquared(feet, saved)
+                + MathF.Abs(feet.Y - saved.Y) * 8f;
+            if (distance < bestDistance) { bestDistance = distance; best = nodeIndex; }
+        }
+        return best >= 0 ? level.Nav.Nodes[best].Position + new Vector3(0f, 0.03f, 0f) : saved;
     }
 }

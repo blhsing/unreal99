@@ -28,7 +28,9 @@ if (args.Contains("--hotplugtest"))
 if (args.Contains("--bindingtest"))
     return BindingProfile.RunSelfTest() | SettingsStore.RunPlayerThreeMigrationSelfTest()
         | SettingsStore.RunVehicleUseMigrationSelfTest() | RawInput.RunKeyNormalizationSelfTest()
-        | SettingsStore.RunHoverboardMigrationSelfTest() | Weapons.RunHudGroupSelfTest();
+        | SettingsStore.RunHoverboardMigrationSelfTest() | SettingsStore.RunTenSlotMigrationSelfTest()
+        | Weapons.RunHudGroupSelfTest();
+if (args.Contains("--gallerytest")) return Menu.RunGalleryPointerSelfTest();
 
 // Only normal game sessions participate in the mutex; command-line diagnostics and installer
 // helpers above remain usable while the game is open.

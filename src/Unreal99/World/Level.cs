@@ -1244,7 +1244,8 @@ public sealed class LevelBuilder
 
         _level.Nav.Generate(_level.Collision);
         foreach (var pad2 in _level.JumpPads)
-            _level.Nav.AddSpecialLink(pad2.Position, pad2.Destination, NavFlags.JumpPad);
+            _level.Nav.AddSpecialLink(pad2.Position, pad2.Destination, NavFlags.JumpPad,
+                discourageOrdinaryTraversal: true);
         foreach (var tp in _level.Teleporters)
             _level.Nav.AddSpecialLink(tp.Position, tp.Destination, NavFlags.Teleporter);
         foreach (var p in _level.Pickups)

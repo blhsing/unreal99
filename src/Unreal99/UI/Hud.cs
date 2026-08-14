@@ -712,7 +712,7 @@ public sealed class Hud
 
     /// <summary>
     /// Compact map-specific weapon positions. Unavailable weapons are absent rather than wasting
-    /// dark cards, so every arena can show its complete authored arsenal in at most eleven slots.
+    /// dark cards, so every arena can show its complete authored arsenal in at most ten slots.
     /// </summary>
     private void DrawWeaponInventory(UiRenderer ui, GameWorld world, Pawn pawn, BindingProfile bindings,
         int width, int height, float s, Vector3 accent)
@@ -779,7 +779,6 @@ public sealed class Hud
 
             GameAction action = i < 9 ? GameAction.Weapon1 + i : GameAction.Weapon10;
             string key = BindingNames.CompactControl(bindings[action]);
-            if (i == 10 && !string.IsNullOrEmpty(key)) key += "×2";
             if (!string.IsNullOrEmpty(key))
             {
                 key = FitText(ui, FaceBold, font, key, cardWidth - 8f);

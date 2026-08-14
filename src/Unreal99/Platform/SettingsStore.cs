@@ -11,7 +11,7 @@ namespace Unreal99.Platform;
 /// </summary>
 public sealed class UserSettings
 {
-    public const int CurrentVersion = 8;
+    public const int CurrentVersion = 9;
     public int Version = CurrentVersion;
 
     // --- video ---
@@ -285,6 +285,18 @@ public static class SettingsStore
                     d.Bindings[GameAction.Hoverboard] =
                         BindingProfile.CreateDefault(i)[GameAction.Hoverboard];
                 }
+
+                // Version 8 briefly exposed an eleventh HUD slot through a second 0 press. Saves
+                // made by that build can contain the recognizable tail 1..0,0 beginning where
+                // SwitchSeat now lives. Restore the current seat key and the ten numeric actions;
+                // do not touch any profile whose tail was genuinely customized.
+                if (s.Version < 9 && LooksLikeVersion8ElevenSlotTail(p))
+                {
+                    BindingProfile defaults = BindingProfile.CreateDefault(i);
+                    d.Bindings[GameAction.SwitchSeat] = defaults[GameAction.SwitchSeat];
+                    for (int slot = 0; slot < 10; slot++)
+                        d.Bindings[GameAction.Weapon1 + slot] = defaults[GameAction.Weapon1 + slot];
+                }
             }
         }
 
@@ -311,6 +323,22 @@ public static class SettingsStore
                 if (action == (int)GameAction.Hoverboard) continue;
                 if (device.Bindings.Bindings[action] != defaults.Bindings[action]) return false;
             }
+            return true;
+        }
+
+        static bool LooksLikeVersion8ElevenSlotTail(PlayerProfileData profile)
+        {
+            int start = (int)GameAction.SwitchSeat;
+            if (profile.BindingKeys.Count != (int)GameAction.Count
+                || profile.BindingMouseButtons.Count != (int)GameAction.Count) return false;
+            Key[] legacy =
+            [
+                Key.Number1, Key.Number2, Key.Number3, Key.Number4, Key.Number5,
+                Key.Number6, Key.Number7, Key.Number8, Key.Number9, Key.Number0, Key.Number0,
+            ];
+            for (int i = 0; i < legacy.Length; i++)
+                if (profile.BindingKeys[start + i] != (int)legacy[i]
+                    || profile.BindingMouseButtons[start + i] >= 0) return false;
             return true;
         }
     }
@@ -411,6 +439,45 @@ public static class SettingsStore
             && devices[0].Bindings[GameAction.Weapon9] == InputBinding.OnKey(Key.Number9)
             && devices[0].Bindings[GameAction.Weapon10] == InputBinding.OnKey(Key.Number0);
         Console.WriteLine($"舊版氣墊板／數字武器槽設定遷移: {(pass ? "通過" : "失敗")}");
+        return pass ? 0 : 1;
+    }
+
+    /// <summary>Repairs the released version-8 eleven-slot numeric tail without touching custom keys.</summary>
+    public static int RunTenSlotMigrationSelfTest()
+    {
+        var legacy = new UserSettings { Version = 8 };
+        BindingProfile current = BindingProfile.CreateDefault(0);
+        var stored = new PlayerProfileData();
+        foreach (InputBinding binding in current.Bindings)
+        {
+            stored.BindingKeys.Add((int)binding.Key);
+            stored.BindingMouseButtons.Add(binding.MouseButton);
+        }
+        int start = (int)GameAction.SwitchSeat;
+        Key[] oldTail =
+        [
+            Key.Number1, Key.Number2, Key.Number3, Key.Number4, Key.Number5,
+            Key.Number6, Key.Number7, Key.Number8, Key.Number9, Key.Number0, Key.Number0,
+        ];
+        for (int i = 0; i < oldTail.Length; i++)
+        {
+            stored.BindingKeys[start + i] = (int)oldTail[i];
+            stored.BindingMouseButtons[start + i] = -1;
+        }
+        legacy.Players.Add(stored);
+
+        PlayerDevice[] devices = [PlayerDevice.Keyboard(0)];
+        Apply(legacy, new RenderSettings(), new ControlSettings(), devices, new string[1],
+            new MatchSetup(), out _, out _, out _);
+        bool pass = devices[0].Bindings[GameAction.SwitchSeat] == InputBinding.OnKey(Key.C);
+        Key[] expected =
+        [
+            Key.Number1, Key.Number2, Key.Number3, Key.Number4, Key.Number5,
+            Key.Number6, Key.Number7, Key.Number8, Key.Number9, Key.Number0,
+        ];
+        for (int i = 0; i < expected.Length; i++)
+            pass &= devices[0].Bindings[GameAction.Weapon1 + i] == InputBinding.OnKey(expected[i]);
+        Console.WriteLine($"舊版第十一武器槽遷移: {(pass ? "通過" : "失敗")}");
         return pass ? 0 : 1;
     }
 }

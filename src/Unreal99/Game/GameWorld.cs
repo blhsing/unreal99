@@ -157,6 +157,12 @@ public sealed class GameWorld
     private readonly Dictionary<int, Matrix4x4[]> _boneWorld = new();
     private readonly Dictionary<int, Matrix4x4[]> _boneSkin = new();
     private readonly List<Vector3> _spawnAvoid = new(16);
+    /// <summary>
+    /// Accuracy is successful attacks divided by trigger pulls, not damage events. A flak blast
+    /// can hit with several shards and an explosive can touch several targets, but the attack is
+    /// credited only once.
+    /// </summary>
+    private readonly HashSet<(int PawnId, int AttackSequence)> _accuracyHits = new();
 
     // Domination state
     /// <summary>The Onslaught node network. Empty on every other mode.</summary>
@@ -190,6 +196,9 @@ public sealed class GameWorld
     public int HoverboardTows { get; private set; }
     public int AssaultObjectiveCompletions { get; private set; }
     public int AssaultRoundsCompleted { get; private set; }
+    public int JumpPadLaunches { get; private set; }
+    public int RepeatedJumpPadLaunches { get; private set; }
+    private readonly Dictionary<int, (Vector3 Position, float Time)> _lastJumpPadLaunch = new();
     public int NextVehicleId = 1;
 
     public Vehicle FindVehicle(int id)
@@ -341,6 +350,7 @@ public sealed class GameWorld
     public int VoidDeaths { get; private set; }
     public int FallDeaths { get; private set; }
     public int LavaDeaths { get; private set; }
+    public int DrowningDeaths { get; private set; }
     public readonly List<string> EnvironmentalDeathDetails = new();
 
     public ParticleSystem Particles => _renderer.Particles;
@@ -392,6 +402,7 @@ public sealed class GameWorld
         VoidDeaths = 0;
         FallDeaths = 0;
         LavaDeaths = 0;
+        DrowningDeaths = 0;
         EnvironmentalDeathDetails.Clear();
         VehicleBoardings = 0;
         AssaultAttackerVehicleBoardings = 0;
@@ -405,6 +416,10 @@ public sealed class GameWorld
         HoverboardTows = 0;
         AssaultObjectiveCompletions = 0;
         AssaultRoundsCompleted = 0;
+        JumpPadLaunches = 0;
+        RepeatedJumpPadLaunches = 0;
+        _lastJumpPadLaunch.Clear();
+        _accuracyHits.Clear();
 
         foreach (var p in level.Pickups)
         {
@@ -814,6 +829,37 @@ public sealed class GameWorld
         }
         if (e.JumpPad)
         {
+            JumpPad pad = default;
+            float nearest = 3f * 3f;
+            foreach (JumpPad candidate in Level.JumpPads)
+            {
+                float distance = Vector3.DistanceSquared(candidate.Position, pawn.Position);
+                if (distance >= nearest) continue;
+                nearest = distance;
+                pad = candidate;
+            }
+            if (nearest < 3f * 3f)
+            {
+                bool countLaunch = true;
+                if (_lastJumpPadLaunch.TryGetValue(pawn.Id, out var previous)
+                    && Vector3.DistanceSquared(previous.Position, pad.Position) < 0.5f * 0.5f)
+                {
+                    float elapsed = Time - previous.Time;
+                    // Pawn.Move can overlap the trigger for several frames during one launch.
+                    // Those events are one pad use, not an instant repeat.
+                    if (elapsed < 0.5f) countLaunch = false;
+                    else if (elapsed < 8f) RepeatedJumpPadLaunches++;
+                }
+                if (countLaunch)
+                {
+                    JumpPadLaunches++;
+                    _lastJumpPadLaunch[pawn.Id] = (pad.Position, Time);
+                    if (Environment.GetEnvironmentVariable("UNREAL99_NAV_DEBUG") == "1")
+                        Console.WriteLine($"跳板使用: {pawn.Name} · 板 {pad.Position} · "
+                            + $"時間 {Time:0.00}s · 重複 {RepeatedJumpPadLaunches}");
+                }
+            }
+            else JumpPadLaunches++;
             OnSound?.Invoke(SoundId.JumpPad, pawn.Position, 0.9f);
             Particles.EnergyBurst(pawn.Position, e.JumpPadColor, 0.9f);
         }
@@ -1095,6 +1141,14 @@ public sealed class GameWorld
                 new Vector4(def.Tint * 3f, 0.9f), new Vector4(def.Tint, 0f), 0.3f, 0.05f, 0.05f, Spr.Flare);
     }
 
+    /// <summary>Credits one trigger pull once, regardless of how many pellets or victims it hits.</summary>
+    private void RegisterAccuracyHit(Pawn shooter, int attackSequence = -1)
+    {
+        if (shooter == null) return;
+        int sequence = attackSequence >= 0 ? attackSequence : shooter.ShotsFired;
+        if (_accuracyHits.Add((shooter.Id, sequence))) shooter.ShotsHit++;
+    }
+
     private void HitscanShot(Pawn shooter, Vector3 origin, Vector3 dir, in FireDef fire, float damageScale,
         Vector3 tint)
     {
@@ -1119,7 +1173,7 @@ public sealed class GameWorld
         {
             float dmg = fire.Damage * damageScale;
             if (headshot && fire.HeadshotMultiplier > 1f) dmg *= fire.HeadshotMultiplier;
-            shooter.ShotsHit++;
+            RegisterAccuracyHit(shooter);
             Damage(hitPawn, shooter, dmg, DamageType.Hitscan, dir, headshot);
             if (fire.Knockback > 0f) hitPawn.Velocity += dir * fire.Knockback * 0.25f;
             Particles.BloodSpray(pawnPoint, -dir, 0.8f);
@@ -1157,7 +1211,7 @@ public sealed class GameWorld
 
         if (vehicle != null && (node < 0 || vDist <= nDist))
         {
-            shooter.ShotsHit++;
+            RegisterAccuracyHit(shooter);
             if (supportFriendlyNodes && vehicle.Team == shooter.Team)
             {
                 vehicle.Health = MathF.Min(vehicle.Def.Health, vehicle.Health + damage);
@@ -1183,7 +1237,7 @@ public sealed class GameWorld
                 : Onslaught.Hurt(node, shooter.Team, damage, out hit);
             Effects.AddTracer(origin, point, tint, 0.04f, 0.08f);
             if (evt == NodeEvent.None) return false;    // our own node, or an untouchable core
-            shooter.ShotsHit++;
+            RegisterAccuracyHit(shooter);
             Particles.EnergyBurst(point, evt == NodeEvent.Blocked ? new Vector3(1f, 0.4f, 0.2f) : tint, 0.7f);
             if (evt == NodeEvent.Blocked && shooter.PlayerIndex >= 0)
                 FeedbackFor(shooter).Sub(Loc.OnsNodeBlocked, 1f);
@@ -1218,7 +1272,7 @@ public sealed class GameWorld
         float t = MathF.Max(0f, -b - MathF.Sqrt(disc));
         if (t > maxDist) return false;
 
-        shooter.ShotsHit++;
+        RegisterAccuracyHit(shooter);
         Vector3 point = origin + dir * t;
         Effects.AddTracer(origin, point, tint, 0.04f, 0.08f);
         Particles.ImpactSparks(point, -dir, 1.4f, new Vector3(1f, 0.75f, 0.3f));
@@ -1250,7 +1304,7 @@ public sealed class GameWorld
             OnSound?.Invoke(SoundId.PulseBeam, pawn.Position, 0.5f);
             if (target != null)
             {
-                pawn.ShotsHit++;
+                RegisterAccuracyHit(pawn);
                 if (target.Team != Team.None && target.Team == pawn.Team)
                 {
                     // A Link beam on a team-mate is harmless and boosts the teammate's Link Gun
@@ -1301,8 +1355,7 @@ public sealed class GameWorld
 
         if (target != null)
         {
-            pawn.ShotsFired++;
-            pawn.ShotsHit++;
+            RegisterAccuracyHit(pawn);
             Damage(target, pawn, fire.Damage * damageScale, DamageType.Melee, dir, head);
             target.Velocity += dir * fire.Knockback + MathX.Up * fire.Knockback * 0.3f;
             Particles.BloodSpray(point, -dir, 1.4f);
@@ -1315,7 +1368,6 @@ public sealed class GameWorld
         else if (HitStructures(pawn, origin, dir, maxDist, fire.Damage * damageScale,
                      new Vector3(0.7f, 0.85f, 1f)))
         {
-            pawn.ShotsFired++;
             OnSound?.Invoke(SoundId.HammerHit, origin + dir * MathF.Min(maxDist, fire.Range), 1f);
         }
         else if (worldHit.Hit)
@@ -1327,7 +1379,6 @@ public sealed class GameWorld
             if (fire.SelfKnockback > 0f || Vector3.Dot(worldHit.Normal, MathX.Up) > 0.6f)
                 pawn.Velocity += worldHit.Normal * MathF.Max(fire.SelfKnockback, 10.5f);
         }
-        pawn.ShotsFired++;
     }
 
     // ---------------------------------------------------------------- projectiles
@@ -1340,7 +1391,7 @@ public sealed class GameWorld
         {
             if (Projectiles[i].Active) continue;
             Projectiles[i] = ProjectileFactory.Create(kind, fire, origin, dir, owner.Id, owner.Team,
-                tint, damageScale, Rng);
+                owner.ShotsFired, tint, damageScale, Rng);
             return i;
         }
         return -1;
@@ -1588,7 +1639,7 @@ public sealed class GameWorld
                 var owner = FindPawn(p.OwnerId);
                 float dmg = p.Damage * p.DamageScale;
                 if (headshot && p.HeadshotMultiplier > 1f) dmg *= p.HeadshotMultiplier;
-                if (owner != null) owner.ShotsHit++;
+                if (owner != null) RegisterAccuracyHit(owner, p.AttackSequence);
                 Damage(hit, owner, dmg, DamageType.Generic, MathX.SafeNormalize(p.Velocity, MathX.Forward),
                     headshot);
                 hit.Velocity += MathX.SafeNormalize(p.Velocity, Vector3.Zero) * p.Knockback * 0.22f;
@@ -1616,7 +1667,7 @@ public sealed class GameWorld
                         float dmg = p.Damage * p.DamageScale;
                         if (Mode.TeamBased && owner != null && struckV.Team != Team.None
                             && owner.Team == struckV.Team) dmg *= Mode.FriendlyFire;
-                        if (owner != null) owner.ShotsHit++;
+                        if (owner != null) RegisterAccuracyHit(owner, p.AttackSequence);
                         DamageVehicle(struckV, owner, dmg);
                         p.Position = vPoint;
                         if (p.SplashRadius > 0f) ExplodeProjectile(ref p);
@@ -1952,7 +2003,8 @@ public sealed class GameWorld
         if (type == DamageType.Void) VoidDeaths++;
         else if (type == DamageType.Fall) FallDeaths++;
         else if (type == DamageType.Lava) LavaDeaths++;
-        if (type is DamageType.Void or DamageType.Fall or DamageType.Lava)
+        else if (type == DamageType.Drowning) DrowningDeaths++;
+        if (type is DamageType.Void or DamageType.Fall or DamageType.Lava or DamageType.Drowning)
         {
             if (EnvironmentalDeathDetails.Count >= 32) EnvironmentalDeathDetails.RemoveAt(0);
             EnvironmentalDeathDetails.Add($"{victim.Name}: {type} at {victim.Position} velocity {victim.Velocity} " +
@@ -3436,6 +3488,7 @@ public sealed class GameWorld
             ? MathX.DirFromYawPitch(v.SeatYaw[seat], v.SeatPitch[seat])
             : MathX.DirFromYawPitch(v.Yaw + MathX.Pi, v.SeatPitch[seat]);
 
+        pawn.ShotsFired++;
         switch (fire.Mode)
         {
             case FireMode.Hitscan:
@@ -3448,7 +3501,6 @@ public sealed class GameWorld
                 MeleeSwing(pawn, origin, aim, fire, 1f);
                 break;
         }
-        pawn.ShotsFired++;
         OnSound?.Invoke(WeaponSound(WeaponKind.RocketLauncher, alt), v.Position, 0.9f);
     }
 

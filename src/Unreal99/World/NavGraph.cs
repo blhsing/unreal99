@@ -253,7 +253,8 @@ public sealed class NavGraph
     }
 
     /// <summary>Adds a one-way traversal link, used for jump pads, lifts and teleporters.</summary>
-    public void AddSpecialLink(Vector3 from, Vector3 to, NavFlags flagOnSource)
+    public void AddSpecialLink(Vector3 from, Vector3 to, NavFlags flagOnSource,
+        bool discourageOrdinaryTraversal = false)
     {
         int a = FindNearest(from), b = FindNearest(to);
         if (a < 0 || b < 0 || a == b) return;
@@ -265,7 +266,16 @@ public sealed class NavGraph
         {
             var n = Nodes[i];
             int first = rebuilt.Count;
-            for (int e = 0; e < n.EdgeCount; e++) rebuilt.Add(edgeList[n.FirstEdge + e]);
+            for (int e = 0; e < n.EdgeCount; e++)
+            {
+                NavEdge edge = edgeList[n.FirstEdge + e];
+                // A physical launch pad is hazardous floor unless this exact special edge is
+                // useful. Keep ordinary graph connectivity as a fallback, but make A* prefer a
+                // modest walk around its trigger. Lifts deliberately do not request this cost.
+                if (discourageOrdinaryTraversal && !edge.Jump && (i == a || edge.To == a))
+                    edge.Cost += 12f;
+                rebuilt.Add(edge);
+            }
             if (i == a)
             {
                 rebuilt.Add(new NavEdge { To = b, Cost = Vector3.Distance(Nodes[a].Position, Nodes[b].Position) * 0.35f, Jump = true });
@@ -349,7 +359,8 @@ public sealed class NavGraph
     /// Finds a node path from start to goal. Returns false if unreachable.
     /// The output list is filled with node indices in travel order (excluding the start node).
     /// </summary>
-    public bool FindPath(int start, int goal, List<int> outPath, int maxExpansions = 4000)
+    public bool FindPath(int start, int goal, List<int> outPath, int maxExpansions = 4000,
+        Func<int, bool> canVisit = null, Func<int, int, bool> canTraverse = null)
     {
         outPath.Clear();
         if (start < 0 || goal < 0 || start >= Nodes.Length || goal >= Nodes.Length) return false;
@@ -388,6 +399,8 @@ public sealed class NavGraph
             {
                 var edge = Edges[node.FirstEdge + e];
                 int next = edge.To;
+                if (canVisit != null && !canVisit(next)) continue;
+                if (canTraverse != null && !canTraverse(current, next)) continue;
                 Touch(next);
                 if (_closed[next]) continue;
 
@@ -409,9 +422,10 @@ public sealed class NavGraph
     /// island—to the reachable node closest to it. Objective-driven bots must keep advancing
     /// instead of standing still merely because a flag dais sampled onto the wrong nav island.
     /// </summary>
-    public bool FindPathToward(int start, int goal, List<int> outPath, int maxExpansions = 4000)
+    public bool FindPathToward(int start, int goal, List<int> outPath, int maxExpansions = 4000,
+        Func<int, bool> canVisit = null, Func<int, int, bool> canTraverse = null)
     {
-        if (FindPath(start, goal, outPath, maxExpansions)) return true;
+        if (FindPath(start, goal, outPath, maxExpansions, canVisit, canTraverse)) return true;
         outPath.Clear();
         if (start < 0 || goal < 0 || start >= Nodes.Length || goal >= Nodes.Length) return false;
         if (_gScore.Length != Nodes.Length) AllocateSearchBuffers();
@@ -432,6 +446,8 @@ public sealed class NavGraph
             for (int e = 0; e < node.EdgeCount; e++)
             {
                 int next = Edges[node.FirstEdge + e].To;
+                if (canVisit != null && !canVisit(next)) continue;
+                if (canTraverse != null && !canTraverse(current, next)) continue;
                 if (_stamp[next] == _searchStamp) continue;
                 Touch(next);
                 _cameFrom[next] = current;
@@ -458,7 +474,8 @@ public sealed class NavGraph
     /// Choosing a distant node in the current directed component keeps bots exploring instead
     /// of repeatedly standing still while random goals or visible opponents remain unreachable.
     /// </summary>
-    public bool FindPathToFarthestReachable(int start, List<int> outPath, int maxExpansions = 4000)
+    public bool FindPathToFarthestReachable(int start, List<int> outPath, int maxExpansions = 4000,
+        Func<int, bool> canVisit = null, Func<int, int, bool> canTraverse = null)
     {
         outPath.Clear();
         if (start < 0 || start >= Nodes.Length) return false;
@@ -480,6 +497,8 @@ public sealed class NavGraph
             for (int e = 0; e < node.EdgeCount; e++)
             {
                 int next = Edges[node.FirstEdge + e].To;
+                if (canVisit != null && !canVisit(next)) continue;
+                if (canTraverse != null && !canTraverse(current, next)) continue;
                 if (_stamp[next] == _searchStamp) continue;
                 Touch(next);
                 _cameFrom[next] = current;
@@ -497,6 +516,53 @@ public sealed class NavGraph
 
         if (farthest == start) return false;
         for (int node = farthest; node != -1 && node != start; node = _cameFrom[node])
+            outPath.Add(node);
+        outPath.Reverse();
+        return outPath.Count > 0;
+    }
+
+    /// <summary>
+    /// Breadth-first search of the start node's directed component, stopping at the first node
+    /// accepted by the caller. Water escape uses this instead of measuring straight-line range:
+    /// a dry floor across a harbour wall can be geometrically close and completely unreachable,
+    /// while the real submerged ramp is farther away along the basin floor.
+    /// </summary>
+    public bool FindPathToNearestReachable(int start, List<int> outPath,
+        Func<int, bool> accepts, int maxExpansions = 4000)
+    {
+        outPath.Clear();
+        if (start < 0 || start >= Nodes.Length || accepts == null) return false;
+        if (_gScore.Length != Nodes.Length) AllocateSearchBuffers();
+
+        _searchStamp++;
+        int read = 0, write = 0;
+        _openHeap[write++] = start;
+        Touch(start);
+        _cameFrom[start] = -1;
+
+        int found = -1;
+        int expansions = 0;
+        while (read < write && expansions++ < maxExpansions)
+        {
+            int current = _openHeap[read++];
+            if (current != start && accepts(current))
+            {
+                found = current;
+                break;
+            }
+            NavNode node = Nodes[current];
+            for (int edgeIndex = 0; edgeIndex < node.EdgeCount; edgeIndex++)
+            {
+                int next = Edges[node.FirstEdge + edgeIndex].To;
+                if (_stamp[next] == _searchStamp) continue;
+                Touch(next);
+                _cameFrom[next] = current;
+                _openHeap[write++] = next;
+            }
+        }
+
+        if (found < 0) return false;
+        for (int node = found; node != -1 && node != start; node = _cameFrom[node])
             outPath.Add(node);
         outPath.Reverse();
         return outPath.Count > 0;

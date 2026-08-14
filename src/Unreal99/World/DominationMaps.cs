@@ -376,6 +376,21 @@ public static partial class Maps
             Vector3 hi = Vector3.Max(a, c) + new Vector3(MathF.Abs(dz) * 2.5f, 0f, MathF.Abs(dx) * 2.5f);
             b.Solid(new Vector3(lo.X, Floor - 0.6f, lo.Z), new Vector3(hi.X, Floor, hi.Z), MatId.Concrete, true, 0.8f);
         }
+        // Falling beside a causeway used to be fatal by attrition: the water floor is 2.4 m
+        // below the ring and each bridge presented a vertical wall, so swimming/jumping could
+        // never regain land. Four submerged slopes preserve the moat while making every quadrant
+        // escapable. They deliberately overlap both the basin and the dry ring and are eight
+        // metres wide: a pawn capsule approaching the side of the former four-metre ramps could
+        // wedge on the fascia a few centimetres from safety and drown.
+        const float PoolFloor = -5.35f;
+        b.Ramp(new Vector3(8.4f, PoolFloor, -10f), new Vector3(15.2f, Floor, 10f), 0,
+            MatId.Concrete, true, 0.7f);
+        b.Ramp(new Vector3(-15.2f, PoolFloor, -10f), new Vector3(-8.4f, Floor, 10f), 1,
+            MatId.Concrete, true, 0.7f);
+        b.Ramp(new Vector3(-10f, PoolFloor, 8.4f), new Vector3(10f, Floor, 15.2f), 2,
+            MatId.Concrete, true, 0.7f);
+        b.Ramp(new Vector3(-10f, PoolFloor, -15.2f), new Vector3(10f, Floor, -8.4f), 3,
+            MatId.Concrete, true, 0.7f);
         b.AddControlPoint(new Vector3(0f, Floor, 0f), Loc.DomPointSpring);
 
         // --- colonnade ring, second point on its north side ---
@@ -434,8 +449,11 @@ public static partial class Maps
         }
 
         // --- loadout per the original: no minigun body, only its ammo ---
-        b.Weapon(new Vector3(-16f, -3.0f, 0f), WeaponKind.BioRifle);
-        b.Weapon(new Vector3(16f, -3.0f, 0f), WeaponKind.Ripper);
+        // Keep ground weapons clear of the jump-pad triggers at x = +/-16. Their old exact
+        // overlap made collecting a basic weapon forcibly launch the player, and bots quite
+        // reasonably returned after respawn only to repeat the ride.
+        b.Weapon(new Vector3(-16f, -3.0f, -4f), WeaponKind.BioRifle);
+        b.Weapon(new Vector3(16f, -3.0f, 4f), WeaponKind.Ripper);
         b.Weapon(new Vector3(0f, Shrine + 0.9f, 5f), WeaponKind.SniperRifle);
         b.Weapon(new Vector3(0f, Colonnade + 0.9f, 19f), WeaponKind.FlakCannon);
         b.Weapon(new Vector3(-19f, Colonnade + 0.9f, 0f), WeaponKind.FlakCannon);

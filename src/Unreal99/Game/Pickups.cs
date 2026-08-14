@@ -123,6 +123,8 @@ public sealed class PickupModels : IDisposable
     private readonly MeshSection[][] _sections = new MeshSection[(int)PickupKind.Count][];
     public Mesh Flag { get; }
     public MeshSection[] FlagSections { get; }
+    public Mesh ObjectiveBeacon { get; }
+    public MeshSection[] ObjectiveBeaconSections { get; }
     public Mesh AmmoBox { get; }
     public MeshSection[] AmmoBoxSections { get; }
 
@@ -314,6 +316,22 @@ public sealed class PickupModels : IDisposable
             AmmoBox = Mesh.CreateStatic<Vertex>(gl, v, i3, VertexLayouts.Static);
             AmmoBoxSections = s;
         }
+
+        {
+            // Assault objectives need a neutral beacon rather than a flag: using the CTF cloth
+            // mesh made a yellow banner appear to float in mid-air above the live target.
+            var mb = new MeshBuilder { WorldUv = false, Material = (int)MatId.EnergyPanel };
+            // This is deliberately a free-floating holographic glyph, not a pole or banner:
+            // objective labels already explain the action, while this gives the player a clear
+            // world-space landmark without looking like a misplaced third CTF flag.
+            mb.AddPrism(Vector3.Zero, 0.34f, 0.50f, 6, MathX.Pi / 6f);
+            mb.Material = (int)MatId.Trim;
+            mb.AddTorus(Vector3.Zero, 0.47f, 0.05f, 20, 6);
+            mb.RecalculateTangents();
+            var (v, i4, sections) = mb.Build();
+            ObjectiveBeacon = Mesh.CreateStatic<Vertex>(gl, v, i4, VertexLayouts.Static);
+            ObjectiveBeaconSections = sections;
+        }
     }
 
     private void Build(GL gl, PickupKind kind, Action<MeshBuilder> build)
@@ -331,5 +349,6 @@ public sealed class PickupModels : IDisposable
         foreach (var m in _meshes) m?.Dispose();
         Flag?.Dispose();
         AmmoBox?.Dispose();
+        ObjectiveBeacon?.Dispose();
     }
 }

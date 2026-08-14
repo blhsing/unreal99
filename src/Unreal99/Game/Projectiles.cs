@@ -15,6 +15,11 @@ public struct Projectile
     public Vector3 Up;              // spin reference for blades and rockets
     public int OwnerId;
     public Team OwnerTeam;
+    /// <summary>
+    /// Trigger pull that created this projectile. All pellets/projectiles spawned by one attack
+    /// share the sequence so accuracy counts the attack once even when several fragments hit.
+    /// </summary>
+    public int AttackSequence;
 
     public float Damage;
     public float SplashRadius;
@@ -207,7 +212,7 @@ public static class ProjectileFactory
 
     /// <summary>Fills in the per-kind behaviour for a projectile spawned from <paramref name="fire"/>.</summary>
     public static Projectile Create(ProjectileKind kind, in FireDef fire, Vector3 position, Vector3 direction,
-        int ownerId, Team ownerTeam, Vector3 tint, float damageScale, Rng rng)
+        int ownerId, Team ownerTeam, int attackSequence, Vector3 tint, float damageScale, Rng rng)
     {
         var p = new Projectile
         {
@@ -218,6 +223,7 @@ public static class ProjectileFactory
             Up = MathX.Up,
             OwnerId = ownerId,
             OwnerTeam = ownerTeam,
+            AttackSequence = attackSequence,
             Damage = fire.Damage,
             SplashRadius = fire.SplashRadius,
             SplashDamage = fire.SplashDamage,

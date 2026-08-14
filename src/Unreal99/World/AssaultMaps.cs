@@ -278,6 +278,14 @@ public static partial class Maps
 
         // --- the cargo bay the attackers start in, on the quay ---
         b.Solid(new Vector3(-88f, -1.5f, -34f), new Vector3(-40f, Quay, 34f), MatId.Concrete, true, 0.6f);
+        // Falling from the dock or frigate must not be a slow death. The old "flooded passage"
+        // entered the hull at x=20, but the solid hull itself starts at x=6 and sealed that
+        // route. These two broad 1:4 quay ramps are unambiguous exits from the common basin,
+        // placed clear of the central assault bridge so they remain usable during a firefight.
+        b.Ramp(new Vector3(-40f, -1.5f, -31f), new Vector3(-10f, Quay, -19f), 1,
+            MatId.Concrete, true, 0.65f);
+        b.Ramp(new Vector3(-40f, -1.5f, 19f), new Vector3(-10f, Quay, 31f), 1,
+            MatId.Concrete, true, 0.65f);
         // Build the cargo-bay shell explicitly so the east wall contains a real opening. Adding
         // a non-colliding decorative brush over Room() does not subtract its solid wall and had
         // trapped every attacker inside this box.

@@ -24,6 +24,12 @@ public struct PawnInput
     public bool Hoverboard;
     /// <summary>Edge-triggered: move to the next vacant seat of the vehicle already being ridden.</summary>
     public bool SwitchSeat;
+    /// <summary>
+    /// Bots set this while ordinary walking, combat strafing, or pickup steering. A planned
+    /// special-link route clears it as the pawn approaches the authored launcher. Human input
+    /// leaves it false, preserving normal physical jump-pad behavior.
+    /// </summary>
+    public bool AvoidJumpPads;
 }
 
 /// <summary>
@@ -167,7 +173,9 @@ public sealed class Pawn
     public float Speed => Velocity.Horizontal();
     public bool IsInvisible => InvisibilityTime > 0f;
     public bool HasDamageAmp => DamageAmpTime > 0f;
-    public float Accuracy => ShotsFired > 0 ? ShotsHit / (float)ShotsFired : 0f;
+    // Older saves can contain the former per-pellet hit count. Keep their results screen valid
+    // while new attacks use one hit credit per trigger pull in GameWorld.
+    public float Accuracy => ShotsFired > 0 ? MathX.Saturate(ShotsHit / (float)ShotsFired) : 0f;
 
     public WeaponDef WeaponDef => Weapons.Get(Weapon);
 
@@ -496,6 +504,7 @@ public sealed class Pawn
         // --- jump pads ---
         foreach (var pad in level.JumpPads)
         {
+            if (input.AvoidJumpPads) break;
             Vector3 pmin = pad.Position - pad.HalfExtents;
             Vector3 pmax = pad.Position + pad.HalfExtents + new Vector3(0, 1.4f, 0);
             if (center.X + half.X < pmin.X || center.X - half.X > pmax.X) continue;

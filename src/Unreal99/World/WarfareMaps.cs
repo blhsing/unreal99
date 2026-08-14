@@ -301,9 +301,10 @@ public static partial class Maps
             b.AddVehicle(VehicleKind.Scavenger, centreRoad + new Vector3(20f, -2.2f, 5f), -90f, Team.Blue);
             b.AddVehicle(VehicleKind.Darkwalker, centreRoad + new Vector3(-30f, 12.6f, 0f), 90f, Team.Blue);
         }
-        for (int s = -1; s <= 1; s += 2)
-            b.AddJumpPad(centreRoad + new Vector3(s * 40f, -3.2f, 0f),
-                centreRoad + new Vector3(s * 36f, 9f, 0f), new Vector3(0.45f, 0.85f, 1f));
+        // Do not put jump pads beneath the solid bridge and target its upper deck. Their arc
+        // necessarily struck the underside, dropped the rider back into the river, and repeated
+        // whenever navigation approached the same trigger. The broad ramps at both bridge ends
+        // are the deliberate, driveable route to the deck and work for infantry too.
 
         // --- scattered rock so the open ground reads as terrain ---
         for (int i = 0; i < 44; i++)
